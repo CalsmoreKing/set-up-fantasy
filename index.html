@@ -1639,19 +1639,29 @@
             });
         }
 
-        function promptAdjustPts(playerName) {
-            if (db.st[playerName]) {
-                let currentPts = db.st[playerName].pts;
-                let input = prompt(`Зміна балів для гравця: ${playerName}\nПоточні бали: ${currentPts}\n\nВведіть число, яке хочете ДОДАТИ (або відняти, якщо з мінусом, наприклад -5):`, "0");
-                if (input !== null) {
-                    let delta = parseInt(input.trim(), 10);
-                    if (!isNaN(delta) && delta !== 0) {
-                        db.st[playerName].pts += delta;
-                        save(); updateTables(); renderH2H(); updateChartData(); updateDetailsTable();
-                    }
-                }
-            }
+        async function promptAdjustPts(name) {
+    let adj = prompt(`Змінити бали для ${name} (наприклад: 5 або -3):`, "0");
+    if (adj === null) return; // Скасування
+    
+    adj = parseInt(adj, 10);
+    if (!isNaN(adj)) {
+        if (!db.st[name]) db.st[name] = { pts: 0 }; // Запобіжник
+        db.st[name].pts += adj;
+        
+        updateTables(); // Оновлюємо візуально
+        
+        // ПРИМУСОВИЙ ЗАПИС У ХМАРУ
+        try {
+            await save(); 
+            console.log(`Бали для ${name} успішно оновлено та збережено.`);
+        } catch (err) {
+            console.error("Не вдалося зберегти нові бали в Supabase:", err);
+            alert("Помилка збереження! Перевір консоль.");
         }
+    } else {
+        alert("Введено некоректне число.");
+    }
+}
 
         function resetStage() {
             const gp = document.getElementById('gp-select').value;
