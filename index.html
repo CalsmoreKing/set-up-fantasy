@@ -1035,27 +1035,44 @@
         }
 
         async function save() {
-            if (!isDataLoaded) return;
+    console.log("КРОК 1: Викликано функцію save()");
 
-            // ЖОРСТКИЙ ЗАХИСТ: блокуємо запис, якщо список гравців порожній
-            if (!db || !db.st || Object.keys(db.st).length === 0) {
-                console.warn("ЗАБЛОКОВАНО: Спроба стерти базу даних (db.st порожній)!");
-                return; 
-            }
-
-            localStorage.setItem('f1_v14_db', JSON.stringify(db));
-            localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
-
-            try {
-                const { error } = await supabaseClient.from('f1_data').upsert([
-                    { id: 'main_db', data: db },
-                    { id: 'tmp_db', data: allTmp }
-                ]);
-                if (error) console.error('Помилка збереження в Supabase:', error);
-            } catch (err) {
-                console.error('Помилка мережі при збереженні:', err);
-            }
+    // Перевіряємо, чи існує змінна і чи вона не блокує збереження
+    if (typeof isDataLoaded !== 'undefined') {
+        console.log("КРОК 1.1: Стан isDataLoaded =", isDataLoaded);
+        if (!isDataLoaded) {
+            console.error("КРОК 2: ПЕРЕРИВАННЯ! isDataLoaded === false. Скрипт зупинено.");
+            return;
         }
+    } else {
+        console.log("КРОК 1.1: Змінна isDataLoaded не визначена, пропускаємо перевірку.");
+    }
+
+    if (!db || !db.st || Object.keys(db.st).length === 0) {
+        console.error("КРОК 2: ПЕРЕРИВАННЯ! db.st порожній або не існує.", db);
+        return;
+    }
+
+    console.log("КРОК 3: Перевірки пройдено. Записую бекап у localStorage...");
+    localStorage.setItem('f1_v14_db', JSON.stringify(db));
+    localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
+
+    console.log("КРОК 4: Відправляю запит у Supabase...");
+    try {
+        const { data, error } = await supabaseClient.from('f1_data').upsert([
+            { id: 'main_db', data: db },
+            { id: 'tmp_db', data: allTmp }
+        ]);
+        
+        if (error) {
+            console.error("КРОК 5: Помилка від Supabase:", error);
+        } else {
+            console.log("КРОК 5: УСПІХ! Supabase прийняв дані.", data);
+        }
+    } catch (err) {
+        console.error("КРОК 5: КРИТИЧНА ПОМИЛКА коду або мережі під час відправки:", err);
+    }
+}
 
         const TELEGRAM_BOT_TOKEN = '8922387886:AAG0NLq3FY5Zsl1lTbDGcuhCKZsE-g0b9uk'; // Встав сюди токен від BotFather
         const TELEGRAM_CHAT_ID = '-1003958806927';
