@@ -796,41 +796,36 @@
                     let mainRow = data.find(row => row.id === 'main_db');
                     let tmpRow = data.find(row => row.id === 'tmp_db');
                     
-                    // Використовуємо Object.assign, щоб не розривати зв'язки в пам'яті
                     if (mainRow && mainRow.data) {
-                        for (let key in db) delete db[key];
-                        Object.assign(db, mainRow.data);
+                        // Зберігаємо хардкод-гравців перед злиттям
+                        const hardcodedSt = db.st ? JSON.parse(JSON.stringify(db.st)) : {};
+                        
+                        db = mainRow.data; // Отримуємо хмарні дані
+                        
+                        // Відновлюємо хардкод і зливаємо з хмарою (хмара має пріоритет)
+                        db.st = { ...hardcodedSt, ...(db.st || {}) };
                     }
-                    if (tmpRow && tmpRow.data) {
-                        for (let key in allTmp) delete allTmp[key];
-                        Object.assign(allTmp, tmpRow.data);
-                    }
+                    if (tmpRow && tmpRow.data) allTmp = tmpRow.data;
                 }
                 
+                // Базові перевірки структури
                 if (!db.qDrivers) db.qDrivers = {};
                 if (!db.st) db.st = {};
                 
-                isDataLoaded = true; // Знімаємо замок
-                
-                // ГОЛОВНЕ ВИПРАВЛЕННЯ: Імітуємо зміну етапу, щоб оновити всі змінні на сайті
-                const gpSelect = document.getElementById('gp-select');
-                if (gpSelect) {
-                    gpSelect.dispatchEvent(new Event('change'));
-                } else if (typeof changeGP === 'function') {
-                    changeGP();
-                } else {
-                    if (typeof updateTables === 'function') updateTables();
-                    if (typeof render === 'function') render();
-                }
+                if (typeof updateTables === 'function') updateTables();
+                if (typeof render === 'function') render();
                 
             } catch (err) {
-                console.error("Помилка завантаження Supabase:", err);
-                db = JSON.parse(localStorage.getItem('f1_v14_db')) || db;
-                allTmp = JSON.parse(localStorage.getItem('f1_v14_allTmp')) || allTmp;
-                isDataLoaded = true;
+                console.error("Не вдалося завантажити базу з Supabase, використовуємо локальну:", err);
+                const hardcodedSt = db.st ? JSON.parse(JSON.stringify(db.st)) : {};
                 
-                const gpSelect = document.getElementById('gp-select');
-                if (gpSelect) gpSelect.dispatchEvent(new Event('change'));
+                db = JSON.parse(localStorage.getItem('f1_v14_db')) || db;
+                db.st = { ...hardcodedSt, ...(db.st || {}) };
+                
+                allTmp = JSON.parse(localStorage.getItem('f1_v14_allTmp')) || allTmp;
+                
+                if (typeof updateTables === 'function') updateTables();
+                if (typeof render === 'function') render();
             }
         }
 
