@@ -1035,22 +1035,17 @@
         }
 
         async function save() {
-            // Блокуємо збереження, якщо дані ще не завантажились
             if (!isDataLoaded) return;
 
-            // ЖОРСТКИЙ ЗАХИСТ: блокуємо запис, якщо скрипт намагається зберегти повну порожнечу
-            const isDbEmpty = Object.keys(db.st || {}).length === 0 && Object.keys(db.qDrivers || {}).length === 0;
-            const isTmpEmpty = Object.keys(allTmp || {}).length === 0;
-            if (isDbEmpty && isTmpEmpty) {
-                console.warn("ЗАБЛОКОВАНО: Спроба стерти базу даних (передані порожні об'єкти)!");
+            // ЖОРСТКИЙ ЗАХИСТ: блокуємо запис, якщо список гравців порожній
+            if (!db || !db.st || Object.keys(db.st).length === 0) {
+                console.warn("ЗАБЛОКОВАНО: Спроба стерти базу даних (db.st порожній)!");
                 return; 
             }
 
-            // Робимо локальний бекап
             localStorage.setItem('f1_v14_db', JSON.stringify(db));
             localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
 
-            // Відправляємо в хмару
             try {
                 const { error } = await supabaseClient.from('f1_data').upsert([
                     { id: 'main_db', data: db },
@@ -1972,6 +1967,28 @@
         }
 
         function updateTables() {
+            // === 1. ЖОРСТКЕ ВІДНОВЛЕННЯ ТА ІНІЦІАЛІЗАЦІЯ ===
+            if (!db.st) db.st = {};
+            if (!db.hist) db.hist = {};
+            if (!db.prevOrder) db.prevOrder = [];
+
+            // Гарантуємо, що всі 8 гравців (і будь-які інші з команд) завжди існують у базі
+            teams.forEach(t => {
+                t.p.forEach(playerName => {
+                    if (!db.st[playerName]) {
+                        // Якщо гравця немає, створюємо з базовими 0 балів
+                        db.st[playerName] = { t: t.n, pts: 0 };
+                    } else if (!db.st[playerName].t) {
+                        // Відновлюємо прив'язку до команди, якщо вона злетіла
+                        db.st[playerName].t = t.n; 
+                    }
+                });
+            });
+
+            // ТУТ МОЖЕШ ДОДАТИ СВОЇ БОНУСИ НОВАЧКІВ, ЯКЩО ВОНИ ХАРДКОДЯТЬСЯ
+            // Наприклад: if (db.st['Ім\'яГраця'] && db.st['Ім\'яГраця'].pts === 0) db.st['Ім\'яГраця'].pts = 10;
+            // ===============================================
+
             let showDetailed = document.getElementById('detailed-view-toggle').checked;
             
             if (!showDetailed) sortCol = 'total';
@@ -2020,11 +2037,13 @@
             playersData.forEach((item, idx) => {
                 const name = item.name;
                 const d = item.d;
+                
+                // Тепер ця стрічка ніколи не викличе помилку
                 const pTeam = teams.find(t => t.n === d.t);
+                const pColor = pTeam ? teamTextColors[pTeam.id] : '#fff'; // Захист кольору
+
                 const prevIdx = db.prevOrder.indexOf(name);
                 
-                const pColor = teamTextColors[pTeam.id];
-
                 let trend = '<span class="same">—</span>';
                 if (prevIdx !== -1) {
                     const diff = prevIdx - idx;
@@ -2033,7 +2052,7 @@
                 }
 
                 let trHTML = `
-                    <tr class="row-${pTeam.id}">
+                    <tr class="${pTeam ? 'row-' + pTeam.id : ''}">
                         <td>${idx+1}</td>
                         <td class="logo-cell">
                             <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
@@ -2081,7 +2100,8 @@
                 tmT.innerHTML += `<tr class="row-${d.id}"><td>${i+1}</td><td class="logo-cell"><div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;"><span>${n}</span> <span style="font-size:10px; color:#777;">(${driversStr})</span></div></td><td>${d.pts}</td></tr>`;
             });
 
-            updateStatsTable();
+            // Захист виклику таблиці статистики
+            if (typeof updateStatsTable === 'function') updateStatsTable();
         }
 
         function updateDetailsTable() {
