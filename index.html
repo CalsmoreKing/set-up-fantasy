@@ -811,6 +811,8 @@
                 // Базові перевірки структури
                 if (!db.qDrivers) db.qDrivers = {};
                 if (!db.st) db.st = {};
+
+                isDataLoaded = true;
                 
                 if (typeof updateTables === 'function') updateTables();
                 if (typeof render === 'function') render();
@@ -824,6 +826,8 @@
                 
                 allTmp = JSON.parse(localStorage.getItem('f1_v14_allTmp')) || allTmp;
                 
+                isDataLoaded = true;
+
                 if (typeof updateTables === 'function') updateTables();
                 if (typeof render === 'function') render();
             }
