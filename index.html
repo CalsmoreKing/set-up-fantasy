@@ -693,6 +693,11 @@
     </div>
 
     <script>
+        // === СИСТЕМА ДОСТУПУ ===
+        const urlParams = new URLSearchParams(window.location.search);
+        const isAdmin = urlParams.get('pass') === '9123'; 
+        const currentUser = urlParams.get('player'); // Ім'я гравця з URL, наприклад ?player=Ярік
+
         // Ініціалізація Supabase
         const SUPABASE_URL = 'https://fvubnbkqnldsspsjduqc.supabase.co'; // Зверни увагу: без /rest/v1/ на кінці
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2dWJuYmtxbmxkc3Nwc2pkdXFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MTAyNTYsImV4cCI6MjA5NjE4NjI1Nn0.VykrfV5a4e7cmPZfwUwzFRYkMuIiegW8dSXadcHW59w'; // Встав сюди свій ключ, який починається на eyJhbGciOi...
@@ -1150,30 +1155,49 @@
             render();
         }
 
+        // Функція автовиправлення (1-VER, 1. VER, 1 -- ver -> 1. VER)
+        function autoFormat(elem, pName) {
+            if (elem.readOnly) return; // Якщо поле заблоковано, не чіпаємо
+            let val = elem.value;
+            
+            // Форматує "1. ver", "1-VER", "1 -- ver" у "1. VER"
+            val = val.replace(/^(\d+)[\s\-.,_]+/gm, '$1. ');
+            val = val.toUpperCase();
+            
+            elem.value = val;
+            tmp[sess].p[pName] = val;
+            save();
+        }
+
         function render() {
             const grid = document.getElementById('main-grid');
             grid.innerHTML = '';
-            grid.className = 'compact-grid'; // Змінюємо клас для нової сітки
+            grid.className = 'compact-grid';
             
             const gp = document.getElementById('gp-select').value;
             const gpIdx = getGpIndex(gp);
             const isNewQualy = (sess === 'qualy' && gpIdx >= getGpIndex('Канада'));
 
             const btnRand = document.getElementById('btn-random-qualy');
-            if (isNewQualy) btnRand.style.display = 'inline-flex';
-            else btnRand.style.display = 'none';
-
+            
+            // БЛОКУВАННЯ ІНТЕРФЕЙСУ ДЛЯ НЕ-АДМІНІВ
             const realInput = document.getElementById('real-input');
-            realInput.value = tmp[sess].r;
-            if(isNewQualy) {
-                realInput.placeholder = "Введіть усі 22 позиції кваліфікації...";
-            } else if (sess === 'qualy') {
-                realInput.placeholder = "Введіть володаря поулу (напр. 1 - VER)...";
+            if (!isAdmin) {
+                btnRand.style.display = 'none';
+                realInput.style.display = 'none'; // Приховуємо поле реальних результатів від гравців
             } else {
-                realInput.placeholder = "Вводьте результати сюди, щоб бачити LIVE бали...";
+                if (isNewQualy) btnRand.style.display = 'inline-flex';
+                else btnRand.style.display = 'none';
+                
+                realInput.style.display = 'block';
+                realInput.value = tmp[sess].r || '';
+                if(isNewQualy) realInput.placeholder = "Введіть усі 22 позиції кваліфікації...";
+                else if (sess === 'qualy') realInput.placeholder = "Введіть володаря поулу (напр. 1 - VER)...";
+                else realInput.placeholder = "Вводьте результати сюди, щоб бачити LIVE бали...";
+                
+                realInput.style.height = '50px'; 
+                realInput.style.height = realInput.scrollHeight + 'px';
             }
-            realInput.style.height = '50px'; 
-            realInput.style.height = realInput.scrollHeight + 'px';
 
             teams.forEach(t => {
                 const teamBlock = document.createElement('div');
@@ -1184,20 +1208,43 @@
                     const row = document.createElement('div');
                     row.className = `player-row ${isC ? 'confirmed' : ''}`;
                     
+                    // === ЛОГІКА ДОСТУПУ ПО PIN-КОДУ ===
+                    const canEdit = isAdmin || (myPlayer === p && !isC);
+                    const isLockedForMe = !isAdmin && myPlayer !== p;
+
+                    // Якщо поле заблоковане для мене, при кліку викликаємо перевірку PIN-коду (checkAuth)
+                    // Якщо поле моє, але вже підтверджене (isC), просто блокуємо його (readonly disabled)
+                    let lockAction = '';
+                    if (isLockedForMe) {
+                        lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Натисніть, щоб авторизуватись"`;
+                    } else if (!canEdit) {
+                        lockAction = 'readonly disabled style="background: #2a2a2a; color: #888;"';
+                    }
+
                     const flHTML = (sess === 'race') 
-                        ? `<input class="p-fl" value="${tmp[sess].fl[p] || ''}" oninput="updFL('${p}', this.value)" placeholder="Шв. коло" ${isC ? 'readonly' : ''}>` 
+                        ? `<input class="p-fl" value="${tmp[sess].fl[p] || ''}" oninput="updFL('${p}', this.value)" placeholder="Шв. коло" ${lockAction}>` 
                         : '';
 
                     let inputHTML = '';
                     if (isNewQualy) {
                         let assignedDriver = (db.qDrivers[gp] && db.qDrivers[gp][p]) ? db.qDrivers[gp][p] : '???';
+                        let assignClick = isAdmin ? `onclick="openDriverModal('${gp}', '${p}')"` : '';
                         inputHTML = `
-                            <div class="q-assigned" title="Змінити пілота" onclick="openDriverModal('${gp}', '${p}')">${assignedDriver}</div>
-                            <input type="number" min="1" max="22" class="p-pred" style="width: 80px; flex: none; text-align: center; font-size: 16px;" value="${tmp[sess].p[p] || ''}" oninput="updP('${p}', this.value)" placeholder="Місце" ${isC ? 'readonly' : ''}>
+                            <div class="q-assigned" title="${isAdmin ? 'Змінити пілота' : ''}" ${assignClick}>${assignedDriver}</div>
+                            <input type="number" min="1" max="22" class="p-pred" style="width: 80px; flex: none; text-align: center; font-size: 16px;" value="${tmp[sess].p[p] || ''}" oninput="updP('${p}', this.value)" placeholder="Місце" ${lockAction}>
                         `;
                     } else {
-                        inputHTML = `<textarea class="p-pred" oninput="updP('${p}', this.value)" placeholder="Прогноз..." ${isC ? 'readonly' : ''}>${tmp[sess].p[p] || ''}</textarea>`;
+                        inputHTML = `<textarea class="p-pred" oninput="updP('${p}', this.value)" onblur="autoFormat(this, '${p}')" placeholder="${isLockedForMe ? '🔒 Натисніть для входу...' : 'Прогноз...'}" ${lockAction}>${tmp[sess].p[p] || ''}</textarea>`;
                     }
+
+                    // Кнопка затвердження тільки для адміна
+                    let btnCheckHTML = isAdmin ? `
+                        <button class="btn-check admin-only" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </button>
+                    ` : '';
 
                     row.innerHTML = `
                         <div class="p-info">
@@ -1209,11 +1256,7 @@
                             ${flHTML}
                         </div>
                         <div class="p-live-pts" id="live-badge-${p}">0</div>
-                        <button class="btn-check admin-only" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                        </button>
+                        ${btnCheckHTML}
                     `;
                     teamBlock.appendChild(row);
                 });
@@ -1224,6 +1267,10 @@
 
         function randomizeQualyDrivers() {
             const f1Roster = ["HAM", "LEC", "VER", "RUS", "ANT", "HAD", "PIA", "HUL", "BOR", "BEA", "GAS", "SAI", "ALB", "LIN", "COL", "LAW", "OCO", "PER", "NOR", "ALO", "STR", "BOT"];
+            const urlParams = new URLSearchParams(window.location.search);
+            const isAdmin = urlParams.get('pass') === '9123';
+            // Читаємо авторизованого гравця з пам'яті браузера
+            let myPlayer = localStorage.getItem('f1_auth_player');
             const gp = document.getElementById('gp-select').value;
             if(!db.qDrivers) db.qDrivers = {};
             
@@ -2510,6 +2557,43 @@
             perfChart.data.labels = labels;
             perfChart.data.datasets = datasets;
             perfChart.update();
+        }
+
+        function checkAuth(pName) {
+            if (isAdmin) return; // Адміну авторизація не потрібна
+            
+            if (!db.pins) db.pins = {};
+
+            if (!db.pins[pName]) {
+                let newPin = prompt(`Профіль "${pName}" ще не захищено. Придумайте ваш PIN-код (мінімум 4 символи):`);
+                if (newPin && newPin.trim().length >= 4) {
+                    db.pins[pName] = newPin.trim();
+                    localStorage.setItem('f1_auth_player', pName);
+                    myPlayer = pName;
+                    save(); // Записуємо PIN у Supabase
+                    render();
+                } else if (newPin !== null) {
+                    alert("Помилка: PIN-код має містити щонайменше 4 символи.");
+                }
+            } else {
+                let enterPin = prompt(`Введіть PIN-код для доступу до профілю "${pName}":`);
+                if (enterPin === db.pins[pName]) {
+                    localStorage.setItem('f1_auth_player', pName);
+                    myPlayer = pName;
+                    render();
+                } else if (enterPin !== null) {
+                    alert("Невірний PIN-код!");
+                }
+            }
+        }
+
+        // Для адміна: якщо хтось вкрав чужий акаунт, адмін може скинути PIN через консоль
+        function resetPin(pName) {
+            if (db.pins && db.pins[pName]) {
+                delete db.pins[pName];
+                save();
+                console.log(`PIN для ${pName} скинуто.`);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
