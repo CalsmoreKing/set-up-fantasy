@@ -1055,28 +1055,66 @@
         }
 
         async function save() {
-            // ЖОРСТКИЙ ЗАХИСТ: блокуємо запис, якщо список гравців порожній
-            if (!db || !db.st || Object.keys(db.st).length === 0) {
-                console.warn("ЗАБЛОКОВАНО: Спроба стерти базу даних (db.st порожній)!");
-                return; 
+            if (!db || !db.st || Object.keys(db.st).length === 0) return;
+
+            try {
+                // 1. Завантажуємо поточну хмару перед записом
+                const { data, error } = await supabaseClient.from('f1_data').select('*');
+                if (!error && data && data.length > 0) {
+                    let cloudMain = data.find(row => row.id === 'main_db')?.data || {};
+                    let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
+
+                    // 2. ЗЛИТТЯ PIN-КОДІВ (щоб не стерти чужі паролі)
+                    if (!db.pins) db.pins = {};
+                    if (cloudMain.pins) {
+                        for (let pName in cloudMain.pins) {
+                            // Гравці не можуть перезаписувати чужі паролі
+                            if (pName !== myPlayer || !db.pins[pName]) {
+                                db.pins[pName] = cloudMain.pins[pName];
+                            }
+                        }
+                    }
+
+                    // 3. ЗЛИТТЯ ПРОГНОЗІВ (щоб не стерти чужу роботу)
+                    ['qualy', 'sprint', 'race'].forEach(s => {
+                        if (cloudTmp[s] && allTmp[s]) {
+                            let cloudP = cloudTmp[s].p || {};
+                            let cloudFl = cloudTmp[s].fl || {};
+                            let cloudC = cloudTmp[s].c || {};
+
+                            for (let pName in allTmp[s].p) {
+                                if (!isAdmin && pName !== myPlayer) {
+                                    // Звичайний гравець примусово отримує з хмари всі ЧУЖІ прогнози
+                                    allTmp[s].p[pName] = cloudP[pName] || "";
+                                    allTmp[s].fl[pName] = cloudFl[pName] || "";
+                                    allTmp[s].c[pName] = cloudC[pName] || false;
+                                } else if (isAdmin) {
+                                    // Адмін не затирає чужі прогнози пустими клітинками
+                                    if (!allTmp[s].p[pName] && cloudP[pName]) {
+                                        allTmp[s].p[pName] = cloudP[pName];
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch(e) {
+                console.error("Помилка при злитті даних перед збереженням:", e);
             }
 
+            // Зберігаємо локально
             localStorage.setItem('f1_v14_db', JSON.stringify(db));
             localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
 
+            // Пушимо у Supabase
             try {
-                const { error } = await supabaseClient.from('f1_data').upsert([
+                await supabaseClient.from('f1_data').upsert([
                     { id: 'main_db', data: db },
                     { id: 'tmp_db', data: allTmp }
                 ]);
-                
-                if (error) {
-                    console.error("Помилка від Supabase:", error);
-                } else {
-                    console.log("УСПІХ! Дані записані в хмару.");
-                }
-            } catch (err) {
-                console.error("КРИТИЧНА ПОМИЛКА мережі під час відправки:", err);
+                console.log("Дані успішно синхронізовано.");
+            } catch(err) {
+                console.error("Помилка запису в Supabase:", err);
             }
         }
 
@@ -2569,18 +2607,35 @@
             perfChart.update();
         }
 
-        function checkAuth(pName) {
-            if (isAdmin) return; // Адміну авторизація не потрібна
-            
+        async function checkAuth(pName) {
+            if (isAdmin) return;
+
+            // ПРИМУСОВЕ ОНОВЛЕННЯ БАЗИ ПІНІВ ПЕРЕД ПЕРЕВІРКОЮ
+            try {
+                const { data } = await supabaseClient.from('f1_data').select('data').eq('id', 'main_db').single();
+                if (data && data.data && data.data.pins) {
+                    db.pins = data.data.pins;
+                }
+            } catch(e) { console.warn("Не вдалося перевірити хмару:", e); }
+
             if (!db.pins) db.pins = {};
 
             if (!db.pins[pName]) {
                 let newPin = prompt(`Профіль "${pName}" ще не захищено. Придумайте ваш PIN-код (мінімум 4 символи):`);
                 if (newPin && newPin.trim().length >= 4) {
+                    // Фінальна перевірка, чи ніхто не зайняв профіль, поки ми думали над паролем
+                    try {
+                        const { data } = await supabaseClient.from('f1_data').select('data').eq('id', 'main_db').single();
+                        if (data && data.data && data.data.pins && data.data.pins[pName]) {
+                            alert("Хтось інший щойно зареєстрував цей профіль! Оновіть сторінку.");
+                            return;
+                        }
+                    } catch(e) {}
+
                     db.pins[pName] = newPin.trim();
                     localStorage.setItem('f1_auth_player', pName);
                     myPlayer = pName;
-                    save(); // Записуємо PIN у Supabase
+                    await save();
                     render();
                 } else if (newPin !== null) {
                     alert("Помилка: PIN-код має містити щонайменше 4 символи.");
