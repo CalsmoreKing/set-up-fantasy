@@ -1170,6 +1170,12 @@
         }
 
         function render() {
+            // === НАДІЙНИЙ ФІКС АВТОРИЗАЦІЇ ===
+            const urlParams = new URLSearchParams(window.location.search);
+            const isAdmin = urlParams.get('pass') === '9123';
+            const myPlayer = localStorage.getItem('f1_auth_player');
+            // ==================================
+
             const grid = document.getElementById('main-grid');
             grid.innerHTML = '';
             grid.className = 'compact-grid';
