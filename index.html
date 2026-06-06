@@ -525,10 +525,11 @@
                     <button class="btn" id="btn-qualy" onclick="setS('qualy')">Кваліфікація</button>
                     <button class="btn" id="btn-sprint" onclick="setS('sprint')">Спринт</button>
                     <button class="btn active" id="btn-race" onclick="setS('race')">Гонка</button>
-                    <button id="btn-random-qualy" class="btn" style="background: #8e44ad; border-color: #9b59b6; display: none;" onclick="randomizeQualyDrivers()" title="Згенерувати унікальних пілотів гравцям для поточної кваліфікації">
+                    <button id="btn-random-qualy admin-only" class="btn" style="background: #8e44ad; border-color: #9b59b6; display: none;" onclick="randomizeQualyDrivers()" title="Згенерувати унікальних пілотів гравцям для поточної кваліфікації">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><circle cx="15.5" cy="15.5" r="1.5"></circle><circle cx="15.5" cy="8.5" r="1.5"></circle><circle cx="8.5" cy="15.5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg>
                         Рандомізатор пілотів
                     </button>
+                    <button class="btn" onclick="changeMyPin()" style="background: #333; color: #fff; margin-left: 10px;">🔑 Змінити мій PIN</button>
                     <button class="btn admin-only" style="background: #0088cc; border-color: #0077b3;" onclick="sendTelegramNotification()">Сповістити в TG 📢</button>
                 </div>
                 
@@ -2593,6 +2594,29 @@
                 } else if (enterPin !== null) {
                     alert("Невірний PIN-код!");
                 }
+            }
+        }
+
+        function changeMyPin() {
+            if (!myPlayer) {
+                alert("Ви ще не авторизовані. Спочатку натисніть на своє поле і введіть PIN.");
+                return;
+            }
+            
+            let currentPin = prompt(`Зміна PIN-коду для "${myPlayer}". Введіть ваш ПОТОЧНИЙ PIN-код:`);
+            if (currentPin === null) return; // Гравець натиснув "Скасувати"
+            
+            if (currentPin === db.pins[myPlayer]) {
+                let newPin = prompt("Введіть НОВИЙ PIN-код (мінімум 4 символи):");
+                if (newPin && newPin.trim().length >= 4) {
+                    db.pins[myPlayer] = newPin.trim();
+                    save(); // Зберігаємо в Supabase
+                    alert("Ваш PIN-код успішно змінено!");
+                } else if (newPin !== null) {
+                    alert("Помилка: новий PIN-код має містити щонайменше 4 символи.");
+                }
+            } else {
+                alert("Невірний поточний PIN-код! Зміна скасована.");
             }
         }
 
