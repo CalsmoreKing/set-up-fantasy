@@ -543,7 +543,7 @@
                 </div>
             </div>
 
-            <div class="import-area">
+            <div class="import-area admin-only">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <h4 style="margin: 0; color: #aaa; text-transform: uppercase; font-size: 14px;">Інкрементальний імпорт з чату:</h4>
                     <div>
@@ -694,9 +694,10 @@
 
     <script>
         // === СИСТЕМА ДОСТУПУ ===
-        const urlParams = new URLSearchParams(window.location.search);
-        const isAdmin = urlParams.get('pass') === '9123'; 
-        const currentUser = urlParams.get('player'); // Ім'я гравця з URL, наприклад ?player=Ярік
+            const f1Roster = ["HAM", "LEC", "VER", "RUS", "ANT", "HAD", "PIA", "HUL", "BOR", "BEA", "GAS", "SAI", "ALB", "LIN", "COL", "LAW", "OCO", "PER", "NOR", "ALO", "STR", "BOT"];
+            const urlParams = new URLSearchParams(window.location.search);
+            const isAdmin = urlParams.get('pass') === '9123';
+            let myPlayer = localStorage.getItem('f1_auth_player');
 
         // Ініціалізація Supabase
         const SUPABASE_URL = 'https://fvubnbkqnldsspsjduqc.supabase.co'; // Зверни увагу: без /rest/v1/ на кінці
@@ -990,6 +991,9 @@
         let editTargetPlayer = '';
 
         function applyNewbieBonuses() {
+            // Жорсткий запобіжник від подвійного нарахування після імпорту
+            if (db.bonusesSynced) return;
+
             const bonuses = {
                 'Австралія': { 'Ярік': 18, 'Анастасія': 18, 'Андрій': 18, 'Валентін': 18, 'Софія': 18, 'Стас': 18, 'K1tasu': 18, 'Миколапка': 18 },
                 'Китай': { 'Ярік': 9, 'Анастасія': 9, 'Андрій': 9, 'Валентін': 9, 'Софія': 9, 'Стас': 9, 'K1tasu': 9, 'Миколапка': 9 },
@@ -997,7 +1001,11 @@
                 'Маямі': { 'K1tasu': 5, 'Миколапка': 5 },
                 'Канада': { 'Стас': 8, 'K1tasu': 8, 'Миколапка': 8 }
             };
+            
             let changed = false;
+            
+            if (!db.hist) db.hist = {};
+
             for (const [gp, players] of Object.entries(bonuses)) {
                 if (!db.hist[gp]) db.hist[gp] = {};
                 for (const [p, pts] of Object.entries(players)) {
@@ -1007,20 +1015,20 @@
                     if (oldBonus !== pts) {
                         db.hist[gp][p].b = pts; 
                         
-                        // Синхронізація із загальним заліком
                         if (!db.st[p]) {
                             let tObj = teams.find(t => t.p.includes(p));
                             db.st[p] = { t: tObj ? tObj.n : '', pts: 0 };
                         }
                         db.st[p].pts += (pts - oldBonus);
-                        
                         changed = true;
                     }
                 }
             }
+            
             if (changed) {
+                db.bonusesSynced = true; // Блокуємо повторне виконання для цієї версії бази
                 save();
-                updateTables();
+                if (typeof updateTables === 'function') updateTables();
             }
         }
 
@@ -1272,11 +1280,6 @@
         }
 
         function randomizeQualyDrivers() {
-            const f1Roster = ["HAM", "LEC", "VER", "RUS", "ANT", "HAD", "PIA", "HUL", "BOR", "BEA", "GAS", "SAI", "ALB", "LIN", "COL", "LAW", "OCO", "PER", "NOR", "ALO", "STR", "BOT"];
-            const urlParams = new URLSearchParams(window.location.search);
-            const isAdmin = urlParams.get('pass') === '9123';
-            // Читаємо авторизованого гравця з пам'яті браузера
-            let myPlayer = localStorage.getItem('f1_auth_player');
             const gp = document.getElementById('gp-select').value;
             if(!db.qDrivers) db.qDrivers = {};
             
