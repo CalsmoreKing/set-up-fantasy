@@ -393,6 +393,20 @@
                 let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
 
                 if (!db.pins) db.pins = {};
+                
+                // Злиття лічильників змін
+                if (!db.changes) db.changes = {};
+                if (cloudMain.changes) {
+                    for (let gpKey in cloudMain.changes) {
+                        if (!db.changes[gpKey]) db.changes[gpKey] = {};
+                        for (let pName in cloudMain.changes[gpKey]) {
+                            if (!db.changes[gpKey][pName]) {
+                                db.changes[gpKey][pName] = cloudMain.changes[gpKey][pName];
+                            }
+                        }
+                    }
+                }
+
                 if (cloudMain.pins) {
                     for (let pName in cloudMain.pins) {
                         if (pName !== myPlayer || !db.pins[pName]) db.pins[pName] = cloudMain.pins[pName];
@@ -599,16 +613,19 @@
                     const isC = tmp[sess].c[p];
                     const row = document.createElement('div');
                     row.className = `player-row ${isC ? 'confirmed' : ''}`;
-                    
-                    // === ЛОГІКА ДОСТУПУ ПО PIN-КОДУ ===
+
+                    // Перевірка ліміту
+                    let changesCount = (db.changes && db.changes[gp] && db.changes[gp][p] && db.changes[gp][p][sess]) ? db.changes[gp][p][sess] : 0;
+                    const isLockedPermanently = isC && changesCount >= 1 && !isAdmin;
+
                     const canEdit = isAdmin || (myPlayer === p && !isC);
                     const isLockedForMe = !isAdmin && myPlayer !== p;
 
-                    // Якщо поле заблоковане для мене, при кліку викликаємо перевірку PIN-коду (checkAuth)
-                    // Якщо поле моє, але вже підтверджене (isC), просто блокуємо його (readonly disabled)
                     let lockAction = '';
                     if (isLockedForMe) {
-                        lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Натисніть, щоб авторизуватись"`;
+                        lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Авторизуватись"`;
+                    } else if (isLockedPermanently) {
+                        lockAction = 'readonly disabled style="background: #4a0000; color: #888; cursor: not-allowed;" title="Ліміт змін вичерпано"';
                     } else if (!canEdit) {
                         lockAction = 'readonly disabled style="background: #2a2a2a; color: #888;"';
                     }
@@ -629,14 +646,19 @@
                         inputHTML = `<textarea class="p-pred" oninput="updP('${p}', this.value)" onblur="autoFormat(this, '${p}')" placeholder="${isLockedForMe ? '🔒 Натисніть для входу...' : 'Прогноз...'}" ${lockAction}>${tmp[sess].p[p] || ''}</textarea>`;
                     }
 
-                    // Кнопка затвердження: показуємо Адміну АБО Власнику прогнозу
-                    let btnCheckHTML = (isAdmin || myPlayer === p) ? `
-                        <button class="btn-check" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                        </button>
-                    ` : '';
+                    let btnCheckHTML = '';
+                    if (isAdmin || myPlayer === p) {
+                        if (isLockedPermanently) {
+                            btnCheckHTML = `<button class="btn-check" style="background: #4a0000; border-color: #ff3e3e; cursor: not-allowed;" title="Заблоковано">🔒</button>`;
+                        } else {
+                            btnCheckHTML = `
+                                <button class="btn-check" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                </button>`;
+                        }
+                    }
 
                     row.innerHTML = `
                         <div class="p-info">
@@ -802,23 +824,42 @@
         }
 
         async function togC(pName) { 
-            console.log(`[КНОПКА] Натиснуто затвердження для ${pName}`);
+            const gp = document.getElementById('gp-select').value;
+
             if (!isAdmin && myPlayer !== pName) {
                 alert("Ви можете затверджувати лише свій прогноз!");
                 return;
             }
-            tmp[sess].c[pName] = !tmp[sess].c[pName]; 
-            const gp = document.getElementById('gp-select').value;
-            dirtyFields[`${gp}_${sess}_c_${pName}`] = true; // Мітка зміни статусу
+
+            // Ініціалізація лічильника змін
+            if (!db.changes) db.changes = {};
+            if (!db.changes[gp]) db.changes[gp] = {};
+            if (!db.changes[gp][pName]) db.changes[gp][pName] = { qualy: 0, sprint: 0, race: 0 };
+
+            let isCurrentlyConfirmed = tmp[sess].c[pName];
+
+            if (isCurrentlyConfirmed) {
+                // Спроба розблокувати
+                if (!isAdmin && db.changes[gp][pName][sess] >= 1) {
+                    alert("Ліміт змін вичерпано. Прогноз заблоковано остаточно.");
+                    return;
+                }
+                if (!isAdmin) {
+                    if (!confirm("Увага! Ви маєте лише 1 спробу на зміну після затвердження. Розблокувати?")) return;
+                    db.changes[gp][pName][sess]++;
+                }
+                tmp[sess].c[pName] = false;
+            } else {
+                // Затвердження
+                tmp[sess].c[pName] = true;
+            }
+
+            dirtyFields[`${gp}_${sess}_c_${pName}`] = true;
             
             await save(); 
             let scrollY = window.scrollY; 
             render(); 
             window.scrollTo(0, scrollY); 
-            
-            if (!isAdmin) {
-                alert(tmp[sess].c[pName] ? "Ваш прогноз успішно збережено та зафіксовано в базі!" : "Прогноз розблоковано для редагування.");
-            }
         }
         
         function confirmAll() { 
@@ -1117,7 +1158,7 @@
 
         async function promptAdjustPts(name) {
             if (!isAdmin) {
-                alert("Дія скасована. Тільки адміністратор може змінювати бали вручну.");
+                alert("Руки геть! Тільки адміністратор може змінювати бали вручну.");
                 return;
             }
 
