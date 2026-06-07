@@ -797,12 +797,21 @@
         }
         
         function confirmAll() { 
-            teams.forEach(t => t.p.forEach(p => tmp[sess].c[p] = true)); 
-            save(); 
-            let scrollY = window.scrollY; 
-            render(); 
-            window.scrollTo(0, scrollY); 
-        }
+        const gp = document.getElementById('gp-select').value;
+        teams.forEach(t => t.p.forEach(p => {
+            tmp[sess].c[p] = true; 
+            
+            // ПРИМУСОВІ МІТКИ: кажемо базі, що адмін щойно затвердив ці поля,
+            // тому Supabase НЕ МАЄ ПРАВА затирати їх пустими даними з хмари.
+            dirtyFields[`${gp}_${sess}_c_${p}`] = true;
+            dirtyFields[`${gp}_${sess}_p_${p}`] = true;
+            dirtyFields[`${gp}_${sess}_fl_${p}`] = true;
+        })); 
+        save(); 
+        let scrollY = window.scrollY; 
+        render(); 
+        window.scrollTo(0, scrollY); 
+    }
 
         function importFromText() {
             const text = document.getElementById('bulk-import').value;
@@ -817,12 +826,13 @@
             let parsedData = {};
 
             const lines = text.split('\n');
-            const gpIdx = getGpIndex(document.getElementById('gp-select').value);
+            const gp = document.getElementById('gp-select').value; 
+            const gpIdx = getGpIndex(gp);
             const isNewQualy = (sess === 'qualy' && gpIdx >= getGpIndex('Канада'));
 
             lines.forEach(line => {
                 const trimmedLine = line.trim();
-                if (trimmedLine === '') return; // Пропускаємо порожні рядки
+                if (trimmedLine === '') return;
 
                 let isHeaderOrInline = false;
                 for (let item of pMap) {
@@ -843,20 +853,15 @@
                     }
                 }
 
-                // Якщо це не відоме ім'я
                 if (!isHeaderOrInline) {
-                    // Перевіряємо, чи рядок схожий на звичайний прогноз (починається з цифри або слів "швидке", "коло", "FL" тощо)
                     const isPrediction = /^(?:\d|Швид|Найшвид|Коло|FL|Q|Квалі)/i.test(trimmedLine);
                     
                     if (!isPrediction && currentMatchedPlayer) {
-                        // Не схоже на прогноз, але ми зараз записуємо дані для гравця. Можливо, це неактивний гравець.
-                        let userInput = prompt(`⚠️ Перевірка рядка:\n"${trimmedLine}"\n\n(Зараз записуємо для: ${currentMatchedPlayer})\n\nЩо з цим робити?\n• Якщо це коментар гравця — натисніть "ОК" (пусте поле).\n• Якщо це гравець з помилкою в імені — напишіть його правильне ім'я.\n• Якщо це неактивний гравець (треба пропустити його і прогнози) — натисніть "Скасувати".`);
+                        let userInput = prompt(`⚠️ Перевірка рядка:\n"${trimmedLine}"\n\n(Зараз записуємо для: ${currentMatchedPlayer})\n\nЩо з цим робити?\n• Якщо це коментар гравця — натисніть "ОК" (пусте поле).\n• Якщо це гравець з помилкою в імені — напишіть його правильне ім'я.\n• Якщо це неактивний гравець — натисніть "Скасувати".`);
                         
                         if (userInput === null) {
-                            // Користувач натиснув Скасувати -> ігноруємо цей та наступні рядки
                             currentMatchedPlayer = null;
                         } else if (userInput.trim() !== '') {
-                            // Користувач ввів нове ім'я
                             const typedName = userInput.trim().toLowerCase();
                             const matchedName = teams.flatMap(t => t.p).find(n => n.toLowerCase() === typedName);
                             if (matchedName) {
@@ -867,11 +872,9 @@
                                 currentMatchedPlayer = null;
                             }
                         } else {
-                            // Пусте поле + ОК -> записуємо як частину прогнозу поточного гравця
                             parsedData[currentMatchedPlayer].push(trimmedLine);
                         }
                     } else if (!isPrediction && !currentMatchedPlayer) {
-                        // Дивний текст поза блоком будь-якого гравця
                         let userInput = prompt(`⚠️ Нерозпізнаний текст або неактивний гравець:\n"${trimmedLine}"\n\nКому призначити цей блок?\n• Введіть ім'я з бази, щоб зарахувати.\n• Натисніть "Скасувати", щоб пропустити цей текст.`);
                         
                         if (userInput && userInput.trim() !== '') {
@@ -886,10 +889,8 @@
                             }
                         }
                     } else if (isPrediction && currentMatchedPlayer) {
-                        // Це звичайний рядок прогнозу для активного гравця
                         parsedData[currentMatchedPlayer].push(trimmedLine);
                     }
-                    // Якщо isPrediction == true, але currentMatchedPlayer == null -> це прогноз неактивного гравця, він мовчки ігнорується.
                 }
             });
 
@@ -910,6 +911,15 @@
                         const cleanPreds = content.replace(/\(\d+\)/g, "").trim();
                         tmp[sess].p[name] = cleanPreds;
                     }
+                    
+                    // === РЕЖИМ БОГА (ПРИМУСОВИЙ ПЕРЕЗАПИС) ===
+                    tmp[sess].c[name] = false; // Знімаємо замок, щоб поле оновилося і відкрилося для редагування
+                    
+                    // Ставимо мітки, що це 100% нові дані, які треба відправити в хмару
+                    dirtyFields[`${gp}_${sess}_p_${name}`] = true;
+                    dirtyFields[`${gp}_${sess}_fl_${name}`] = true;
+                    dirtyFields[`${gp}_${sess}_c_${name}`] = true;
+                    
                     importedCount++;
                 }
             });
