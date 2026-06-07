@@ -1,0 +1,472 @@
+        :root {
+            --bg: #090a0f;
+            --panel: rgba(18, 18, 22, 0.85);
+            --mclaren: #FF8000;
+            --redbull: #3366FF; --redbull-txt: #FFC200; 
+            --mercedes: #999999; --mercedes-txt: #00D2BE;
+            --audi: #555555; --audi-txt: #FF5A36; 
+            --ferrari: #DC0000; --ferrari-txt: #FFFFFF;
+            --aston: #006F62; 
+            --alpine: #0090FF;
+            --alfaromeo: #8B0000; --alfaromeo-txt: #00ff00; 
+            --success: #00FF00;
+            --danger: #ff3e3e;
+            --warning: #e67e22;
+            --rbr: #000080; --rbr-txt: #FFFFFF;
+        }
+
+        body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background-color: var(--bg); color: #e0e0e0; overflow-x: hidden; }
+
+        .bg-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1; background: radial-gradient(circle at 15% 50%, rgba(220, 0, 0, 0.06), transparent 30%), radial-gradient(circle at 85% 30%, rgba(0, 210, 190, 0.06), transparent 30%), linear-gradient(to bottom, #050505, #111 50%, #050505); }
+        .bg-grid { position: absolute; width: 200%; height: 200%; top: -50%; left: -50%; background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px); background-size: 50px 50px; transform: rotateX(60deg) translateY(0); animation: gridMove 15s infinite linear; perspective: 1000px; }
+        @keyframes gridMove { 0% { transform: perspective(600px) rotateX(60deg) translateY(0); } 100% { transform: perspective(600px) rotateX(60deg) translateY(50px); } }
+
+        .container { max-width: 1700px; margin: 0 auto; padding: 20px; }
+
+        .nav-tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .nav-tab { background: transparent; border: none; color: #888; font-size: 14px; font-weight: bold; text-transform: uppercase; padding: 10px 20px; cursor: pointer; transition: 0.3s; position: relative; }
+        .nav-tab:hover { color: #fff; }
+        .nav-tab.active { color: var(--success); }
+        .nav-tab.active::after { content: ''; position: absolute; bottom: -11px; left: 0; width: 100%; height: 3px; background: var(--success); border-radius: 3px 3px 0 0; box-shadow: 0 0 10px rgba(0,255,0,0.5); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .header-panel { display: flex; justify-content: space-between; align-items: center; background: var(--panel); padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(10px); flex-wrap: wrap; gap: 15px; }
+
+        .btn { padding: 8px 14px; border-radius: 6px; border: 1px solid #444; background: #222; color: #fff; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 11px; transition: all 0.3s ease; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn:hover { background: #333; border-color: #666; }
+        .btn.active { background: #e0e0e0; color: #000; border-color: #fff; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+        .btn-calc { background: var(--success); color: #000; border: none; font-size: 13px; padding: 10px 20px; }
+        .btn-calc:hover { background: #00cc00; box-shadow: 0 0 20px rgba(0,255,0,0.4); transform: translateY(-2px); }
+
+        .import-area { background: var(--panel); padding: 20px; border-radius: 12px; border: 1px solid #333; margin-bottom: 30px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); }
+        .import-area textarea { width: 100%; height: 80px; background: rgba(0,0,0,0.6); color: #3498db; border: 1px solid #444; padding: 10px; border-radius: 6px; resize: none; font-family: 'Courier New', monospace; }
+
+        .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; }
+        .team-col { display: flex; flex-direction: column; gap: 15px; }
+
+        .card { background: var(--panel); border-top: 5px solid #444; padding: 12px; border-radius: 10px; box-sizing: border-box; border: 1px solid #222; border-top-width: 5px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
+        .card:hover { transform: translateY(-4px); border-color: #666; box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+        .card.confirmed { background: rgba(0, 255, 0, 0.03); border-color: var(--success) !important; transform: scale(0.98); }
+
+        .live-badge { position: absolute; top: -12px; right: -8px; background: #222; color: #888; padding: 3px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; border: 1px solid #444; z-index: 10; transition: 0.3s ease; opacity: 0; transform: translateY(5px); pointer-events: none;}
+        .live-badge.show { opacity: 1; transform: translateY(0); }
+        .live-badge.active-pts { background: var(--danger); color: #fff; border-color: #ff7675; box-shadow: 0 0 10px rgba(255,0,0,0.5); animation: pulseBadge 2s infinite; }
+        @keyframes pulseBadge { 0% { box-shadow: 0 0 0 0 rgba(231,76,60, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(231,76,60, 0); } 100% { box-shadow: 0 0 0 0 rgba(231,76,60, 0); } }
+
+        .mclaren { border-top-color: var(--mclaren); } .mclaren h3 { color: var(--mclaren); text-shadow: 0 0 10px rgba(255,128,0,0.3); }
+        .redbull { border-top-color: var(--redbull); } .redbull h3 { color: var(--redbull-txt); text-shadow: 0 0 10px rgba(51,102,255,0.3); }
+        .mercedes { border-top-color: var(--mercedes); } .mercedes h3 { color: var(--mercedes-txt); text-shadow: 0 0 10px rgba(0,210,190,0.3); }
+        .audi { border-top-color: var(--audi); } .audi h3 { color: var(--audi-txt) !important; text-shadow: 0 0 10px rgba(255,90,54,0.3); }
+        .ferrari { border-top-color: var(--ferrari); } .ferrari h3 { color: var(--ferrari-txt) !important; text-shadow: 0 0 10px rgba(255,215,0,0.3); }
+        .aston { border-top-color: var(--aston); } .aston h3 { color: var(--aston); text-shadow: 0 0 10px rgba(0,111,98,0.3); }
+        .alpine { border-top-color: var(--alpine); } .alpine h3 { color: var(--alpine); text-shadow: 0 0 10px rgba(0,144,255,0.3); }
+        .alfaromeo { border-top-color: var(--alfaromeo); } .alfaromeo h3 { color: var(--alfaromeo-txt) !important; text-shadow: 0 0 10px rgba(0,255,0,0.3); }
+        .rbr { border-top-color: var(--rbr); } .rbr h3 { color: var(--rbr-txt) !important; text-shadow: 0 0 10px rgba(30,65,255,0.3); }
+
+        h3 { margin: 0 0 8px 0; font-size: 14px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px;}
+        
+        .tg-handle { font-size: 10px; opacity: 0.7; text-transform: none; font-weight: normal; letter-spacing: 0; }
+        .tg-handle-card { display: block; margin-top: 2px; font-size: 10px; opacity: 0.7; text-transform: none; font-weight: normal; letter-spacing: 0; }
+
+        textarea.pred-box { width: 100%; height: 95px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #444; border-radius: 6px; padding: 6px; box-sizing: border-box; font-family: 'Courier New', monospace; resize: none; font-size: 11px; transition: 0.3s ease; }
+        textarea.pred-box:hover, textarea.pred-box:focus { background: rgba(0,0,0,0.8); border-color: #666; outline: none; }
+        input.fl-box { width: 100%; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #444; padding: 6px; border-radius: 6px; box-sizing: border-box; font-family: 'Courier New', monospace; font-size: 11px; margin-top: 6px; font-weight: bold; transition: 0.3s ease; }
+        input.fl-box:hover, input.fl-box:focus { background: rgba(0,0,0,0.8); border-color: #666; outline: none; }
+        
+        .q-driver-display { background: rgba(255,255,255,0.05); border: 1px solid #444; border-radius: 6px; padding: 8px; text-align: center; font-weight: bold; font-size: 18px; color: var(--success); margin-bottom: 6px; position: relative; }
+        .q-driver-display .edit-icon { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; opacity: 0; cursor: pointer; transition: 0.2s; color: #aaa; }
+        .q-driver-display:hover .edit-icon { opacity: 0.6; }
+        .q-driver-display .edit-icon:hover { opacity: 1; color: #fff; }
+        input.q-pos-box { width: 100%; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #444; padding: 8px; border-radius: 6px; box-sizing: border-box; font-family: 'Courier New', monospace; font-size: 14px; text-align: center; font-weight: bold; transition: 0.3s ease; }
+        input.q-pos-box:hover, input.q-pos-box:focus { background: rgba(0,0,0,0.8); border-color: #666; outline: none; }
+
+        .confirm-btn { width: 100%; margin-top: 8px; padding: 8px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background: #333; color: white; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; transition: 0.3s; }
+        .confirmed .confirm-btn { background: var(--success); color: black; box-shadow: 0 0 10px rgba(0,255,0,0.2); }
+
+        .tables-wrapper { display: flex; gap: 30px; align-items: stretch; }
+        .left-col { flex: 1; display: flex; flex-direction: column; }
+        .right-col { flex: 1; display: flex; flex-direction: column; gap: 30px; }
+        .sub-col { flex: 1; display: flex; flex-direction: column; }
+        .table-header-wrap { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; min-height: 24px; }
+        
+        table { width: 100%; height: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border-radius: 10px; border: 1px solid #333; }
+        
+        /* Збільшено ширину другої колонки до 340px, щоб водяні знаки не обрізались балами */
+        #table-dr { table-layout: fixed; }
+        #table-dr th:nth-child(1), #table-dr td:nth-child(1) { width: 40px; text-align: center; }
+        #table-dr th:nth-child(2), #table-dr td:nth-child(2) { width: 340px; } 
+        #table-dr th:nth-child(3), #table-dr td:nth-child(3) { width: 80px; text-align: center; }
+        
+        #table-tm { table-layout: fixed; }
+        #table-tm th:nth-child(1), #table-tm td:nth-child(1) { width: 40px; text-align: center; }
+        #table-tm th:nth-child(2), #table-tm td:nth-child(2) { width: 340px; }
+
+        table th:first-child { border-top-left-radius: 10px; }
+        table th:last-child { border-top-right-radius: 10px; }
+        table tr:last-child td:first-child { border-bottom-left-radius: 10px; }
+        table tr:last-child td:last-child { border-bottom-right-radius: 10px; }
+        
+        th { background: #1a1a1a; padding: 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; text-align: left; position: relative; z-index: 2; border-bottom: 1px solid #222; }
+        td { padding: 12px; font-weight: 500; font-size: 13px; text-shadow: 0 2px 4px rgba(0,0,0,0.7); }
+        tr:hover td { background-color: rgba(255,255,255,0.07) !important; }
+
+        tr.row-mclaren td { color: var(--mclaren); border-bottom: 1px solid rgba(255, 128, 0, 0.25); } 
+        tr.row-mclaren td:first-child { border-left: 4px solid var(--mclaren); } 
+        tr.row-mclaren td:last-child { border-right: 4px solid var(--mclaren); }
+
+        tr.row-redbull td { color: var(--redbull-txt); border-bottom: 1px solid rgba(51, 102, 255, 0.25); } 
+        tr.row-redbull td:first-child { border-left: 4px solid var(--redbull); } 
+        tr.row-redbull td:last-child { border-right: 4px solid var(--redbull); }
+
+        tr.row-mercedes td { color: var(--mercedes-txt); border-bottom: 1px solid rgba(0, 210, 190, 0.25); } 
+        tr.row-mercedes td:first-child { border-left: 4px solid var(--mercedes); } 
+        tr.row-mercedes td:last-child { border-right: 4px solid var(--mercedes); }
+
+        tr.row-audi td { color: var(--audi-txt); border-bottom: 1px solid rgba(166, 166, 166, 0.25); } 
+        tr.row-audi td:first-child { border-left: 4px solid var(--audi); } 
+        tr.row-audi td:last-child { border-right: 4px solid var(--audi); }
+
+        tr.row-ferrari td { color: var(--ferrari-txt); border-bottom: 1px solid rgba(220, 0, 0, 0.25); } 
+        tr.row-ferrari td:first-child { border-left: 4px solid var(--ferrari); } 
+        tr.row-ferrari td:last-child { border-right: 4px solid var(--ferrari); }
+
+        tr.row-aston td { color: var(--aston); border-bottom: 1px solid rgba(0, 111, 98, 0.25); } 
+        tr.row-aston td:first-child { border-left: 4px solid var(--aston); } 
+        tr.row-aston td:last-child { border-right: 4px solid var(--aston); }
+
+        tr.row-alpine td { color: var(--alpine); border-bottom: 1px solid rgba(0, 144, 255, 0.25); } 
+        tr.row-alpine td:first-child { border-left: 4px solid var(--alpine); } 
+        tr.row-alpine td:last-child { border-right: 4px solid var(--alpine); }
+
+        tr.row-alfaromeo td { color: var(--alfaromeo-txt); border-bottom: 1px solid rgba(0, 255, 0, 0.25); } 
+        tr.row-alfaromeo td:first-child { border-left: 4px solid var(--alfaromeo); } 
+        tr.row-alfaromeo td:last-child { border-right: 4px solid var(--alfaromeo); }
+
+        tr.row-rbr td { color: var(--rbr-txt); border-bottom: 1px solid rgba(30, 65, 255, 0.25); } 
+        tr.row-rbr td:first-child { border-left: 4px solid var(--rbr); } 
+        tr.row-rbr td:last-child { border-right: 4px solid var(--rbr); }
+        tr.row-rbr { background-image: linear-gradient(90deg, rgba(0, 0, 128, 0.2) 0%, transparent 50%, rgba(204, 0, 0, 0.1) 100%), radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: 100% 100%, 8px 8px; }
+
+        .up { color: var(--success); font-weight: bold; }
+        .down { color: var(--danger); font-weight: bold; }
+        .same { color: #555; }
+
+        .adj-btn { background: transparent; border: 1px solid #555; color: #aaa; border-radius: 4px; cursor: pointer; margin-left: 10px; font-size: 11px; padding: 3px 8px; font-weight: bold; transition: 0.2s; opacity: 0; }
+        .adj-btn:hover { background: #fff; color: #000; border-color: #fff; }
+        tr:hover .adj-btn { opacity: 1; }
+
+        tr[class*="row-"] { position: relative; z-index: 1; }
+        tr[class*="row-"]:hover { z-index: 5; }
+
+        tr.row-mclaren { background-image: linear-gradient(90deg, rgba(255, 128, 0, 0.15) 0%, transparent 40%, rgba(0, 160, 255, 0.08) 100%), repeating-linear-gradient(45deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 2px, transparent 2px, transparent 6px); }
+        tr.row-redbull { background-image: linear-gradient(90deg, rgba(51, 102, 255, 0.15) 0%, transparent 50%, rgba(204, 0, 0, 0.08) 100%), radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: 100% 100%, 8px 8px; }
+        tr.row-mercedes { background-image: linear-gradient(90deg, rgba(0, 210, 190, 0.15) 0%, transparent 40%, rgba(192, 192, 192, 0.1) 100%), repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 4px); }
+        tr.row-audi { background-image: linear-gradient(90deg, rgba(166, 166, 166, 0.15) 0%, transparent 50%, rgba(255, 90, 54, 0.1) 100%), repeating-linear-gradient(60deg, transparent, transparent 10px, rgba(255, 255, 255, 0.02) 10px, rgba(255, 255, 255, 0.02) 12px); }
+        tr.row-ferrari { background-image: linear-gradient(90deg, rgba(220, 0, 0, 0.15) 0%, transparent 50%, rgba(255, 215, 0, 0.08) 100%), repeating-linear-gradient(-45deg, rgba(0,0,0,0.4) 0px, rgba(0,0,0,0.4) 2px, transparent 2px, transparent 5px); }
+        tr.row-aston { background-image: linear-gradient(90deg, rgba(0, 111, 98, 0.2) 0%, transparent 50%, rgba(173, 255, 47, 0.08) 100%), repeating-linear-gradient(90deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 15px); }
+        tr.row-alpine { background-image: linear-gradient(90deg, rgba(0, 144, 255, 0.15) 0%, transparent 50%, rgba(255, 105, 180, 0.1) 100%), linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px); background-size: 100% 100%, 12px 12px, 12px 12px; }
+        tr.row-alfaromeo { background-image: linear-gradient(90deg, rgba(139, 0, 0, 0.15) 0%, transparent 50%, rgba(0, 255, 0, 0.08) 100%), repeating-linear-gradient(45deg, rgba(255,255,255,0.01) 0px, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 8px); }
+
+        td.logo-cell { position: relative; overflow: hidden; }
+        td.logo-cell::before { content: ""; position: absolute; background-repeat: no-repeat; background-size: contain; background-position: left center; filter: brightness(0) invert(1); pointer-events: none; z-index: -1; }
+
+        #table-dr td.logo-cell::before { left: 160px; }
+        #table-dr tr.row-redbull td.logo-cell::before { left: 140px; }
+        #table-dr tr.row-mercedes td.logo-cell::before { left: 170px; }
+        #table-dr tr.row-ferrari td.logo-cell::before { left: 140px; } 
+        #table-dr tr.row-alpine td.logo-cell::before { left: 170px; }
+        #table-dr tr.row-alfaromeo td.logo-cell::before { left: 180px; }
+        #table-dr tr.row-aston td.logo-cell::before { left: 150px; }
+        #table-dr tr.row-rbr td.logo-cell::before { left: 140px; }
+
+        /* Відступи для логотипів у Кубку Конструкторів теж адаптовано під ширину */
+        #table-tm td.logo-cell::before { left: 160px; }
+        #table-tm tr.row-redbull td.logo-cell::before { left: 140px; }
+        #table-tm tr.row-mercedes td.logo-cell::before { left: 170px; }
+        #table-tm tr.row-ferrari td.logo-cell::before { left: 140px; top: calc(170% + 10px); } 
+        #table-tm tr.row-alpine td.logo-cell::before { left: 170px; }
+        #table-tm tr.row-alfaromeo td.logo-cell::before { left: 180px; }
+        #table-tm tr.row-aston td.logo-cell::before { left: 150px; }
+        #table-tm tr.row-rbr td.logo-cell::before { left: 140px; }
+
+        #table-hist td.logo-cell::before, #live-modal td.logo-cell::before { left: 100px; }
+        #table-hist tr.row-redbull td.logo-cell::before { left: 80px; }
+        #table-hist tr.row-mercedes td.logo-cell::before { left: 110px; }
+        #table-hist tr.row-ferrari td.logo-cell::before { left: 80px; } 
+        #table-hist tr.row-alpine td.logo-cell::before { left: 110px; }
+        #table-hist tr.row-alfaromeo td.logo-cell::before { left: 120px; }
+        #table-hist tr.row-aston td.logo-cell::before { left: 90px; }
+        #table-hist tr.row-rbr td.logo-cell::before { left: 80px; }
+
+        tr.row-mclaren td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/mclaren.svg'); width: 170px; height: 170px; top: 50%; transform: translateY(-50%) rotate(-5deg); opacity: 0.15; }
+        tr.row-redbull td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/redbull.svg'); width: 180px; height: 180px; top: 30%; transform: translateY(calc(-50% - 2px)) rotate(-5deg); opacity: 0.20; }
+        tr.row-mercedes td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/mercedes.svg'); width: 150px; height: 150px; top: 50%; transform: translateY(-50%) rotate(-5deg); opacity: 0.12; }
+        tr.row-audi td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/audi.svg'); width: 160px; height: 160px; top: 50%; transform: translateY(-50%) rotate(-5deg); opacity: 0.15; }
+        tr.row-ferrari td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/ferrari.svg'); width: 190px; height: 180px; top: 170%; transform: translateY(-55%) rotate(50deg); opacity: 0.18; }
+        tr.row-aston td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg'); width: 170px; height: 190px; top: 55%; transform: translateY(-50%) rotate(-5deg); opacity: 0.20; }
+        tr.row-alpine td.logo-cell::before { background-image: url('https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg'); width: 150px; height: 150px; top: 100%; transform: translateY(-50%) rotate(-5deg); opacity: 0.18; }
+        tr.row-alfaromeo td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg'); width: 130px; height: 130px; top: 58%; transform: translateY(-30%) rotate(-5deg); opacity: 0.20; }
+        tr.row-rbr td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/redbull.svg'); width: 180px; height: 180px; top: 30%; transform: translateY(calc(-50% - 2px)) rotate(-5deg); opacity: 0.20; }
+        
+        .tt-wrapper { position: relative; display: inline-block; cursor: help; border-bottom: 1px dashed rgba(255,255,255,0.4); padding-bottom: 1px; }
+        
+        /* ДОДАНО: max-height, overflow-y та змінено pointer-events на auto для можливості скролу */
+        .tt-content { visibility: hidden; width: 250px; background-color: #1a1a20; color: #eee; text-align: left; border-radius: 8px; padding: 14px; position: absolute; z-index: 9999; bottom: 130%; left: 50%; transform: translateX(-50%) translateY(10px); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 10px 25px rgba(0,0,0,0.9); border: 1px solid #444; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 500; line-height: 1.6; letter-spacing: 0.2px; pointer-events: auto; text-shadow: none; max-height: 50vh; overflow-y: auto; }
+        
+        /* Стилізація скролбару всередині тултипу */
+        .tt-content::-webkit-scrollbar { width: 4px; }
+        .tt-content::-webkit-scrollbar-thumb { background-color: #555; border-radius: 2px; }
+        
+        .tt-content::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #444 transparent transparent transparent; }
+        .tt-wrapper:hover .tt-content { visibility: visible; opacity: 1; transform: translateX(-50%) translateY(0); }
+        .tt-highlight { color: var(--success); font-weight: bold; }
+        
+        td:last-child .tt-content { left: auto; right: -10px; transform: translateY(10px); }
+        td:last-child .tt-content::after { left: auto; right: 20px; }
+        td:last-child .tt-wrapper:hover .tt-content { transform: translateY(0); }
+
+        /* Перевертання тултипа ВНИЗ спеціально для колонки Σ у таблиці Результатів ГП */
+        #table-hist td:last-child .tt-content { 
+            bottom: auto; 
+            top: calc(100% + 12px); /* Відкриваємо одразу під цифрами з невеликим відступом */
+            left: 50%; /* Центруємо відносно цифр */
+            right: auto; /* Жорстко перебиваємо старий зсув вправо */
+            transform: translateX(-50%) translateY(-5px); /* Зсув для анімації */
+            
+            max-height: none !important; 
+            overflow-y: visible !important;
+            pointer-events: none !important; 
+        }
+        
+        /* Гострий кутик (стрілочка) */
+        #table-hist td:last-child .tt-content::after { 
+            top: auto;      
+            bottom: 100%;   /* Ставимо рівно над тултипом */
+            left: 50%;      /* Центруємо стрілочку */
+            right: auto;    /* Скасовуємо старий зсув стрілочки */
+            margin-left: -6px; /* Коригування по центру */
+            border-color: transparent transparent #444 transparent; /* Направляємо вістря вгору */
+        }
+        
+        /* Стан при наведенні */
+        #table-hist td:last-child .tt-wrapper:hover .tt-content { 
+            transform: translateX(-50%) translateY(0); 
+        }
+
+        .toggle-wrap { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #aaa; text-transform: uppercase; font-weight: bold; }
+        .switch { position: relative; display: inline-block; width: 34px; height: 18px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 20px; border: 1px solid #222; }
+        .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--success); border-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(16px); }
+
+        #live-modal, #edit-driver-modal { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
+        .live-modal-content { width:700px; max-height: 90vh; overflow-y: auto; background:var(--panel); border-radius:12px; border: 1px solid var(--danger); box-shadow: 0 0 50px rgba(231,76,60,0.2); padding:25px; }
+        .live-modal-content::-webkit-scrollbar { width: 8px; }
+        .live-modal-content::-webkit-scrollbar-thumb { background-color: #555; border-radius: 4px; }
+        .edit-modal-content { background: var(--panel); border-radius: 12px; border: 1px solid #444; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); width: 350px; text-align: center; }
+
+        .h2h-container { background: var(--panel); border-radius: 12px; padding: 25px; border: 1px solid #333; box-shadow: 0 5px 20px rgba(0,0,0,0.4); }
+        .h2h-header { display: flex; justify-content: center; align-items: center; margin-bottom: 40px; gap: 40px; }
+        .h2h-select { background: #111; color: #fff; border: 1px solid #555; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; outline: none; transition: 0.3s; min-width: 220px; text-align: center; }
+        .h2h-select:hover { border-color: #888; background: #1a1a1a; }
+        .h2h-select optgroup { background: #222; font-style: normal; font-weight: bold; }
+        .h2h-select option { background: #111; color: #fff; font-weight: normal; }
+        
+        .h2h-logo-wrap { position: relative; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; }
+        .h2h-logo { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; filter: brightness(0) invert(1); opacity: 0.8; transition: 0.5s ease; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .vs-text { font-size: 36px; font-weight: 900; font-style: italic; color: #fff; text-shadow: 0 0 15px rgba(255,255,255,0.4); }
+        
+        .custom-dropdown { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); background: #1a1a1a; border: 1px solid #444; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 100; min-width: 180px; display: none; overflow: hidden; flex-direction: column; }
+        .custom-dropdown.show { display: flex; animation: dropFade 0.2s ease forwards; }
+        @keyframes dropFade { 
+            from { opacity: 0; transform: translateX(-50%) translateY(10px); } 
+            to { opacity: 1; transform: translateX(-50%) translateY(0); } 
+        }
+
+        .dropdown-item { padding: 12px 15px; font-size: 13px; font-weight: bold; text-align: center; cursor: pointer; transition: 0.2s; border-bottom: 1px solid #222; }
+        .dropdown-item:last-child { border-bottom: none; }
+        .dropdown-item:hover { background: #333; }
+
+        .h2h-label { text-align: center; font-size: 10px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; }
+        .h2h-row-new { display: flex; align-items: center; justify-content: center; margin-bottom: 30px; gap: 15px; }
+        
+        .h2h-val { display: flex; flex-direction: column; min-width: 75px; height: 45px; justify-content: center; }
+        .h2h-val.left { text-align: right; align-items: flex-end; }
+        .h2h-val.right { text-align: left; align-items: flex-start; }
+        .h-num { line-height: 1; text-shadow: 0 2px 5px rgba(0,0,0,0.8); transition: all 0.3s ease; }
+        .h-pct { font-size: 11px; color: #666; font-weight: bold; margin-top: 4px; }
+
+        .h2h-bar-wrap { flex: 1; display: flex; align-items: center; max-width: 800px; width: 100%; gap: 2px; }
+        .bar-side { flex: 1; display: flex; height: 16px; background: rgba(0,0,0,0.4); border-radius: 4px; overflow: hidden; border: 1px solid #111; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5); }
+        .bar-side.left { justify-content: flex-end; }
+        .bar-side.right { justify-content: flex-start; }
+        .bar-fill { height: 100%; transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1); width: 0%; } 
+        .bar-center-divider { width: 2px; height: 24px; background: #666; border-radius: 2px; }
+
+        .rbr-wrapper { overflow-x: auto; margin-top: 20px; border-radius: 10px; border: 1px solid #333; background: #111; }
+        .rbr-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: center; font-size: 13px; font-weight: bold; }
+        .rbr-table th, .rbr-table td { padding: 12px 5px; border-right: 1px solid #222; border-bottom: 1px solid #222; overflow: hidden; }
+        .rbr-table th:first-child, .rbr-table td:first-child { width: 120px; text-align: left; padding-left: 15px; border-right: 2px solid #333; }
+        .rbr-table th { background: #1a1a1a; color: #888; font-size: 10px; text-transform: uppercase; border-bottom: 2px solid #333; }
+        .rbr-table td.win { color: #fff; font-weight: 900; text-shadow: 0 0 8px rgba(255,255,255,0.5); }
+        .rbr-table td.loss { color: #666; font-weight: normal; }
+        .rbr-table td.tie { color: #aaa; }
+        .rbr-table td.empty { color: #333; font-weight: normal; }
+
+        .perf-container { display: flex; background: var(--panel); border-radius: 12px; border: 1px solid #333; box-shadow: 0 5px 20px rgba(0,0,0,0.4); overflow: hidden; height: 600px; }
+        .perf-sidebar { width: 250px; background: #111; border-right: 1px solid #333; display: flex; flex-direction: column; overflow-y: auto; }
+        .perf-sidebar::-webkit-scrollbar { width: 6px; }
+        .perf-sidebar::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
+        
+        .perf-player-item { padding: 12px 15px; border-bottom: 1px solid #222; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: 0.2s; user-select: none; }
+        .perf-player-item:hover { background: #1a1a1a; }
+        .perf-player-item.active { background: rgba(255,255,255,0.05); }
+        .perf-p-name { font-size: 13px; font-weight: bold; color: #fff; display: flex; flex-direction: column; }
+        .perf-t-name { font-size: 10px; text-transform: uppercase; margin-top: 2px; }
+        .perf-color-box { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); transition: 0.2s; }
+        .perf-player-item:not(.active) .perf-color-box { background: transparent !important; border-color: #555; }
+        .perf-player-item:not(.active) .perf-p-name { color: #666; }
+        
+        .perf-chart-area { flex: 1; padding: 20px; position: relative; }
+        .perf-controls { position: absolute; top: 15px; right: 25px; display: flex; gap: 10px; z-index: 10; }
+        .perf-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 5px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: 0.2s; }
+        .perf-btn.active { background: #fff; color: #000; font-weight: bold; }
+        
+        #selectAllBtn { background: #222; border: none; color: #aaa; padding: 10px; font-size: 11px; cursor: pointer; border-bottom: 1px solid #333; text-transform: uppercase; font-weight: bold; }
+        #selectAllBtn:hover { background: #333; color: #fff; }
+
+        /* КОМПАКТНИЙ ДИЗАЙН LIVE-ПРОГНОЗІВ */
+        .compact-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+        .team-block { background: var(--panel); border: 1px solid #333; border-radius: 8px; border-left: 5px solid #555; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        
+        .team-block.mclaren { border-left-color: var(--mclaren); }
+        .team-block.redbull { border-left-color: var(--redbull); }
+        .team-block.mercedes { border-left-color: var(--mercedes); }
+        .team-block.audi { border-left-color: var(--audi); }
+        .team-block.ferrari { border-left-color: var(--ferrari); }
+        .team-block.aston { border-left-color: var(--aston); }
+        .team-block.alpine { border-left-color: var(--alpine); }
+        .team-block.alfaromeo { border-left-color: var(--alfaromeo); }
+        .team-block.rbr { border-left-color: var(--rbr); }
+
+        .player-row { display: flex; align-items: center; padding: 10px 15px; border-bottom: 1px solid #222; gap: 15px; transition: 0.2s; }
+        .player-row:last-child { border-bottom: none; }
+        .player-row:hover { background: rgba(255,255,255,0.03); }
+        .player-row.confirmed { background: rgba(0,255,0,0.05); }
+        
+        .p-info { width: 130px; display: flex; flex-direction: column; }
+        .p-name { font-weight: bold; font-size: 14px; color: #eee; }
+        .p-tag { font-size: 10px; color: #888; }
+        
+        .p-input-zone { flex: 1; display: flex; gap: 10px; align-items: center; }
+        .p-pred { flex: 1; background: #111; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; font-family: 'Courier New', monospace; font-size: 12px; resize: vertical; min-height: 36px; box-sizing: border-box; transition: 0.3s; }
+        .p-pred:focus { border-color: #777; outline: none; background: #000; }
+        .p-fl { width: 90px; background: #111; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 8px; font-family: 'Courier New', monospace; font-size: 12px; text-align: center; font-weight: bold; transition: 0.3s; }
+        .p-fl:focus { border-color: #777; outline: none; background: #000; }
+        
+        .q-assigned { width: 60px; font-size: 15px; color: var(--success); font-weight: bold; text-align: center; cursor: pointer; transition: 0.2s; background: rgba(255,255,255,0.05); padding: 6px; border-radius: 4px; border: 1px solid #444; }
+        .q-assigned:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        
+        .p-live-pts { width: 40px; text-align: center; font-weight: bold; font-size: 15px; color: #555; }
+        .p-live-pts.active-pts { color: var(--danger); text-shadow: 0 0 10px rgba(231,76,60,0.5); }
+        
+        .btn-check { background: #333; color: #aaa; border: 1px solid #444; border-radius: 6px; width: 36px; height: 36px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s; }
+        .btn-check:hover { background: #555; color: #fff; }
+        .confirmed .btn-check { background: var(--success); color: #000; border-color: var(--success); box-shadow: 0 0 15px rgba(0,255,0,0.3); }
+        .btn-check svg { width: 20px; height: 20px; }
+
+        /* =========================================
+           ФІНАЛЬНИЙ ЧИСТИЙ CSS ДЛЯ ТАБЛИЦЬ І СКРОЛУ
+           ========================================= */
+
+        /* 1. Обгортка для скролу (ховаємо смугу прокрутки) */
+        .table-scroll-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            border-radius: 10px;
+        }
+        .table-scroll-wrapper::-webkit-scrollbar { display: none; }
+
+        /* 2. Базові стилі таблиць (повертаємо розтягування) */
+        #table-dr {
+            min-width: 100%;
+            width: max-content;
+            table-layout: fixed;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        #table-tm {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        /* 3. Жорстка ширина колонок */
+        /* Колонка 1: Позиція */
+        #table-dr th:nth-child(1), #table-dr td:nth-child(1),
+        #table-tm th:nth-child(1), #table-tm td:nth-child(1) {
+            width: 40px; min-width: 40px; text-align: center;
+        }
+        /* Колонка 2: Пілот / Команда */
+        #table-dr th:nth-child(2), #table-dr td:nth-child(2),
+        #table-tm th:nth-child(2), #table-tm td:nth-child(2) {
+            width: 280px; min-width: 280px; text-align: left;
+        }
+        /* Колонка 3: Бали */
+        #table-dr th:nth-child(3), #table-dr td:nth-child(3),
+        #table-tm th:nth-child(3), #table-tm td:nth-child(3) {
+            width: 80px; min-width: 80px; text-align: center;
+        }
+        /* Колонки 4+: Етапи Гран-прі (тільки для таблиці пілотів) */
+        #table-dr th:nth-child(n+4), #table-dr td:nth-child(n+4) {
+            width: 65px; min-width: 65px; text-align: center; z-index: 1;
+        }
+
+        /* =========================================
+           ЛОГІКА ФІКСАЦІЇ (STICKY) ДЛЯ ТАБЛИЦІ ПІЛОТІВ
+           ========================================= */
+        
+        /* Робимо перші 3 колонки фіксованими з НЕПРОЗОРИМ фоном, щоб сховати скрол */
+        #table-dr th:nth-child(1), #table-dr td:nth-child(1) {
+            position: sticky; left: 0; z-index: 4; background-color: #141419;
+        }
+        #table-dr th:nth-child(2), #table-dr td:nth-child(2) {
+            position: sticky; left: 40px; z-index: 4; background-color: #141419;
+        }
+        #table-dr th:nth-child(3), #table-dr td:nth-child(3) {
+            position: sticky; left: 320px; z-index: 4; background-color: #141419;
+            border-right: 2px solid #333; /* Межа початку прокрутки */
+            box-shadow: 5px 0 10px -5px rgba(0,0,0,0.6); /* Тінь для глибини */
+        }
+
+        /* Шапка фіксованих колонок має бути вище за комірки */
+        #table-dr thead th:nth-child(1),
+        #table-dr thead th:nth-child(2),
+        #table-dr thead th:nth-child(3) {
+            background-color: #1a1a1a; z-index: 5;
+        }
+
+        /* Відновлюємо підсвітку при наведенні для фіксованих колонок */
+        #table-dr tr:hover td:nth-child(1),
+        #table-dr tr:hover td:nth-child(2),
+        #table-dr tr:hover td:nth-child(3) {
+            background-color: #1c1c22 !important; 
+        }
+
+        /* =========================================
+           ПОРЯТУНОК ЕМБЛЕМ ТА ТЕКСТУ
+           ========================================= */
+        #table-dr td.logo-cell::before, #table-tm td.logo-cell::before {
+            z-index: 0 !important; /* Логотип на самому дні */
+        }
+        #table-dr td.logo-cell div, #table-tm td.logo-cell div {
+            position: relative;
+            z-index: 2 !important; /* Текст та тег завжди поверх логотипу */
+        }
