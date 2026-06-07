@@ -3,6 +3,7 @@
             const urlParams = new URLSearchParams(window.location.search);
             const isAdmin = urlParams.get('pass') === '9123';
             let myPlayer = localStorage.getItem('f1_auth_player');
+            let dirtyFields = {}; // Відстежує, що саме було відредаговано до збереження
 
         // Ініціалізація Supabase
         const SUPABASE_URL = 'https://fvubnbkqnldsspsjduqc.supabase.co'; // Зверни увагу: без /rest/v1/ на кінці
@@ -358,68 +359,75 @@
             updateDetailsTable();
         }
 
+        // === РОЗУМНЕ ЗБЕРЕЖЕННЯ (БЕЗ ЗАТИРАНЬ) ===
         async function save() {
+            console.log("=== ПОЧАТОК ЗБЕРЕЖЕННЯ (SAVE) ===");
             if (!db || !db.st || Object.keys(db.st).length === 0) return;
 
             try {
-                // 1. Завантажуємо поточну хмару перед записом
                 const { data, error } = await supabaseClient.from('f1_data').select('*');
-                if (!error && data && data.length > 0) {
-                    let cloudMain = data.find(row => row.id === 'main_db')?.data || {};
-                    let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
+                if (error) throw error;
 
-                    // 2. ЗЛИТТЯ PIN-КОДІВ (щоб не стерти чужі паролі)
-                    if (!db.pins) db.pins = {};
-                    if (cloudMain.pins) {
-                        for (let pName in cloudMain.pins) {
-                            // Гравці не можуть перезаписувати чужі паролі
-                            if (pName !== myPlayer || !db.pins[pName]) {
-                                db.pins[pName] = cloudMain.pins[pName];
-                            }
-                        }
+                let cloudMain = data.find(row => row.id === 'main_db')?.data || {};
+                let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
+
+                // Злиття PIN-кодів
+                if (!db.pins) db.pins = {};
+                if (cloudMain.pins) {
+                    for (let pName in cloudMain.pins) {
+                        if (pName !== myPlayer || !db.pins[pName]) db.pins[pName] = cloudMain.pins[pName];
                     }
+                }
 
-                    // 3. ЗЛИТТЯ ПРОГНОЗІВ (щоб не стерти чужу роботу)
+                // Розумне злиття прогнозів
+                for (let gpKey in allTmp) {
+                    if (!cloudTmp[gpKey]) continue; 
                     ['qualy', 'sprint', 'race'].forEach(s => {
-                        if (cloudTmp[s] && allTmp[s]) {
-                            let cloudP = cloudTmp[s].p || {};
-                            let cloudFl = cloudTmp[s].fl || {};
-                            let cloudC = cloudTmp[s].c || {};
+                        if (!allTmp[gpKey][s]) allTmp[gpKey][s] = { p: {}, fl: {}, c: {}, r: "" };
+                        if (!cloudTmp[gpKey][s]) cloudTmp[gpKey][s] = { p: {}, fl: {}, c: {}, r: "" };
 
-                            for (let pName in allTmp[s].p) {
-                                if (!isAdmin && pName !== myPlayer) {
-                                    // Звичайний гравець примусово отримує з хмари всі ЧУЖІ прогнози
-                                    allTmp[s].p[pName] = cloudP[pName] || "";
-                                    allTmp[s].fl[pName] = cloudFl[pName] || "";
-                                    allTmp[s].c[pName] = cloudC[pName] || false;
-                                } else if (isAdmin) {
-                                    // Адмін не затирає чужі прогнози пустими клітинками
-                                    if (!allTmp[s].p[pName] && cloudP[pName]) {
-                                        allTmp[s].p[pName] = cloudP[pName];
-                                    }
-                                }
+                        let cP = cloudTmp[gpKey][s].p || {}; 
+                        let cFl = cloudTmp[gpKey][s].fl || {}; 
+                        let cC = cloudTmp[gpKey][s].c || {};
+
+                        let lP = allTmp[gpKey][s].p; 
+                        let lFl = allTmp[gpKey][s].fl; 
+                        let lC = allTmp[gpKey][s].c;
+
+                        const allPlayers = teams.flatMap(t => t.p);
+                        allPlayers.forEach(pName => {
+                            // НАЙГОЛОВНІША ЗМІНА:
+                            // Якщо я НЕ ВЛАСНИК цього профілю і я ЩОЙНО НЕ ДРУКУВАВ у цю клітинку особисто,
+                            // мій браузер ОБОВ'ЯЗКОВО бере найсвіжіші дані з хмари, незалежно від того, адмін я чи ні.
+                            
+                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_p_${pName}`]) {
+                                if (cP[pName] !== undefined) lP[pName] = cP[pName];
                             }
-                        }
+                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_fl_${pName}`]) {
+                                if (cFl[pName] !== undefined) lFl[pName] = cFl[pName];
+                            }
+                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_c_${pName}`]) {
+                                if (cC[pName] !== undefined) lC[pName] = cC[pName];
+                            }
+                        });
                     });
                 }
-            } catch(e) {
-                console.error("Помилка при злитті даних перед збереженням:", e);
-            }
+            } catch(e) { console.error("❌ Помилка під час злиття:", e); }
 
-            // Зберігаємо локально
             localStorage.setItem('f1_v14_db', JSON.stringify(db));
             localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
 
-            // Пушимо у Supabase
             try {
-                await supabaseClient.from('f1_data').upsert([
+                const { error } = await supabaseClient.from('f1_data').upsert([
                     { id: 'main_db', data: db },
                     { id: 'tmp_db', data: allTmp }
                 ]);
-                console.log("Дані успішно синхронізовано.");
-            } catch(err) {
-                console.error("Помилка запису в Supabase:", err);
-            }
+                if (error) throw error;
+                console.log("✅ 4. УСПІХ! Дані зафіксовано в хмарі.");
+                
+                // Очищаємо всі мітки після того, як успішно записали все в хмару
+                dirtyFields = {}; 
+            } catch(err) { console.error("❌ Помилка запису в Supabase:", err); }
         }
 
         const TELEGRAM_BOT_TOKEN = '8922387886:AAG0NLq3FY5Zsl1lTbDGcuhCKZsE-g0b9uk'; // Встав сюди токен від BotFather
@@ -508,16 +516,18 @@
 
         // Функція автовиправлення (1-VER, 1. VER, 1 -- ver -> 1. VER)
         function autoFormat(elem, pName) {
-            if (elem.readOnly) return; // Якщо поле заблоковано, не чіпаємо
+            if (elem.readOnly) return; 
             let val = elem.value;
-            
-            // Форматує "1. ver", "1-VER", "1 -- ver" у "1. VER"
             val = val.replace(/^(\d+)[\s\-.,_]+/gm, '$1. ');
             val = val.toUpperCase();
-            
             elem.value = val;
             tmp[sess].p[pName] = val;
-            save();
+            
+            const gp = document.getElementById('gp-select').value;
+            dirtyFields[`${gp}_${sess}_p_${pName}`] = true;
+            
+            console.log(`[ЗБЕРЕЖЕННЯ] Завершено ввід для ${pName}. Текст:`, val);
+            save(); 
         }
 
         function render() {
@@ -732,8 +742,18 @@
             }
         }
 
-        function updP(p, v) { tmp[sess].p[p] = v; save(); updateLiveBadges(); }
-        function updFL(p, v) { tmp[sess].fl[p] = v; save(); updateLiveBadges(); }
+        // === ФУНКЦІЇ ВВОДУ ТА МІТКИ РЕДАГУВАННЯ ===
+        function updP(p, v) { 
+            tmp[sess].p[p] = v; 
+            const gp = document.getElementById('gp-select').value;
+            dirtyFields[`${gp}_${sess}_p_${p}`] = true; // Ставимо мітку, що це поле змінено локально
+        }
+        
+        function updFL(p, v) { 
+            tmp[sess].fl[p] = v; 
+            const gp = document.getElementById('gp-select').value;
+            dirtyFields[`${gp}_${sess}_fl_${p}`] = true;
+        }
         
         function syncRealInput(elem) {
             let val = elem.value;
@@ -757,17 +777,16 @@
         }
 
         async function togC(pName) { 
-            // Захист: забороняємо затверджувати чужі прогнози
+            console.log(`[КНОПКА] Натиснуто затвердження для ${pName}`);
             if (!isAdmin && myPlayer !== pName) {
                 alert("Ви можете затверджувати лише свій прогноз!");
                 return;
             }
-
             tmp[sess].c[pName] = !tmp[sess].c[pName]; 
+            const gp = document.getElementById('gp-select').value;
+            dirtyFields[`${gp}_${sess}_c_${pName}`] = true; // Мітка зміни статусу
             
-            // ПРИМУСОВЕ збереження у хмару
             await save(); 
-            
             let scrollY = window.scrollY; 
             render(); 
             window.scrollTo(0, scrollY); 
@@ -1062,28 +1081,32 @@
         }
 
         async function promptAdjustPts(name) {
-    let adj = prompt(`Змінити бали для ${name} (наприклад: 5 або -3):`, "0");
-    if (adj === null) return; // Скасування
-    
-    adj = parseInt(adj, 10);
-    if (!isNaN(adj)) {
-        if (!db.st[name]) db.st[name] = { pts: 0 }; // Запобіжник
-        db.st[name].pts += adj;
-        
-        updateTables(); // Оновлюємо візуально
-        
-        // ПРИМУСОВИЙ ЗАПИС У ХМАРУ
-        try {
-            await save(); 
-            console.log(`Бали для ${name} успішно оновлено та збережено.`);
-        } catch (err) {
-            console.error("Не вдалося зберегти нові бали в Supabase:", err);
-            alert("Помилка збереження! Перевір консоль.");
+            if (!isAdmin) {
+                alert("Дія скасована. Тільки адміністратор може змінювати бали вручну.");
+                return;
+            }
+
+            let adj = prompt(`Змінити бали для ${name} (наприклад: 5 або -3):`, "0");
+            if (adj === null) return; 
+            
+            adj = parseInt(adj, 10);
+            if (!isNaN(adj)) {
+                if (!db.st[name]) db.st[name] = { pts: 0 }; 
+                db.st[name].pts += adj;
+                
+                updateTables(); 
+                
+                try {
+                    await save(); 
+                    console.log(`Бали для ${name} успішно оновлено та збережено.`);
+                } catch (err) {
+                    console.error("Не вдалося зберегти нові бали в Supabase:", err);
+                    alert("Помилка збереження! Перевір консоль.");
+                }
+            } else {
+                alert("Введено некоректне число.");
+            }
         }
-    } else {
-        alert("Введено некоректне число.");
-    }
-}
 
         function resetStage() {
             const gp = document.getElementById('gp-select').value;
