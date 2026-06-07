@@ -359,19 +359,39 @@
             updateDetailsTable();
         }
 
-        // === РОЗУМНЕ ЗБЕРЕЖЕННЯ (БЕЗ ЗАТИРАНЬ) ===
+        // === ГЛОБАЛЬНІ ЗМІННІ ДЛЯ ЧЕРГИ ЗБЕРЕЖЕНЬ ===
+        let isSaving = false;
+        let pendingSave = false;
+
+        // === РОЗУМНЕ ЗБЕРЕЖЕННЯ З БЛОКУВАННЯМ ПОТОКІВ ===
         async function save() {
+            // Якщо збереження вже йде, ставимо наступне в чергу і скасовуємо паралельний запуск
+            if (isSaving) {
+                pendingSave = true;
+                console.log("⏳ Збереження вже йде. Запит поставлено в чергу...");
+                return;
+            }
+            
+            isSaving = true;
             console.log("=== ПОЧАТОК ЗБЕРЕЖЕННЯ (SAVE) ===");
-            if (!db || !db.st || Object.keys(db.st).length === 0) return;
+
+            if (!db || !db.st || Object.keys(db.st).length === 0) {
+                isSaving = false;
+                return;
+            }
 
             try {
+                // Фіксуємо поточні мітки і одразу очищаємо глобальний об'єкт.
+                // Це гарантує, що якщо ти введеш щось НОВЕ під час збереження, воно не загубиться.
+                let activeDirty = { ...dirtyFields };
+                dirtyFields = {};
+
                 const { data, error } = await supabaseClient.from('f1_data').select('*');
                 if (error) throw error;
 
                 let cloudMain = data.find(row => row.id === 'main_db')?.data || {};
                 let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
 
-                // Злиття PIN-кодів
                 if (!db.pins) db.pins = {};
                 if (cloudMain.pins) {
                     for (let pName in cloudMain.pins) {
@@ -379,7 +399,6 @@
                     }
                 }
 
-                // Розумне злиття прогнозів
                 for (let gpKey in allTmp) {
                     if (!cloudTmp[gpKey]) continue; 
                     ['qualy', 'sprint', 'race'].forEach(s => {
@@ -396,38 +415,44 @@
 
                         const allPlayers = teams.flatMap(t => t.p);
                         allPlayers.forEach(pName => {
-                            // НАЙГОЛОВНІША ЗМІНА:
-                            // Якщо я НЕ ВЛАСНИК цього профілю і я ЩОЙНО НЕ ДРУКУВАВ у цю клітинку особисто,
-                            // мій браузер ОБОВ'ЯЗКОВО бере найсвіжіші дані з хмари, незалежно від того, адмін я чи ні.
-                            
-                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_p_${pName}`]) {
-                                if (cP[pName] !== undefined) lP[pName] = cP[pName];
+                            // Використовуємо activeDirty, щоб перевірити, чи міняли ми це поле щойно
+                            if (pName !== myPlayer && !activeDirty[`${gpKey}_${s}_p_${pName}`]) {
+                                if (cP[pName] !== undefined && cP[pName] !== null) lP[pName] = cP[pName];
                             }
-                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_fl_${pName}`]) {
-                                if (cFl[pName] !== undefined) lFl[pName] = cFl[pName];
+                            if (pName !== myPlayer && !activeDirty[`${gpKey}_${s}_fl_${pName}`]) {
+                                if (cFl[pName] !== undefined && cFl[pName] !== null) lFl[pName] = cFl[pName];
                             }
-                            if (pName !== myPlayer && !dirtyFields[`${gpKey}_${s}_c_${pName}`]) {
-                                if (cC[pName] !== undefined) lC[pName] = cC[pName];
+                            if (pName !== myPlayer && !activeDirty[`${gpKey}_${s}_c_${pName}`]) {
+                                if (cC[pName] !== undefined && cC[pName] !== null) lC[pName] = cC[pName];
                             }
                         });
                     });
                 }
-            } catch(e) { console.error("❌ Помилка під час злиття:", e); }
 
-            localStorage.setItem('f1_v14_db', JSON.stringify(db));
-            localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
+                localStorage.setItem('f1_v14_db', JSON.stringify(db));
+                localStorage.setItem('f1_v14_allTmp', JSON.stringify(allTmp));
 
-            try {
-                const { error } = await supabaseClient.from('f1_data').upsert([
+                const { error: upsertError } = await supabaseClient.from('f1_data').upsert([
                     { id: 'main_db', data: db },
                     { id: 'tmp_db', data: allTmp }
                 ]);
-                if (error) throw error;
-                console.log("✅ 4. УСПІХ! Дані зафіксовано в хмарі.");
+                if (upsertError) throw upsertError;
                 
-                // Очищаємо всі мітки після того, як успішно записали все в хмару
-                dirtyFields = {}; 
-            } catch(err) { console.error("❌ Помилка запису в Supabase:", err); }
+                console.log("✅ 4. УСПІХ! Дані зафіксовано в хмарі.");
+
+            } catch(err) { 
+                console.error("❌ Помилка збереження:", err); 
+            } finally {
+                // Знімаємо блокування
+                isSaving = false;
+                
+                // Якщо за час збереження накопичилися нові зміни - запускаємо процес ще раз
+                if (pendingSave) {
+                    pendingSave = false;
+                    console.log("🔄 Запуск відкладеного збереження з черги...");
+                    save(); 
+                }
+            }
         }
 
         const TELEGRAM_BOT_TOKEN = '8922387886:AAG0NLq3FY5Zsl1lTbDGcuhCKZsE-g0b9uk'; // Встав сюди токен від BotFather
