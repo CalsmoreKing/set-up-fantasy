@@ -1,3 +1,36 @@
+        // Час вказано за Києвом (формат ISO з часовим поясом +03:00)
+        // Для спринт-вікендів додано параметр sprint
+        const gpSchedule = {
+            'Монако': { qualy: '2026-06-06T15:00:00+03:00', race: '2026-06-07T15:00:00+03:00' },
+            'Барселона': { qualy: '2026-06-13T15:00:00+03:00', race: '2026-06-14T15:00:00+03:00' },
+            'Австрія': { qualy: '2026-06-27T15:00:00+03:00', sprint: '2026-06-27T11:00:00+03:00', race: '2026-06-28T15:00:00+03:00' },
+            'Велика Британія': { qualy: '2026-07-04T15:00:00+03:00', race: '2026-07-05T15:00:00+03:00' },
+            'Бельгія': { qualy: '2026-07-18T15:00:00+03:00', sprint: '2026-07-18T11:00:00+03:00', race: '2026-07-19T15:00:00+03:00' },
+            'Угорщина': { qualy: '2026-07-25T15:00:00+03:00', race: '2026-07-26T15:00:00+03:00' },
+            'Нідерланди': { qualy: '2026-08-22T15:00:00+03:00', race: '2026-08-23T15:00:00+03:00' },
+            'Італія': { qualy: '2026-09-05T15:00:00+03:00', race: '2026-09-06T15:00:00+03:00' },
+            'Мадрид': { qualy: '2026-09-12T15:00:00+03:00', race: '2026-09-13T15:00:00+03:00' },
+            'Азербайджан': { qualy: '2026-09-25T15:00:00+03:00', race: '2026-09-26T15:00:00+03:00' },
+            'Сінгапур': { qualy: '2026-10-10T20:00:00+03:00', race: '2026-10-11T20:00:00+03:00' },
+            'США': { qualy: '2026-10-24T15:00:00+03:00', sprint: '2026-10-24T11:00:00+03:00', race: '2026-10-25T15:00:00+03:00' },
+            'Мексика': { qualy: '2026-10-31T14:00:00+03:00', race: '2026-11-01T14:00:00+03:00' },
+            'Бразилія': { qualy: '2026-11-07T14:00:00+03:00', sprint: '2026-11-07T10:00:00+03:00', race: '2026-11-08T14:00:00+03:00' },
+            'Лас-Вегас': { qualy: '2026-11-20T20:00:00+03:00', race: '2026-11-21T20:00:00+03:00' },
+            'Катар': { qualy: '2026-11-28T19:00:00+03:00', sprint: '2026-11-28T15:00:00+03:00', race: '2026-11-29T19:00:00+03:00' },
+            'Абу-Дабі': { qualy: '2026-12-05T17:00:00+03:00', race: '2026-12-06T17:00:00+03:00' }
+        };
+        
+        function isSessionLockedByTime(gpName, currentSession) {
+            if (isAdmin) return false; 
+            if (!gpSchedule[gpName] || !gpSchedule[gpName][currentSession]) return false;
+            
+            const sessionStartTime = new Date(gpSchedule[gpName][currentSession]).getTime();
+            const currentTime = new Date().getTime();
+            const minutesToStart = (sessionStartTime - currentTime) / (1000 * 60);
+            
+            return minutesToStart <= 30; 
+        }
+
         // === СИСТЕМА ДОСТУПУ ===
             const f1Roster = ["HAM", "LEC", "VER", "RUS", "ANT", "HAD", "PIA", "HUL", "BOR", "BEA", "GAS", "SAI", "ALB", "LIN", "COL", "LAW", "OCO", "PER", "NOR", "ALO", "STR", "BOT"];
             const urlParams = new URLSearchParams(window.location.search);
@@ -144,6 +177,7 @@
 
                 if (typeof updateTables === 'function') updateTables();
                 if (typeof render === 'function') render();
+                changeGP();
             }
         }
 
@@ -393,7 +427,7 @@
                 let cloudTmp = data.find(row => row.id === 'tmp_db')?.data || {};
 
                 if (!db.pins) db.pins = {};
-                
+
                 // Злиття лічильників змін
                 if (!db.changes) db.changes = {};
                 if (cloudMain.changes) {
@@ -553,19 +587,34 @@
             render();
         }
 
-        // Функція автовиправлення (1-VER, 1. VER, 1 -- ver -> 1. VER)
         function autoFormat(elem, pName) {
             if (elem.readOnly) return; 
-            let val = elem.value;
-            val = val.replace(/^(\d+)[\s\-.,_]+/gm, '$1. ');
-            val = val.toUpperCase();
+            let val = elem.value.trim().toUpperCase();
+            if (val === '') return; // Ігноруємо пусті поля
+
+            // 1. Перевірка на Швидке коло (FL, ФЛ, Швид, Найшвидше)
+            const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-Я]{3})$/i);
+            
+            // 2. Перевірка на позицію (напр. 1 ver, 1.ver, 1_ver, 1-ver)
+            const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-Я]{3})$/i);
+
+            if (flMatch) {
+                val = `ШВИДКЕ КОЛО - ${flMatch[1]}`;
+            } else if (posMatch) {
+                val = `${posMatch[1]} - ${posMatch[2]}`;
+            } else {
+                alert(`⚠️ Формат не розпізнано: "${val}".\nВикористовуйте формати: "1 - VER" або "Швидке коло - VER".`);
+                elem.focus(); // Повертаємо курсор для виправлення
+                return; // Зупиняємо збереження помилкового формату
+            }
+
             elem.value = val;
             tmp[sess].p[pName] = val;
             
             const gp = document.getElementById('gp-select').value;
             dirtyFields[`${gp}_${sess}_p_${pName}`] = true;
             
-            console.log(`[ЗБЕРЕЖЕННЯ] Завершено ввід для ${pName}. Текст:`, val);
+            console.log(`[ЗБЕРЕЖЕННЯ] Формат виправлено для ${pName}:`, val);
             save(); 
         }
 
@@ -605,6 +654,8 @@
                 realInput.style.height = realInput.scrollHeight + 'px';
             }
 
+            const timeLocked = isSessionLockedByTime(gp, sess);
+
             teams.forEach(t => {
                 const teamBlock = document.createElement('div');
                 teamBlock.className = `team-block ${t.id}`;
@@ -624,6 +675,8 @@
                     let lockAction = '';
                     if (isLockedForMe) {
                         lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Авторизуватись"`;
+                    } else if (timeLocked) {
+                        lockAction = 'readonly disabled style="background: #331a00; color: #888; cursor: not-allowed;" title="Час вийшов (менше 30 хв до старту)"';
                     } else if (isLockedPermanently) {
                         lockAction = 'readonly disabled style="background: #4a0000; color: #888; cursor: not-allowed;" title="Ліміт змін вичерпано"';
                     } else if (!canEdit) {
@@ -648,7 +701,9 @@
 
                     let btnCheckHTML = '';
                     if (isAdmin || myPlayer === p) {
-                        if (isLockedPermanently) {
+                        if (timeLocked) {
+                            btnCheckHTML = `<button class="btn-check" style="background: #331a00; border-color: #e67e22; cursor: not-allowed;" title="Час вийшов">⏳</button>`;
+                        } else if (isLockedPermanently) {
                             btnCheckHTML = `<button class="btn-check" style="background: #4a0000; border-color: #ff3e3e; cursor: not-allowed;" title="Заблоковано">🔒</button>`;
                         } else {
                             btnCheckHTML = `
@@ -964,24 +1019,36 @@
             Object.keys(parsedData).forEach(name => {
                 let content = parsedData[name].join('\n').trim();
                 if (content.length > 0) {
-                    const flMatch = content.match(/Швидке коло\s*[-–]\s*([^\n(]+)/i);
-                    if (flMatch) {
-                        tmp[sess].fl[name] = flMatch[1].trim();
-                        content = content.replace(/Швидке коло[\s\S]*$/, "");
+                    
+                    // Застосовуємо логіку форматування з autoFormat
+                    let cleanPreds = "";
+                    const linesToProcess = content.split('\n');
+                    linesToProcess.forEach(line => {
+                        let val = line.trim().toUpperCase();
+                        if (val === '') return;
+                        
+                        const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-Я]{3})$/i);
+                        const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-Я]{3})$/i);
+
+                        if (flMatch) {
+                            tmp[sess].fl[name] = flMatch[1];
+                        } else if (posMatch) {
+                            cleanPreds += `${posMatch[1]} - ${posMatch[2]}\n`;
+                        } else if(isNewQualy){
+                            let numMatch = val.match(/(\d+)/);
+                            if(numMatch) tmp[sess].p[name] = numMatch[1];
+                        } else {
+                            // Якщо формат не розпізнано, додаємо як є (можливо, потребує ручного втручання)
+                            cleanPreds += val + '\n';
+                        }
+                    });
+
+                    if(!isNewQualy) {
+                        tmp[sess].p[name] = cleanPreds.trim();
                     }
                     
-                    if(isNewQualy) {
-                        let numMatch = content.match(/(\d+)/);
-                        if(numMatch) tmp[sess].p[name] = numMatch[1];
-                    } else {
-                        const cleanPreds = content.replace(/\(\d+\)/g, "").trim();
-                        tmp[sess].p[name] = cleanPreds;
-                    }
+                    tmp[sess].c[name] = false; 
                     
-                    // === РЕЖИМ БОГА (ПРИМУСОВИЙ ПЕРЕЗАПИС) ===
-                    tmp[sess].c[name] = false; // Знімаємо замок, щоб поле оновилося і відкрилося для редагування
-                    
-                    // Ставимо мітки, що це 100% нові дані, які треба відправити в хмару
                     dirtyFields[`${gp}_${sess}_p_${name}`] = true;
                     dirtyFields[`${gp}_${sess}_fl_${name}`] = true;
                     dirtyFields[`${gp}_${sess}_c_${name}`] = true;
@@ -992,7 +1059,7 @@
 
             save(); render();
             if (importedCount > 0) {
-                alert(`Успішно імпортовано/оновлено прогнози для ${importedCount} гравців!`);
+                alert(`Успішно імпортовано та відформатовано прогнози для ${importedCount} гравців!`);
                 document.getElementById('bulk-import').value = ""; 
             } else {
                 alert("Жодного імені не розпізнано. Перевірте формат тексту.");
