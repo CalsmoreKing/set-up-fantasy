@@ -3,7 +3,7 @@
         const gpSchedule = {
             'Монако': { qualy: '2026-06-06T15:00:00+03:00', race: '2026-06-07T15:00:00+03:00' },
             'Барселона': { qualy: '2026-06-13T15:00:00+03:00', race: '2026-06-14T15:00:00+03:00' },
-            'Австрія': { qualy: '2026-06-27T15:00:00+03:00', sprint: '2026-06-27T11:00:00+03:00', race: '2026-06-28T15:00:00+03:00' },
+            'Австрія': { qualy: '2026-06-27T15:00:00+03:00', race: '2026-06-28T15:00:00+03:00' },
             'Велика Британія': { qualy: '2026-07-04T15:00:00+03:00', race: '2026-07-05T15:00:00+03:00' },
             'Бельгія': { qualy: '2026-07-18T15:00:00+03:00', sprint: '2026-07-18T11:00:00+03:00', race: '2026-07-19T15:00:00+03:00' },
             'Угорщина': { qualy: '2026-07-25T15:00:00+03:00', race: '2026-07-26T15:00:00+03:00' },
@@ -29,6 +29,37 @@
             const minutesToStart = (sessionStartTime - currentTime) / (1000 * 60);
             
             return minutesToStart <= 30; 
+        }
+
+        function updateGPDropdown() {
+            const select = document.getElementById('gp-select');
+            let foundCurrent = false;
+            let currentGPValue = null;
+            const now = new Date().getTime();
+
+            Array.from(select.options).forEach(opt => {
+                const gpName = opt.value;
+                const schedule = gpSchedule[gpName];
+                
+                if (schedule && schedule.race) {
+                    const raceTime = new Date(schedule.race).getTime();
+                    if (raceTime < now) {
+                        opt.text = `✅ ${gpName}`; // Завершено
+                    } else if (!foundCurrent) {
+                        opt.text = `🟡 ${gpName}`; // Актуальний
+                        currentGPValue = gpName;
+                        foundCurrent = true;
+                    } else {
+                        opt.text = gpName; // Майбутній
+                    }
+                }
+            });
+
+            // Автовибір поточного етапу при першому завантаженні (якщо ми ще не клацали самі)
+            if (currentGPValue && !window.gpAutoSelected) {
+                select.value = currentGPValue;
+                window.gpAutoSelected = true;
+            }
         }
 
         // === СИСТЕМА ДОСТУПУ ===
@@ -93,7 +124,7 @@
             'aston': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg',
             'alpine': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg',
             'alfaromeo': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg',
-            'rbr': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/redbull.svg'
+            'rbr': 'data:image/svg+xml;utf8,<svg viewBox="0 0 500 500" fill="%23FFFFFF" xmlns="http://www.w3.org/2000/svg"><path d="M250,20 C123.5,20 20,123.5 20,250 C20,376.5 123.5,480 250,480 C376.5,480 480,376.5 480,250 C480,123.5 376.5,20 250,20 Z M250,50 C360.5,50 450,139.5 450,250 C450,360.5 360.5,450 250,450 C139.5,450 50,360.5 50,250 C50,139.5 139.5,50 250,50 Z M208.5,130.5 L125.5,365.5 L174,365.5 L192.5,310.5 L307.5,310.5 L326,365.5 L374.5,365.5 L291.5,130.5 L208.5,130.5 Z M250,185 L293.5,274.5 L206.5,274.5 L250,185 Z M120,210 L120,250 L380,250 L380,210 L120,210 Z"/></svg>'
         };
 
         const getGpIndex = (gpName) => {
@@ -536,6 +567,23 @@
         }
 
         function changeGP() {
+            updateGPDropdown(); 
+            
+            const gp = document.getElementById('gp-select').value;
+            const btnSprint = document.getElementById('btn-sprint');
+            
+            // Якщо в gpSchedule для цього етапу немає ключа 'sprint' — ховаємо кнопку
+            if (gpSchedule[gp] && !gpSchedule[gp].sprint) {
+                if (btnSprint) btnSprint.style.display = 'none';
+                if (sess === 'sprint') {
+                    sess = 'qualy'; // Якщо гравець був на спринті, перекидаємо на квалу
+                    document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-qualy').classList.add('active');
+                }
+            } else {
+                if (btnSprint) btnSprint.style.display = 'inline-block';
+            }
+
             tmp = getTmp();
             render();
             updateTables();
@@ -615,6 +663,7 @@
             dirtyFields[`${gp}_${sess}_p_${pName}`] = true;
             
             console.log(`[ЗБЕРЕЖЕННЯ] Формат виправлено для ${pName}:`, val);
+            logChange(pName, `Змінив текст прогнозу на: ${val}`, myPlayer || "Гість");
             save(); 
         }
 
@@ -908,6 +957,9 @@
                 // Затвердження
                 tmp[sess].c[pName] = true;
             }
+
+            // Запис дії в лог
+            logChange(pName, tmp[sess].c[pName] ? "Затвердив прогноз" : "Розблокував прогноз", myPlayer || "Гість");
 
             dirtyFields[`${gp}_${sess}_c_${pName}`] = true;
             
@@ -2002,28 +2054,21 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: {
+                        padding: { top: 30 } // Опускає графік трохи нижче, щоб не ліз на текст
+                    },
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(0,0,0,0.8)',
-                            titleFont: { size: 14 },
-                            bodyFont: { size: 13, weight: 'bold' },
-                            padding: 10,
-                            borderColor: '#333',
-                            borderWidth: 1
+                            itemSort: function(a, b) {
+                                return b.raw - a.raw; // Автоматичне сортування від найбільшого до найменшого
+                            }
                         }
                     },
                     scales: {
-                        x: { grid: { color: '#222' } },
-                        y: { 
-                            grid: { color: '#222' },
-                            beginAtZero: true 
-                        }
-                    },
-                    elements: {
-                        line: { tension: 0.3, borderWidth: 3 }, 
-                        point: { radius: 3, hoverRadius: 6 }
+                        y: { reverse: false, grid: { color: '#333' } },
+                        x: { grid: { display: false } }
                     }
                 }
             });
@@ -2253,3 +2298,61 @@
                 });
             }
         });
+
+        // === АУДИТ ЗМІН ===
+        function logChange(pName, action, actor) {
+            if (!db.logs) db.logs = [];
+            const entry = {
+                time: new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kiev' }),
+                player: pName,
+                action: action,
+                actor: actor || "Система"
+            };
+            db.logs.unshift(entry);
+            if (db.logs.length > 50) db.logs.pop(); // Зберігаємо останні 50 подій
+        }
+
+        function showLogs() {
+            if (!db.logs || db.logs.length === 0) {
+                alert("Логів поки немає.");
+                return;
+            }
+            const logText = db.logs.slice(0, 20).map(l => `[${l.time}] ${l.player}: ${l.action} (Автор: ${l.actor})`).join('\n\n');
+            alert("ОСТАННІ 20 ЗМІН:\n\n" + logText);
+        }
+
+        // === МЕНЕДЖЕР ПАРОЛІВ ===
+        function managePins() {
+            if (!isAdmin) return;
+            if (!db.pins || Object.keys(db.pins).length === 0) {
+                alert("База паролів порожня.");
+                return;
+            }
+            
+            let pinList = "Поточні PIN-коди гравців:\n\n";
+            for (let p in db.pins) {
+                pinList += `${p}: ${db.pins[p]}\n`;
+            }
+            pinList += "\nВведіть ім'я гравця, щоб ЗМІНИТИ або ВИДАЛИТИ його пароль (або натисніть Скасувати):";
+            
+            let targetPlayer = prompt(pinList);
+            if (!targetPlayer) return;
+            
+            let actualName = Object.keys(db.pins).find(p => p.toLowerCase() === targetPlayer.trim().toLowerCase());
+            
+            if (actualName) {
+                let newPin = prompt(`Введіть новий PIN для ${actualName}\n(Залиште порожнім, щоб повністю видалити пароль):`);
+                if (newPin === null) return;
+                
+                if (newPin.trim() === "") {
+                    delete db.pins[actualName];
+                    alert(`Пароль для ${actualName} ВИДАЛЕНО.`);
+                } else {
+                    db.pins[actualName] = newPin.trim();
+                    alert(`Пароль для ${actualName} змінено на: ${newPin.trim()}`);
+                }
+                save(); 
+            } else {
+                alert("Гравця з таким іменем не знайдено.");
+            }
+        }

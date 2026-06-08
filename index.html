@@ -22,6 +22,7 @@
             <button class="nav-tab" onclick="switchTab('tab-h2h', this)">Порівняння H2H</button>
             <button class="nav-tab" onclick="switchTab('tab-perf', this)">Перформанс</button>
             <button id="nav-btn-details" class="nav-tab" onclick="switchTab('tab-details', this)">Результати ГП</button>
+            <button class="nav-tab" onclick="switchTab('tab-rules', this)">Правила</button>
         </div>
 
         <div id="tab-live" class="tab-content active">
@@ -68,6 +69,10 @@
                     <button class="btn admin-only" style="background: #27ae60; border:none;" onclick="exportDB()" title="Зберегти базу на комп'ютер">Експорт</button>
                     <button class="btn admin-only" style="background: #8e44ad; border:none;" onclick="document.getElementById('file-import').click()" title="Завантажити базу">Імпорт</button>
                     <input type="file" id="file-import" style="display:none" onchange="importDB(event)" accept=".json">
+                    
+                    <button class="btn admin-only" onclick="showLogs()" style="background: #34495e; border: none;">📋 Лог змін</button>
+                    <button class="btn admin-only" onclick="managePins()" style="background: #c0392b; border: none;">🔑 Паролі</button>
+
                     <button class="btn admin-only" style="background: var(--warning); border: none;" onclick="resetStage()" title="Видалити бали за етап">Скинути етап</button>
                     <button class="btn admin-only" style="background: var(--danger); border: none;" onclick="resetSystem()" title="Повністю очистити таблицю">Скинути все</button>
                 </div>
@@ -98,7 +103,7 @@
             <div class="grid" id="main-grid"></div>
         </div>
 
-        <div id="tab-tables" class="tab-content">
+        <div id="tab-tables" class="tab-content" style="display: none;">
             <div class="tables-wrapper">
                 <div class="left-col">
                     <div class="table-header-wrap">
@@ -132,7 +137,7 @@
             </div>
         </div>
 
-        <div id="tab-h2h" class="tab-content">
+        <div id="tab-h2h" class="tab-content" style="display: none;">
             <div class="h2h-container">
                 <div class="h2h-header">
                     <select id="h2h-p1" class="h2h-select" onchange="renderH2H()"></select>
@@ -158,7 +163,7 @@
             </div>
         </div>
 
-        <div id="tab-perf" class="tab-content">
+        <div id="tab-perf" class="tab-content" style="display: none;">
             <div class="perf-container">
                 <div class="perf-sidebar">
                     <button id="selectAllBtn" onclick="toggleAllChartPlayers()">Сховати всіх</button>
@@ -174,13 +179,24 @@
             </div>
         </div>
 
-        <div id="tab-details" class="tab-content">
+        <div id="tab-details" class="tab-content" style="display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; background: var(--panel); padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #333; box-shadow: 0 5px 20px rgba(0,0,0,0.4);">
                 <h3 style="margin: 0; color: #eee; font-size: 18px;">Результати Гран-прі</h3>
                 <select id="gp-select-details" class="btn" style="background: #111; font-size: 14px;" onchange="updateDetailsTable()">
                 </select>
             </div>
             <table id="table-hist"></table>
+        </div>
+
+        <div id="tab-rules" class="tab-content" style="display: none;">
+            <div class="panel" style="max-width: 800px; margin: 0 auto; text-align: left; padding: 20px; border: 1px solid #333; border-radius: 12px; background: var(--panel);">
+                <h2 style="text-align: center; color: var(--warning); margin-bottom: 20px;">Правила Ліги Set-up Fantasy</h2>
+                <div id="rules-text" style="line-height: 1.8; color: #ccc; font-size: 15px;">
+                    <p>1. Прогнози приймаються не пізніше ніж за 30 хвилин до старту сесії.</p>
+                    <p>2. Затверджений прогноз можна змінити лише 1 раз.</p>
+                    <p>3. Формат вводу: "1 - VER" та "Швидке коло - VER".</p>
+                </div>
+            </div>
         </div>
 
     </div>

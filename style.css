@@ -212,47 +212,74 @@
         
         .tt-wrapper { position: relative; display: inline-block; cursor: help; border-bottom: 1px dashed rgba(255,255,255,0.4); padding-bottom: 1px; }
         
-        /* ДОДАНО: max-height, overflow-y та змінено pointer-events на auto для можливості скролу */
-        .tt-content { visibility: hidden; width: 250px; background-color: #1a1a20; color: #eee; text-align: left; border-radius: 8px; padding: 14px; position: absolute; z-index: 9999; bottom: 130%; left: 50%; transform: translateX(-50%) translateY(10px); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 10px 25px rgba(0,0,0,0.9); border: 1px solid #444; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 500; line-height: 1.6; letter-spacing: 0.2px; pointer-events: auto; text-shadow: none; max-height: 50vh; overflow-y: auto; }
-        
-        /* Стилізація скролбару всередині тултипу */
+        /* Базовий тултип (відкривається ВНИЗ) */
+        .tt-content { 
+            visibility: hidden; 
+            width: 250px; 
+            background-color: #1a1a20; 
+            color: #eee; 
+            text-align: left; 
+            border-radius: 8px; 
+            padding: 14px; 
+            position: absolute; 
+            z-index: 9999; 
+            top: 130%; /* Відкриття вниз */
+            bottom: auto; 
+            left: 50%; 
+            transform: translateX(-50%) translateY(-10px); /* Анімація зверху вниз */
+            opacity: 0; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.9); 
+            border: 1px solid #444; 
+            font-family: 'Segoe UI', system-ui, sans-serif; 
+            font-size: 13px; 
+            font-weight: 500; 
+            line-height: 1.6; 
+            letter-spacing: 0.2px; 
+            pointer-events: auto; 
+            text-shadow: none; 
+            max-height: 50vh; 
+            overflow-y: auto; 
+        }
+
         .tt-content::-webkit-scrollbar { width: 4px; }
         .tt-content::-webkit-scrollbar-thumb { background-color: #555; border-radius: 2px; }
-        
-        .tt-content::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #444 transparent transparent transparent; }
-        .tt-wrapper:hover .tt-content { visibility: visible; opacity: 1; transform: translateX(-50%) translateY(0); }
-        .tt-highlight { color: var(--success); font-weight: bold; }
-        
-        td:last-child .tt-content { left: auto; right: -10px; transform: translateY(10px); }
-        td:last-child .tt-content::after { left: auto; right: 20px; }
-        td:last-child .tt-wrapper:hover .tt-content { transform: translateY(0); }
 
-        /* Перевертання тултипа ВНИЗ спеціально для колонки Σ у таблиці Результатів ГП */
-        #table-hist td:last-child .tt-content { 
-            bottom: auto; 
-            top: calc(100% + 12px); /* Відкриваємо одразу під цифрами з невеликим відступом */
-            left: 50%; /* Центруємо відносно цифр */
-            right: auto; /* Жорстко перебиваємо старий зсув вправо */
-            transform: translateX(-50%) translateY(-5px); /* Зсув для анімації */
-            
-            max-height: none !important; 
-            overflow-y: visible !important;
-            pointer-events: none !important; 
+        /* Стрілочка (тепер зверху, вказує вгору) */
+        .tt-content::after { 
+            content: ""; 
+            position: absolute; 
+            bottom: 100%; 
+            top: auto; 
+            left: 50%; 
+            margin-left: -6px; 
+            border-width: 6px; 
+            border-style: solid; 
+            border-color: transparent transparent #444 transparent; 
         }
-        
-        /* Гострий кутик (стрілочка) */
-        #table-hist td:last-child .tt-content::after { 
-            top: auto;      
-            bottom: 100%;   /* Ставимо рівно над тултипом */
-            left: 50%;      /* Центруємо стрілочку */
-            right: auto;    /* Скасовуємо старий зсув стрілочки */
-            margin-left: -6px; /* Коригування по центру */
-            border-color: transparent transparent #444 transparent; /* Направляємо вістря вгору */
-        }
-        
-        /* Стан при наведенні */
-        #table-hist td:last-child .tt-wrapper:hover .tt-content { 
+
+        .tt-wrapper:hover .tt-content { 
+            visibility: visible; 
+            opacity: 1; 
             transform: translateX(-50%) translateY(0); 
+        }
+
+        .tt-highlight { color: var(--success); font-weight: bold; }
+
+        /* Захист для останньої колонки (щоб не вилазило за правий край) */
+        td:last-child .tt-content { 
+            left: auto; 
+            right: -10px; 
+            transform: translateX(0) translateY(-10px); 
+        }
+
+        td:last-child .tt-content::after { 
+            left: auto; 
+            right: 20px; 
+        }
+
+        td:last-child .tt-wrapper:hover .tt-content { 
+            transform: translateX(0) translateY(0); 
         }
 
         .toggle-wrap { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #aaa; text-transform: uppercase; font-weight: bold; }
