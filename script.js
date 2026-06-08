@@ -668,11 +668,9 @@
         }
 
         function render() {
-            // === НАДІЙНИЙ ФІКС АВТОРИЗАЦІЇ ===
             const urlParams = new URLSearchParams(window.location.search);
             const isAdmin = urlParams.get('pass') === '9123';
             const myPlayer = localStorage.getItem('f1_auth_player');
-            // ==================================
 
             const grid = document.getElementById('main-grid');
             grid.innerHTML = '';
@@ -683,12 +681,11 @@
             const isNewQualy = (sess === 'qualy' && gpIdx >= getGpIndex('Канада'));
 
             const btnRand = document.getElementById('btn-random-qualy');
-            
-            // БЛОКУВАННЯ ІНТЕРФЕЙСУ ДЛЯ НЕ-АДМІНІВ
             const realInput = document.getElementById('real-input');
+            
             if (!isAdmin) {
                 btnRand.style.display = 'none';
-                realInput.style.display = 'none'; // Приховуємо поле реальних результатів від гравців
+                realInput.style.display = 'none'; 
             } else {
                 if (isNewQualy) btnRand.style.display = 'inline-flex';
                 else btnRand.style.display = 'none';
@@ -703,7 +700,40 @@
                 realInput.style.height = realInput.scrollHeight + 'px';
             }
 
-            const timeLocked = isSessionLockedByTime(gp, sess);
+            // =========================================
+            // БЛОК ДЕДЛАЙНУ ТА ІНФОРМАЦІЙНОГО БАНЕРА
+            // =========================================
+            let deadlineMsgHTML = '';
+            let isTimeLocked = false;
+
+            if (typeof gpSchedule !== 'undefined' && gpSchedule[gp] && gpSchedule[gp][sess]) {
+                const sessionStartTime = new Date(gpSchedule[gp][sess]).getTime();
+                const deadlineTime = sessionStartTime - (30 * 60 * 1000); // 30 хвилин до старту
+                const now = new Date().getTime();
+                
+                isTimeLocked = now >= deadlineTime;
+                
+                const d = new Date(deadlineTime);
+                const timeStr = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kiev' });
+                const dateStr = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kiev' });
+                
+                if (isTimeLocked) {
+                    deadlineMsgHTML = `
+                        <div style="grid-column: 1 / -1; background: #4a0000; color: #ff9999; padding: 12px; text-align: center; border-radius: 8px; margin-bottom: 10px; font-weight: bold; border: 1px solid #ff3e3e; font-size: 14px;">
+                            ⏳ Дедлайн минув (${timeStr} ${dateStr}). Вже не можна нічого змінювати. Гарної гри!
+                        </div>`;
+                } else {
+                    deadlineMsgHTML = `
+                        <div style="grid-column: 1 / -1; background: #1a2a1a; color: #99ff99; padding: 12px; text-align: center; border-radius: 8px; margin-bottom: 10px; border: 1px solid #27ae60; font-size: 14px;">
+                            ⏰ Дедлайн прийому прогнозів: <b>${timeStr}</b> (${dateStr})
+                        </div>`;
+                }
+            }
+            
+            // Вставляємо банер зверху над усіма картками
+            grid.innerHTML = deadlineMsgHTML;
+
+            const timeLockedForUser = isTimeLocked && !isAdmin;
 
             teams.forEach(t => {
                 const teamBlock = document.createElement('div');
@@ -714,7 +744,6 @@
                     const row = document.createElement('div');
                     row.className = `player-row ${isC ? 'confirmed' : ''}`;
 
-                    // Перевірка ліміту
                     let changesCount = (db.changes && db.changes[gp] && db.changes[gp][p] && db.changes[gp][p][sess]) ? db.changes[gp][p][sess] : 0;
                     const isLockedPermanently = isC && changesCount >= 1 && !isAdmin;
 
@@ -724,7 +753,7 @@
                     let lockAction = '';
                     if (isLockedForMe) {
                         lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Авторизуватись"`;
-                    } else if (timeLocked) {
+                    } else if (timeLockedForUser) {
                         lockAction = 'readonly disabled style="background: #331a00; color: #888; cursor: not-allowed;" title="Час вийшов (менше 30 хв до старту)"';
                     } else if (isLockedPermanently) {
                         lockAction = 'readonly disabled style="background: #4a0000; color: #888; cursor: not-allowed;" title="Ліміт змін вичерпано"';
@@ -750,7 +779,7 @@
 
                     let btnCheckHTML = '';
                     if (isAdmin || myPlayer === p) {
-                        if (timeLocked) {
+                        if (timeLockedForUser) {
                             btnCheckHTML = `<button class="btn-check" style="background: #331a00; border-color: #e67e22; cursor: not-allowed;" title="Час вийшов">⏳</button>`;
                         } else if (isLockedPermanently) {
                             btnCheckHTML = `<button class="btn-check" style="background: #4a0000; border-color: #ff3e3e; cursor: not-allowed;" title="Заблоковано">🔒</button>`;
@@ -767,7 +796,7 @@
                     row.innerHTML = `
                         <div class="p-info">
                             <span class="p-name">${p}</span>
-                            <span class="p-tag">${tgHandles[p] || ''}</span>
+                            <span class="p-tag">${typeof tgHandles !== 'undefined' && tgHandles[p] ? tgHandles[p] : ''}</span>
                         </div>
                         <div class="p-input-zone">
                             ${inputHTML}
@@ -780,7 +809,8 @@
                 });
                 grid.appendChild(teamBlock);
             });
-            updateLiveBadges();
+            
+            if (typeof updateLiveBadges === 'function') updateLiveBadges();
         }
 
         function randomizeQualyDrivers() {
