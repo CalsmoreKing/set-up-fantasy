@@ -1,23 +1,28 @@
         // Час вказано за Києвом (формат ISO з часовим поясом +03:00)
         // Для спринт-вікендів додано параметр sprint
         const gpSchedule = {
-            'Монако': { qualy: '2026-06-06T15:00:00+03:00', race: '2026-06-07T15:00:00+03:00' },
-            'Барселона': { qualy: '2026-06-13T17:00:00+03:00', race: '2026-06-14T16:00:00+03:00' },
-            'Австрія': { qualy: '2026-06-27T15:00:00+03:00', race: '2026-06-28T15:00:00+03:00' },
-            'Велика Британія': { qualy: '2026-07-04T15:00:00+03:00', race: '2026-07-05T15:00:00+03:00' },
-            'Бельгія': { qualy: '2026-07-18T15:00:00+03:00', sprint: '2026-07-18T11:00:00+03:00', race: '2026-07-19T15:00:00+03:00' },
-            'Угорщина': { qualy: '2026-07-25T15:00:00+03:00', race: '2026-07-26T15:00:00+03:00' },
-            'Нідерланди': { qualy: '2026-08-22T15:00:00+03:00', race: '2026-08-23T15:00:00+03:00' },
-            'Італія': { qualy: '2026-09-05T15:00:00+03:00', race: '2026-09-06T15:00:00+03:00' },
-            'Мадрид': { qualy: '2026-09-12T15:00:00+03:00', race: '2026-09-13T15:00:00+03:00' },
-            'Азербайджан': { qualy: '2026-09-25T15:00:00+03:00', race: '2026-09-26T15:00:00+03:00' },
-            'Сінгапур': { qualy: '2026-10-10T20:00:00+03:00', race: '2026-10-11T20:00:00+03:00' },
-            'США': { qualy: '2026-10-24T15:00:00+03:00', sprint: '2026-10-24T11:00:00+03:00', race: '2026-10-25T15:00:00+03:00' },
-            'Мексика': { qualy: '2026-10-31T14:00:00+03:00', race: '2026-11-01T14:00:00+03:00' },
-            'Бразилія': { qualy: '2026-11-07T14:00:00+03:00', sprint: '2026-11-07T10:00:00+03:00', race: '2026-11-08T14:00:00+03:00' },
-            'Лас-Вегас': { qualy: '2026-11-20T20:00:00+03:00', race: '2026-11-21T20:00:00+03:00' },
-            'Катар': { qualy: '2026-11-28T19:00:00+03:00', sprint: '2026-11-28T15:00:00+03:00', race: '2026-11-29T19:00:00+03:00' },
-            'Абу-Дабі': { qualy: '2026-12-05T17:00:00+03:00', race: '2026-12-06T17:00:00+03:00' }
+            'Австралія': { qualy: '2026-03-14T05:00:00Z', race: '2026-03-15T04:00:00Z' },
+            'Китай': { qualy: '2026-04-11T07:00:00Z', race: '2026-04-12T07:00:00Z' },
+            'Японія': { qualy: '2026-04-25T06:00:00Z', race: '2026-04-26T05:00:00Z' },
+            'Маямі': { qualy: '2026-05-09T20:00:00Z', sprint: '2026-05-09T16:00:00Z', race: '2026-05-10T20:00:00Z' },
+            'Монако': { qualy: '2026-05-23T14:00:00Z', race: '2026-05-24T13:00:00Z' },
+            'Канада': { qualy: '2026-06-06T20:00:00Z', race: '2026-06-07T18:00:00Z' },
+            'Барселона': { qualy: '2026-06-13T13:00:00Z', race: '2026-06-14T13:00:00Z' },
+            'Австрія': { qualy: '2026-06-27T14:00:00Z', race: '2026-06-28T13:00:00Z' },
+            'Британія': { qualy: '2026-07-04T14:00:00Z', race: '2026-07-05T14:00:00Z' },
+            'Бельгія': { qualy: '2026-07-18T14:00:00Z', race: '2026-07-19T13:00:00Z' },
+            'Угорщина': { qualy: '2026-07-25T14:00:00Z', race: '2026-07-26T13:00:00Z' },
+            'Нідерланди': { qualy: '2026-08-22T13:00:00Z', race: '2026-08-23T13:00:00Z' },
+            'Італія': { qualy: '2026-09-05T14:00:00Z', race: '2026-09-06T13:00:00Z' },
+            'Мадрид': { qualy: '2026-09-12T14:00:00Z', race: '2026-09-13T13:00:00Z' },
+            'Азербайджан': { qualy: '2026-09-26T12:00:00Z', race: '2026-09-27T11:00:00Z' },
+            'Сінгапур': { qualy: '2026-10-10T13:00:00Z', race: '2026-10-11T12:00:00Z' },
+            'Остін': { qualy: '2026-10-24T22:00:00Z', sprint: '2026-10-24T18:00:00Z', race: '2026-10-25T19:00:00Z' },
+            'Мексика': { qualy: '2026-10-31T21:00:00Z', race: '2026-11-01T20:00:00Z' },
+            'Бразилія': { qualy: '2026-11-07T18:00:00Z', sprint: '2026-11-07T14:00:00Z', race: '2026-11-08T17:00:00Z' },
+            'Лас Вегас': { qualy: '2026-11-21T06:00:00Z', race: '2026-11-22T06:00:00Z' },
+            'Катар': { qualy: '2026-11-28T17:00:00Z', sprint: '2026-11-28T13:00:00Z', race: '2026-11-29T17:00:00Z' },
+            'ОАЕ': { qualy: '2026-12-05T14:00:00Z', race: '2026-12-06T13:00:00Z' }
         };
         
         function isSessionLockedByTime(gpName, currentSession) {
@@ -41,21 +46,27 @@
                 const gpName = opt.value;
                 const schedule = gpSchedule[gpName];
                 
-                if (schedule && schedule.race) {
+                let isCompleted = false;
+                
+                // Етап вважається завершеним, якщо ти його перерахував, або якщо його реальний час давно минув
+                if (db.completedGPs && db.completedGPs[gpName]) {
+                    isCompleted = true;
+                } else if (schedule && schedule.race) {
                     const raceTime = new Date(schedule.race).getTime();
-                    if (raceTime < now) {
-                        opt.text = `✅ ${gpName}`; // Завершено
-                    } else if (!foundCurrent) {
-                        opt.text = `🟡 ${gpName}`; // Актуальний
-                        currentGPValue = gpName;
-                        foundCurrent = true;
-                    } else {
-                        opt.text = gpName; // Майбутній
-                    }
+                    if (raceTime < now) isCompleted = true;
+                }
+
+                if (isCompleted) {
+                    opt.text = `✅ ${gpName}`; 
+                } else if (!foundCurrent) {
+                    opt.text = `🟡 ${gpName}`; 
+                    currentGPValue = gpName;
+                    foundCurrent = true;
+                } else {
+                    opt.text = gpName; 
                 }
             });
 
-            // Автовибір поточного етапу при першому завантаженні (якщо ми ще не клацали самі)
             if (currentGPValue && !window.gpAutoSelected) {
                 select.value = currentGPValue;
                 window.gpAutoSelected = true;
@@ -714,8 +725,9 @@
                 isTimeLocked = now >= deadlineTime;
                 
                 const d = new Date(deadlineTime);
-                const timeStr = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kiev' });
-                const dateStr = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kiev' });
+                // Браузер сам визначить, звідки гравець, і покаже його місцевий час без примусового timeZone
+                const timeStr = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+                const dateStr = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
                 
                 if (isTimeLocked) {
                     deadlineMsgHTML = `
@@ -1355,7 +1367,7 @@
             } 
         }
 
-        function calculateAll() {
+        async function calculateAll() {
             const gp = document.getElementById('gp-select').value;
             const gpIdx = getGpIndex(gp);
             const isNewQualy = (sess === 'qualy' && gpIdx >= getGpIndex('Канада'));
@@ -1505,7 +1517,12 @@
                 db.hist[gp][p].bd[sessKey] = breakdownStr.join('<br>');
             }));
 
-            save(); render(); updateTables(); renderH2H(); updateChartData(); updateDetailsTable();
+            if (!db.completedGPs) db.completedGPs = {};
+            db.completedGPs[gp] = true; 
+            if (typeof updateGPDropdown === 'function') updateGPDropdown(); 
+
+            await save(); 
+            render(); updateTables(); renderH2H(); updateChartData(); updateDetailsTable();
             
             let sessName = sess === 'qualy' ? 'Кваліфікацію' : sess === 'sprint' ? 'Спринт' : 'Гонку';
             alert(`${sessName} успішно перераховано! Бали перезаписано без подвоєння.`);
