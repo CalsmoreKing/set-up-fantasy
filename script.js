@@ -135,7 +135,7 @@
             'aston': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg',
             'alpine': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg',
             'alfaromeo': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg',
-            'rbr': 'data:image/svg+xml;utf8,<svg viewBox="0 0 500 500" fill="%23FFFFFF" xmlns="http://www.w3.org/2000/svg"><path d="M250,20 C123.5,20 20,123.5 20,250 C20,376.5 123.5,480 250,480 C376.5,480 480,376.5 480,250 C480,123.5 376.5,20 250,20 Z M250,50 C360.5,50 450,139.5 450,250 C450,360.5 360.5,450 250,450 C139.5,450 50,360.5 50,250 C50,139.5 139.5,50 250,50 Z M208.5,130.5 L125.5,365.5 L174,365.5 L192.5,310.5 L307.5,310.5 L326,365.5 L374.5,365.5 L291.5,130.5 L208.5,130.5 Z M250,185 L293.5,274.5 L206.5,274.5 L250,185 Z M120,210 L120,250 L380,250 L380,210 L120,210 Z"/></svg>'
+            'rbr': 'https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg'
         };
 
         const getGpIndex = (gpName) => {
@@ -2369,37 +2369,51 @@
         }
 
         // === МЕНЕДЖЕР ПАРОЛІВ ===
-        function managePins() {
-            if (!isAdmin) return;
-            if (!db.pins || Object.keys(db.pins).length === 0) {
-                alert("База паролів порожня.");
-                return;
-            }
-            
-            let pinList = "Поточні PIN-коди гравців:\n\n";
-            for (let p in db.pins) {
-                pinList += `${p}: ${db.pins[p]}\n`;
-            }
-            pinList += "\nВведіть ім'я гравця, щоб ЗМІНИТИ або ВИДАЛИТИ його пароль (або натисніть Скасувати):";
-            
-            let targetPlayer = prompt(pinList);
-            if (!targetPlayer) return;
-            
-            let actualName = Object.keys(db.pins).find(p => p.toLowerCase() === targetPlayer.trim().toLowerCase());
-            
-            if (actualName) {
-                let newPin = prompt(`Введіть новий PIN для ${actualName}\n(Залиште порожнім, щоб повністю видалити пароль):`);
-                if (newPin === null) return;
-                
-                if (newPin.trim() === "") {
-                    delete db.pins[actualName];
-                    alert(`Пароль для ${actualName} ВИДАЛЕНО.`);
-                } else {
-                    db.pins[actualName] = newPin.trim();
-                    alert(`Пароль для ${actualName} змінено на: ${newPin.trim()}`);
-                }
-                save(); 
-            } else {
-                alert("Гравця з таким іменем не знайдено.");
-            }
+async function managePins() {
+    if (!isAdmin) return;
+    if (!db.pins) db.pins = {};
+    
+    let pinList = "Поточні PIN-коди гравців:\n\n";
+    const allPlayers = teams.flatMap(t => t.p);
+    
+    // Показуємо усіх гравців бази, навіть без паролів
+    allPlayers.forEach(p => {
+        pinList += `${p}: ${db.pins[p] || '--- (немає)'}\n`;
+    });
+    
+    pinList += "\nВведіть ім'я гравця, щоб ЗМІНИТИ або ВИДАЛИТИ його пароль:";
+    
+    let targetPlayer = prompt(pinList);
+    if (!targetPlayer) return;
+    
+    let actualName = allPlayers.find(p => p.toLowerCase() === targetPlayer.trim().toLowerCase());
+    
+    if (actualName) {
+        let newPin = prompt(`Введіть новий PIN для ${actualName}\n(Залиште порожнім, щоб повністю видалити пароль):`);
+        if (newPin === null) return;
+        
+        if (newPin.trim() === "") {
+            delete db.pins[actualName];
+            alert(`Пароль для ${actualName} ВИДАЛЕНО.`);
+        } else {
+            db.pins[actualName] = newPin.trim();
+            alert(`Пароль для ${actualName} змінено на: ${newPin.trim()}`);
         }
+        
+        // Прямий запис у хмару в обхід функції save(), щоб уникнути затирання
+        try {
+            const { error } = await supabaseClient.from('f1_data').upsert([
+                { id: 'main_db', data: db }
+            ]);
+            if (error) throw error;
+            
+            localStorage.setItem('f1_v14_db', JSON.stringify(db));
+            console.log(`[АДМІН] Паролі успішно оновлено напряму в Supabase.`);
+        } catch (err) {
+            console.error("Помилка збереження паролів:", err);
+            alert("Помилка при записі в базу. Перевірте консоль.");
+        }
+    } else {
+        alert("Гравця з таким іменем не знайдено.");
+    }
+}

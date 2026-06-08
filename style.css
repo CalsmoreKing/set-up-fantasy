@@ -208,7 +208,7 @@
         tr.row-aston td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg'); width: 170px; height: 190px; top: 55%; transform: translateY(-50%) rotate(-5deg); opacity: 0.20; }
         tr.row-alpine td.logo-cell::before { background-image: url('https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg'); width: 150px; height: 150px; top: 100%; transform: translateY(-50%) rotate(-5deg); opacity: 0.18; }
         tr.row-alfaromeo td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg'); width: 130px; height: 130px; top: 58%; transform: translateY(-30%) rotate(-5deg); opacity: 0.20; }
-        tr.row-rbr td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/redbull.svg'); width: 180px; height: 180px; top: 30%; transform: translateY(calc(-50% - 2px)) rotate(-5deg); opacity: 0.20; }
+        tr.row-rbr td.logo-cell::before { background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg'); width: 180px; height: 180px; top: 50%; transform: translateY(calc(-50% - 2px)) rotate(-5deg); opacity: 0.20; }
         
         .tt-wrapper { position: relative; display: inline-block; cursor: help; border-bottom: 1px dashed rgba(255,255,255,0.4); padding-bottom: 1px; }
         
