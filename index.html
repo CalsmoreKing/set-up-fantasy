@@ -72,6 +72,8 @@
                     
                     <button class="btn admin-only" onclick="showLogs()" style="background: #34495e; border: none;">📋 Лог змін</button>
                     <button class="btn admin-only" onclick="managePins()" style="background: #c0392b; border: none;">🔑 Паролі</button>
+                    <button class="btn admin-only" onclick="unlockPlayerChanges()" style="background: #d35400; border: none;">🔓 Розблокувати гравця</button>
+
 
                     <button class="btn admin-only" style="background: var(--warning); border: none;" onclick="resetStage()" title="Видалити бали за етап">Скинути етап</button>
                     <button class="btn admin-only" style="background: var(--danger); border: none;" onclick="resetSystem()" title="Повністю очистити таблицю">Скинути все</button>
@@ -137,7 +139,7 @@
             </div>
         </div>
 
-        <div id="tab-h2h" class="tab-content">
+        <div id="tab-h2h" class="tab-content" style="display: none;">
             <div class="h2h-container">
                 <div class="h2h-header">
                     <select id="h2h-p1" class="h2h-select" onchange="renderH2H()"></select>
@@ -150,9 +152,9 @@
                     <select id="h2h-p2" class="h2h-select" onchange="renderH2H()"></select>
                 </div>
                 
-                <div style="display: flex; gap: 30px; align-items: center; justify-content: center; flex-wrap: wrap;">
-                    <div id="h2h-bars" style="flex: 1; min-width: 400px; max-width: 800px;"></div>
-                    <div style="width: 350px; height: 350px;">
+                <div class="h2h-main-row">
+                    <div id="h2h-bars" class="h2h-bars-wrap"></div>
+                    <div class="h2h-radar-wrap">
                         <canvas id="h2hRadar"></canvas>
                     </div>
                 </div>
@@ -211,7 +213,7 @@
                         </thead>
                         <tbody>
                             <tr>
-                                <td style="padding: 15px; border-bottom: 1px solid #333; color: var(--warning); font-weight: bold;">Кваліфікація</td>
+                                <td style="padding: 15px; border-bottom: 1px solid #333; color: var(--warning); font-weight: bold;">Кваліфікація (Рулетка)</td>
                                 <td style="padding: 15px; border-bottom: 1px solid #333;">Спрогнозувати точне місце свого унікального персонального гонщика за чистими результатами.</td>
                                 <td style="padding: 15px; border-bottom: 1px solid #333;">Точне влучання: <strong style="color: var(--success);">5 балів</strong>.<br>Похибка +/- 1 позиція: <strong style="color: var(--success);">2 бали</strong>.</td>
                             </tr>

@@ -441,7 +441,6 @@
 
         // === РОЗУМНЕ ЗБЕРЕЖЕННЯ З БЛОКУВАННЯМ ПОТОКІВ ===
         async function save() {
-            // Якщо збереження вже йде, ставимо наступне в чергу і скасовуємо паралельний запуск
             if (isSaving) {
                 pendingSave = true;
                 console.log("⏳ Збереження вже йде. Запит поставлено в чергу...");
@@ -456,12 +455,10 @@
                 return;
             }
 
-            try {
-                // Фіксуємо поточні мітки і одразу очищаємо глобальний об'єкт.
-                // Це гарантує, що якщо ти введеш щось НОВЕ під час збереження, воно не загубиться.
-                let activeDirty = { ...dirtyFields };
-                dirtyFields = {};
+            let activeDirty = { ...dirtyFields };
+            dirtyFields = {};
 
+            try {
                 const { data, error } = await supabaseClient.from('f1_data').select('*');
                 if (error) throw error;
 
@@ -470,7 +467,6 @@
 
                 if (!db.pins) db.pins = {};
 
-                // Правильне злиття лічильників змін (пріоритет максимального значення)
                 if (!db.changes) db.changes = {};
                 if (cloudMain.changes) {
                     for (let gpKey in cloudMain.changes) {
@@ -479,7 +475,6 @@
                             if (!db.changes[gpKey][pName]) {
                                 db.changes[gpKey][pName] = cloudMain.changes[gpKey][pName];
                             } else {
-                                // Беремо максимальне значення між локальним і хмарним
                                 for (let sKey in cloudMain.changes[gpKey][pName]) {
                                     let cVal = cloudMain.changes[gpKey][pName][sKey] || 0;
                                     let lVal = db.changes[gpKey][pName][sKey] || 0;
@@ -512,7 +507,6 @@
 
                         const allPlayers = teams.flatMap(t => t.p);
                         allPlayers.forEach(pName => {
-                            // Використовуємо activeDirty, щоб перевірити, чи міняли ми це поле щойно
                             if (pName !== myPlayer && !activeDirty[`${gpKey}_${s}_p_${pName}`]) {
                                 if (cP[pName] !== undefined && cP[pName] !== null) lP[pName] = cP[pName];
                             }
@@ -538,12 +532,11 @@
                 console.log("✅ 4. УСПІХ! Дані зафіксовано в хмарі.");
 
             } catch(err) { 
-                console.error("❌ Помилка збереження:", err); 
+                console.error("❌ Помилка збереження. Зміни відновлено в чергу.", err); 
+                // Відновлюємо зміни, щоб вони не зникли при оновленні сторінки
+                Object.assign(dirtyFields, activeDirty);
             } finally {
-                // Знімаємо блокування
                 isSaving = false;
-                
-                // Якщо за час збереження накопичилися нові зміни - запускаємо процес ще раз
                 if (pendingSave) {
                     pendingSave = false;
                     console.log("🔄 Запуск відкладеного збереження з черги...");
@@ -827,6 +820,11 @@
                     `;
                     teamBlock.appendChild(row);
                 });
+
+                // Перевірка чи обидва гравці команди затвердили
+                if (t.p.every(p => tmp[sess].c[p])) {
+                    teamBlock.classList.add('team-confirmed');
+                }
                 grid.appendChild(teamBlock);
             });
             
@@ -1045,13 +1043,60 @@
             Object.entries(aliases).forEach(([alias, real]) => pMap.push({ s: alias, r: real }));
             pMap.sort((a,b) => b.s.length - a.s.length);
 
-            let currentMatchedPlayer = null;
-            let parsedData = {};
-
             const lines = text.split('\n');
             const gp = document.getElementById('gp-select').value; 
             const gpIdx = getGpIndex(gp);
             const isNewQualy = (sess === 'qualy' && gpIdx >= getGpIndex('Канада'));
+
+            let importedCount = 0;
+            const allPlayers = teams.flatMap(t => t.p);
+
+            // ШВИДКИЙ ПАРСИНГ ДЛЯ НОВОЇ КВАЛІФІКАЦІЇ ("Ім'я - Пілот - Місце" або "Пілот - Місце")
+            if (isNewQualy) {
+                lines.forEach(line => {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine === '') return;
+
+                    const regex = /(?:([А-ЯІЄЇa-яієїA-Za-z0-9_]+)\s*-\s*)?([A-ZА-ЯІЄЇ]{3})\s*-\s*(\d{1,2})/i;
+                    const match = trimmedLine.match(regex);
+                    
+                    if (match) {
+                        let nameRaw = match[1];
+                        let dCode = match[2].toUpperCase();
+                        let pos = match[3];
+                        let targetPlayer = null;
+
+                        if (nameRaw) {
+                            targetPlayer = allPlayers.find(p => p.toLowerCase() === nameRaw.toLowerCase());
+                        } else {
+                            targetPlayer = Object.keys(db.qDrivers[gp] || {}).find(p => db.qDrivers[gp][p] === dCode);
+                        }
+
+                        if (targetPlayer) {
+                            tmp[sess].p[targetPlayer] = pos;
+                            tmp[sess].c[targetPlayer] = false;
+                            dirtyFields[`${gp}_${sess}_p_${targetPlayer}`] = true;
+                            dirtyFields[`${gp}_${sess}_c_${targetPlayer}`] = true;
+                            importedCount++;
+                        } else {
+                            console.error(`Імпорт Кваліфікації: Не знайдено гравця для рядка "${trimmedLine}"`);
+                        }
+                    }
+                });
+
+                save(); render();
+                if (importedCount > 0) {
+                    alert(`Успішно імпортовано кваліфікацію для ${importedCount} гравців!`);
+                    document.getElementById('bulk-import').value = ""; 
+                } else {
+                    alert("Жодного формату 'Пілот - Місце' не розпізнано.");
+                }
+                return; // Зупиняємо функцію, щоб не виконувати старий код
+            }
+
+            // СТАРА ЛОГІКА ДЛЯ ГОНОК ТА СПРИНТІВ
+            let currentMatchedPlayer = null;
+            let parsedData = {};
 
             lines.forEach(line => {
                 const trimmedLine = line.trim();
@@ -1080,13 +1125,13 @@
                     const isPrediction = /^(?:\d|Швид|Найшвид|Коло|FL|Q|Квалі)/i.test(trimmedLine);
                     
                     if (!isPrediction && currentMatchedPlayer) {
-                        let userInput = prompt(`⚠️ Перевірка рядка:\n"${trimmedLine}"\n\n(Зараз записуємо для: ${currentMatchedPlayer})\n\nЩо з цим робити?\n• Якщо це коментар гравця — натисніть "ОК" (пусте поле).\n• Якщо це гравець з помилкою в імені — напишіть його правильне ім'я.\n• Якщо це неактивний гравець — натисніть "Скасувати".`);
+                        let userInput = prompt(`⚠️ Перевірка рядка:\n"${trimmedLine}"\n\n(Зараз записуємо для: ${currentMatchedPlayer})\n\nЩо з цим робити?\n• Якщо це коментар — натисніть "ОК" (пусте поле).\n• Якщо помилка в імені — напишіть правильне.\n• Натисніть "Скасувати", щоб пропустити цей рядок.`);
                         
                         if (userInput === null) {
-                            currentMatchedPlayer = null;
+                            return; // Скасування конкретного рядка
                         } else if (userInput.trim() !== '') {
                             const typedName = userInput.trim().toLowerCase();
-                            const matchedName = teams.flatMap(t => t.p).find(n => n.toLowerCase() === typedName);
+                            const matchedName = allPlayers.find(n => n.toLowerCase() === typedName);
                             if (matchedName) {
                                 currentMatchedPlayer = matchedName;
                                 if (!parsedData[matchedName]) parsedData[matchedName] = [];
@@ -1098,11 +1143,13 @@
                             parsedData[currentMatchedPlayer].push(trimmedLine);
                         }
                     } else if (!isPrediction && !currentMatchedPlayer) {
-                        let userInput = prompt(`⚠️ Нерозпізнаний текст або неактивний гравець:\n"${trimmedLine}"\n\nКому призначити цей блок?\n• Введіть ім'я з бази, щоб зарахувати.\n• Натисніть "Скасувати", щоб пропустити цей текст.`);
+                        let userInput = prompt(`⚠️ Нерозпізнаний текст:\n"${trimmedLine}"\n\nВведіть ім'я з бази або натисніть "Скасувати", щоб пропустити.`);
                         
-                        if (userInput && userInput.trim() !== '') {
+                        if (userInput === null) {
+                            return; // Скасування
+                        } else if (userInput.trim() !== '') {
                             const typedName = userInput.trim().toLowerCase();
-                            const matchedName = teams.flatMap(t => t.p).find(n => n.toLowerCase() === typedName);
+                            const matchedName = allPlayers.find(n => n.toLowerCase() === typedName);
                             if (matchedName) {
                                 currentMatchedPlayer = matchedName;
                                 if (!parsedData[matchedName]) parsedData[matchedName] = [];
@@ -1117,38 +1164,28 @@
                 }
             });
 
-            let importedCount = 0;
             Object.keys(parsedData).forEach(name => {
                 let content = parsedData[name].join('\n').trim();
                 if (content.length > 0) {
-                    
-                    // Застосовуємо логіку форматування з autoFormat
                     let cleanPreds = "";
                     const linesToProcess = content.split('\n');
                     linesToProcess.forEach(line => {
                         let val = line.trim().toUpperCase();
                         if (val === '') return;
                         
-                        const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-Я]{3})$/i);
-                        const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-Я]{3})$/i);
+                        const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-ЯІЄЇ]{3})$/i);
+                        const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-ЯІЄЇ]{3})$/i);
 
                         if (flMatch) {
                             tmp[sess].fl[name] = flMatch[1];
                         } else if (posMatch) {
                             cleanPreds += `${posMatch[1]} - ${posMatch[2]}\n`;
-                        } else if(isNewQualy){
-                            let numMatch = val.match(/(\d+)/);
-                            if(numMatch) tmp[sess].p[name] = numMatch[1];
                         } else {
-                            // Якщо формат не розпізнано, додаємо як є (можливо, потребує ручного втручання)
                             cleanPreds += val + '\n';
                         }
                     });
 
-                    if(!isNewQualy) {
-                        tmp[sess].p[name] = cleanPreds.trim();
-                    }
-                    
+                    tmp[sess].p[name] = cleanPreds.trim();
                     tmp[sess].c[name] = false; 
                     
                     dirtyFields[`${gp}_${sess}_p_${name}`] = true;
@@ -1525,9 +1562,11 @@
                 db.hist[gp][p].bd[sessKey] = breakdownStr.join('<br>');
             }));
 
-            if (!db.completedGPs) db.completedGPs = {};
-            db.completedGPs[gp] = true; 
-            if (typeof updateGPDropdown === 'function') updateGPDropdown(); 
+            if (sess === 'race') {
+                if (!db.completedGPs) db.completedGPs = {};
+                db.completedGPs[gp] = true; 
+                if (typeof updateGPDropdown === 'function') updateGPDropdown(); 
+            }
 
             await save(); 
             render(); updateTables(); renderH2H(); updateChartData(); updateDetailsTable();
@@ -1755,6 +1794,15 @@
                     else if (diff < 0) trend = `<span class="down">▼ <span style="font-size: 10px;">${Math.abs(diff)}</span></span>`;
                 }
 
+                // === РОЗРАХУНОК ЗАРОБЛЕНИХ БАЛІВ ЗА ПОТОЧНИЙ ЕТАП ===
+                let currentGp = document.getElementById('gp-select').value;
+                let currentGpDelta = 0;
+                if (db.hist[currentGp] && db.hist[currentGp][name]) {
+                    currentGpDelta = db.hist[currentGp][name].q + db.hist[currentGp][name].s + db.hist[currentGp][name].r;
+                }
+                let deltaStr = currentGpDelta > 0 ? `<span style="font-size:11px; color:var(--success); margin-left:6px; font-weight:bold;">+${currentGpDelta}</span>` : 
+                               (currentGpDelta < 0 ? `<span style="font-size:11px; color:var(--danger); margin-left:6px; font-weight:bold;">${currentGpDelta}</span>` : '');
+
                 let trHTML = `
                     <tr class="${pTeam ? 'row-' + pTeam.id : ''}">
                         <td>${idx+1}</td>
@@ -1765,7 +1813,7 @@
                             </div>
                         </td>
                         <td>
-                            ${d.pts}
+                            ${d.pts} ${deltaStr}
                             <button class="adj-btn" onclick="promptAdjustPts('${name}')">±</button>
                         </td>`;
                 
@@ -1906,27 +1954,23 @@
             let playedCount = 0;
             
             let allGPs = Array.from(document.getElementById('gp-select').options).map(o => o.value);
-            let r1Data = [];
-            let r2Data = [];
+            let r1Data = []; let r2Data = [];
 
             allGPs.forEach(gp => {
                 let pts1 = 0, pts2 = 0;
                 let played = db.hist[gp] !== undefined;
-
                 if (played) {
                     playedCount++;
                     if (db.hist[gp][p1]) {
                         let h = db.hist[gp][p1];
                         pts1 = h.q + h.s + h.r + (h.b || 0); 
-                        s1.q += h.q; s1.s += h.s; s1.r += h.r;
-                        s1.total += pts1;
+                        s1.q += h.q; s1.s += h.s; s1.r += h.r; s1.total += pts1;
                         if (pts1 > s1.best) s1.best = pts1;
                     }
                     if (db.hist[gp][p2]) {
                         let h = db.hist[gp][p2];
                         pts2 = h.q + h.s + h.r + (h.b || 0); 
-                        s2.q += h.q; s2.s += h.s; s2.r += h.r;
-                        s2.total += pts2;
+                        s2.q += h.q; s2.s += h.s; s2.r += h.r; s2.total += pts2;
                         if (pts2 > s2.best) s2.best = pts2;
                     }
                     if (pts1 > 0 || pts2 > 0) {
@@ -1934,7 +1978,6 @@
                         else if (pts2 > pts1) s2.wins++;
                     }
                 }
-
                 r1Data.push({ pts: pts1, played: played });
                 r2Data.push({ pts: pts2, played: played });
             });
@@ -1942,40 +1985,55 @@
             let avg1 = playedCount > 0 ? parseFloat((s1.total / playedCount).toFixed(1)) : 0;
             let avg2 = playedCount > 0 ? parseFloat((s2.total / playedCount).toFixed(1)) : 0;
 
-            // Вбудована функція з градієнтами та виділенням лідера
-            const makeBar = (label, v1, v2, c1, c2) => {
-                let total = v1 + v2;
-                let w1 = total > 0 ? (v1 / total) * 100 : 50;
-                let w2 = total > 0 ? (v2 / total) * 100 : 50;
+            // Вбудована функція з фіксованим центром
+            const makeBar = (label, v1, v2, c1, c2, isFloat = false) => {
+                let val1 = isFloat ? parseFloat(v1) : parseInt(v1);
+                let val2 = isFloat ? parseFloat(v2) : parseInt(v2);
+                let maxVal = Math.max(val1, val2);
                 
-                // Логіка виділення лідера
-                let fw1 = v1 > v2 ? '900' : '500';
-                let fs1 = v1 > v2 ? '22px' : '15px';
-                let op1 = v1 > v2 ? '1' : '0.6';
-                let ts1 = v1 > v2 ? `0 0 10px ${c1}80` : 'none';
+                // 100% для лідера, пропорційно для іншого
+                let w1 = maxVal > 0 ? (val1 / maxVal) * 100 : 0;
+                let w2 = maxVal > 0 ? (val2 / maxVal) * 100 : 0;
+                
+                let isV1Win = val1 >= val2;
+                let isV2Win = val2 >= val1;
 
-                let fw2 = v2 > v1 ? '900' : '500';
-                let fs2 = v2 > v1 ? '22px' : '15px';
-                let op2 = v2 > v1 ? '1' : '0.6';
-                let ts2 = v2 > v1 ? `0 0 10px ${c2}80` : 'none';
+                let fw1 = isV1Win ? '900' : '500';
+                let fs1 = isV1Win ? '24px' : '16px'; 
+                let op1 = isV1Win ? '1' : '0.6';
+
+                let fw2 = isV2Win ? '900' : '500';
+                let fs2 = isV2Win ? '24px' : '16px';
+                let op2 = isV2Win ? '1' : '0.6';
 
                 return `
-                <div style="margin-bottom: 20px; width: 100%;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px; color: #ccc;">
-                        <span style="color:${c1}; font-weight:${fw1}; font-size:${fs1}; opacity:${op1}; text-shadow:${ts1}; transition: all 0.3s ease;">${v1}</span>
-                        <span style="text-transform:uppercase; letter-spacing: 1px; font-size: 13px; color: #aaa; padding-bottom: 2px;">${label}</span>
-                        <span style="color:${c2}; font-weight:${fw2}; font-size:${fs2}; opacity:${op2}; text-shadow:${ts2}; transition: all 0.3s ease;">${v2}</span>
+                <div style="margin-bottom: 25px; width: 100%;">
+                    <div style="text-align: center; text-transform: uppercase; letter-spacing: 1px; font-size: 13px; color: #aaa; margin-bottom: 5px;">${label}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px;">
+                        <div style="text-align: left; flex: 1;">
+                            <div style="color:${c1}; font-size:11px; font-weight:bold; margin-bottom:2px; text-transform:uppercase;">${p1}</div>
+                            <span style="color:${c1}; font-weight:${fw1}; font-size:${fs1}; opacity:${op1}; transition: all 0.3s ease;">${v1}</span>
+                        </div>
+                        <div style="text-align: right; flex: 1;">
+                            <div style="color:${c2}; font-size:11px; font-weight:bold; margin-bottom:2px; text-transform:uppercase;">${p2}</div>
+                            <span style="color:${c2}; font-weight:${fw2}; font-size:${fs2}; opacity:${op2}; transition: all 0.3s ease;">${v2}</span>
+                        </div>
                     </div>
+                    
                     <div style="display: flex; width: 100%; height: 12px; border-radius: 6px; overflow: hidden; background: #1a1a20; box-shadow: inset 0 1px 4px rgba(0,0,0,0.6);">
-                        <div class="bar-fill" data-w="${w1}%" style="width: 0%; background: linear-gradient(90deg, #111, ${c1}); box-shadow: 0 0 15px ${c1}40; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
-                        <div class="bar-fill" data-w="${w2}%" style="width: 0%; background: linear-gradient(270deg, #111, ${c2}); box-shadow: 0 0 15px ${c2}40; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                        <div style="width: 50%; display: flex; justify-content: flex-end;">
+                            <div class="bar-fill" data-w="${w1}%" style="width: 0%; background-image: linear-gradient(270deg, ${c1}, transparent); box-shadow: 0 0 15px ${c1}50; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
+                        </div>
+                        <div style="width: 2px; background: #444; z-index: 2;"></div> <div style="width: 50%; display: flex; justify-content: flex-start;">
+                            <div class="bar-fill" data-w="${w2}%" style="width: 0%; background-image: linear-gradient(90deg, ${c2}, transparent); box-shadow: 0 0 15px ${c2}50; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
+                        </div>
                     </div>
                 </div>`;
             };
 
             let barsHTML = `<div style="display: flex; flex-direction: column; width: 100%;">`;
             barsHTML += makeBar("Загалом балів", s1.total, s2.total, col1, col2);
-            barsHTML += makeBar("Середній бал", avg1, avg2, col1, col2);
+            barsHTML += makeBar("Середній бал", avg1, avg2, col1, col2, true);
             barsHTML += makeBar("Кваліфікації", s1.q, s2.q, col1, col2);
             barsHTML += makeBar("Гонки", s1.r, s2.r, col1, col2);
             barsHTML += makeBar("Спринти", s1.s, s2.s, col1, col2);
@@ -1983,75 +2041,53 @@
             barsHTML += makeBar("Рекорд балів", s1.best, s2.best, col1, col2);
             barsHTML += `</div>`;
             
-            // Переконаємося, що HTML-структура дозволяє гнучко розподілити простір
             let layoutHTML = `
                 <div style="display: flex; gap: 40px; align-items: center; justify-content: center; flex-wrap: wrap; flex: 1;">
                     <div id="h2h-bars-inner" style="flex: 1; min-width: 400px; max-width: 800px;">
                         ${barsHTML}
                     </div>
-                    <div style="width: 450px; height: 450px; display: flex; justify-content: center; align-items: center;">
-                        <canvas id="h2hRadar"></canvas>
+                    <div style="width: 450px; height: 450px; display: flex; justify-content: center; align-items: center; order: 2;"> <canvas id="h2hRadar"></canvas>
                     </div>
                 </div>
             `;
 
-            // Записуємо згенерований блок замість старого. 
-            // Зверни увагу: переконайся, що у твоєму index.html у блоці H2H 
-            // замість двох окремих div-ів стоїть один <div id="h2h-bars"></div> куди ми це вставимо.
-            let h2hBarsContainer = document.getElementById('h2h-bars');
-            if(h2hBarsContainer) {
-                h2hBarsContainer.innerHTML = layoutHTML;
-            }
+            document.getElementById('h2h-bars').innerHTML = layoutHTML;
 
             setTimeout(() => {
                 document.querySelectorAll('.bar-fill').forEach(el => {
                     el.style.width = el.getAttribute('data-w');
                 });
-            }, 50);
+            }, 100);
 
-            if (typeof h2hRadarChartInst !== 'undefined' && h2hRadarChartInst) h2hRadarChartInst.destroy();
+            if (window.h2hRadarChartInst) window.h2hRadarChartInst.destroy();
             const ctxR = document.getElementById('h2hRadar').getContext('2d');
             
+            // Радар: Нормалізація до 100%, де 100% - це кращий результат між двома
             let maxQ = Math.max(s1.q, s2.q) || 1;
             let maxS = Math.max(s1.s, s2.s) || 1;
             let maxR = Math.max(s1.r, s2.r) || 1;
             let maxWins = Math.max(s1.wins, s2.wins) || 1;
             let maxAvg = Math.max(avg1, avg2) || 1;
 
-            // Робимо Chart глобальною змінною, якщо вона ще не була
             window.h2hRadarChartInst = new Chart(ctxR, {
                 type: 'radar',
                 data: {
                     labels: ['Кваліфікація', 'Спринт', 'Гонка', 'Середній бал', 'Перемоги в дуелях'],
                     datasets: [
-                        {
-                            label: p1,
-                            data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (avg1/maxAvg)*100, (s1.wins/maxWins)*100],
-                            backgroundColor: col1 + '40', 
-                            borderColor: col1,
-                            pointBackgroundColor: col1,
-                            borderWidth: 2
-                        },
-                        {
-                            label: p2,
-                            data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (avg2/maxAvg)*100, (s2.wins/maxWins)*100],
-                            backgroundColor: col2 + '40',
-                            borderColor: col2,
-                            pointBackgroundColor: col2,
-                            borderWidth: 2
-                        }
+                        { label: p1, data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (avg1/maxAvg)*100, (s1.wins/maxWins)*100], backgroundColor: col1 + '50', borderColor: col1, borderWidth: 2 },
+                        { label: p2, data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (avg2/maxAvg)*100, (s2.wins/maxWins)*100], backgroundColor: col2 + '50', borderColor: col2, borderWidth: 2 }
                     ]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { display: false }, tooltip: { enabled: false } }, 
                     scales: {
                         r: {
+                            min: 0, max: 100, // Фіксує шкалу, щоб різниця виглядала адекватно відносно максимуму
                             angleLines: { color: '#333' },
                             grid: { color: '#444' },
-                            pointLabels: { color: '#ddd', font: { size: 12, weight: 'bold' } }, // Збільшено шрифт підписів радару
-                            ticks: { display: false, min: 0, max: 100 }
+                            pointLabels: { color: '#ddd', font: { size: 13, weight: 'bold' } }, 
+                            ticks: { display: false }
                         }
                     }
                 }
@@ -2407,14 +2443,35 @@
         // === АУДИТ ЗМІН ===
         function logChange(pName, action, actor) {
             if (!db.logs) db.logs = [];
+            const gp = document.getElementById('gp-select').value;
             const entry = {
-                time: new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kiev' }),
+                time: new Date().toLocaleString('uk-UA'),
                 player: pName,
-                action: action,
+                action: `[${gp} | ${sess}] ${action}`, // Тепер видно де саме
                 actor: actor || "Система"
             };
             db.logs.unshift(entry);
-            if (db.logs.length > 50) db.logs.pop(); // Зберігаємо останні 50 подій
+            if (db.logs.length > 50) db.logs.pop(); 
+        }
+
+        async function unlockPlayerChanges() {
+            if (!isAdmin) return;
+            const gp = document.getElementById('gp-select').value;
+            let pName = prompt(`Введіть ім'я гравця, якому треба скинути ліміт змін для ${gp} (${sess}):`);
+            if (!pName) return;
+            
+            let actualName = teams.flatMap(t => t.p).find(p => p.toLowerCase() === pName.trim().toLowerCase());
+            if (actualName) {
+                if (db.changes && db.changes[gp] && db.changes[gp][actualName]) {
+                    db.changes[gp][actualName][sess] = 0;
+                    logChange(actualName, `Адмін примусово скинув ліміт змін`, "Адмін");
+                    await save();
+                    render();
+                    alert(`Ліміт змін для ${actualName} скинуто. Вони знову можуть редагувати прогноз.`);
+                }
+            } else {
+                alert("Гравця не знайдено.");
+            }
         }
 
         function showLogs() {
