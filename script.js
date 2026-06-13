@@ -1662,7 +1662,6 @@
                 <tr class="${getTClass(topR.names)}"><td style="color:#aaa;">Бог Гонок</td><td>${formatNames(topR.names)}</td><td style="color:${cR}; font-weight:bold;">${topR.v} <span style="font-size:10px; opacity:0.7;">${bTextR}</span></td></tr>
                 <tr class="${getTClass(topS.names)}"><td style="color:#aaa;">Майстер Спринтів</td><td>${formatNames(topS.names)}</td><td style="color:${cS}; font-weight:bold;">${topS.v} <span style="font-size:10px; opacity:0.7;">${bTextS}</span></td></tr>
                 <tr class="${getTClass(topQ.names)}"><td style="color:#aaa;">Король Кваліфікацій</td><td>${formatNames(topQ.names)}</td><td style="color:${cQ}; font-weight:bold;">${topQ.v} <span style="font-size:10px; opacity:0.7;">${bTextQ}</span></td></tr>
-                <tr class="${getTClass(minScoreNames)}"><td style="color:#aaa;">Антирекордсмен</td><td>${formatNames(minScoreNames)}</td><td style="color:${cMin}; font-weight:bold;">${minScore.v === 999 ? 0 : minScore.v} <span style="font-size:10px; opacity:0.7;">${bTextMin}</span>${getGpsText(minScore.entries)}</td></tr>
             `;
         }
 
@@ -1891,7 +1890,7 @@
             let t2 = teams.find(t => t.p.includes(p2));
 
             let logoContainer = document.getElementById('h2h-center-logo');
-            if (t1 && t2 && t1.id === t2.id && teamLogos[t1.id]) {
+            if (t1 && t2 && t1.id === t2.id && typeof teamLogos !== 'undefined' && teamLogos[t1.id]) {
                 logoContainer.style.backgroundImage = `url('${teamLogos[t1.id]}')`;
                 logoContainer.innerHTML = '';
             } else {
@@ -1940,32 +1939,43 @@
                 r2Data.push({ pts: pts2, played: played });
             });
 
-            let avg1 = playedCount > 0 ? (s1.total / playedCount).toFixed(1) : 0;
-            let avg2 = playedCount > 0 ? (s2.total / playedCount).toFixed(1) : 0;
+            let avg1 = playedCount > 0 ? parseFloat((s1.total / playedCount).toFixed(1)) : 0;
+            let avg2 = playedCount > 0 ? parseFloat((s2.total / playedCount).toFixed(1)) : 0;
 
-            // Вбудована функція для створення смужок з правильними пропорціями
+            // Вбудована функція з градієнтами та виділенням лідера
             const makeBar = (label, v1, v2, c1, c2) => {
                 let total = v1 + v2;
                 let w1 = total > 0 ? (v1 / total) * 100 : 50;
                 let w2 = total > 0 ? (v2 / total) * 100 : 50;
                 
+                // Логіка виділення лідера
+                let fw1 = v1 > v2 ? '900' : '500';
+                let fs1 = v1 > v2 ? '22px' : '15px';
+                let op1 = v1 > v2 ? '1' : '0.6';
+                let ts1 = v1 > v2 ? `0 0 10px ${c1}80` : 'none';
+
+                let fw2 = v2 > v1 ? '900' : '500';
+                let fs2 = v2 > v1 ? '22px' : '15px';
+                let op2 = v2 > v1 ? '1' : '0.6';
+                let ts2 = v2 > v1 ? `0 0 10px ${c2}80` : 'none';
+
                 return `
-                <div style="margin-bottom: 12px; width: 100%;">
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: #ccc;">
-                        <span style="color:${c1}; font-weight:bold;">${v1}</span>
-                        <span style="text-transform:uppercase; letter-spacing: 0.5px;">${label}</span>
-                        <span style="color:${c2}; font-weight:bold;">${v2}</span>
+                <div style="margin-bottom: 20px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px; color: #ccc;">
+                        <span style="color:${c1}; font-weight:${fw1}; font-size:${fs1}; opacity:${op1}; text-shadow:${ts1}; transition: all 0.3s ease;">${v1}</span>
+                        <span style="text-transform:uppercase; letter-spacing: 1px; font-size: 13px; color: #aaa; padding-bottom: 2px;">${label}</span>
+                        <span style="color:${c2}; font-weight:${fw2}; font-size:${fs2}; opacity:${op2}; text-shadow:${ts2}; transition: all 0.3s ease;">${v2}</span>
                     </div>
-                    <div style="display: flex; width: 100%; height: 10px; border-radius: 4px; overflow: hidden; background: #222;">
-                        <div class="bar-fill" data-w="${w1}%" style="width: 0%; background: ${c1}; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
-                        <div class="bar-fill" data-w="${w2}%" style="width: 0%; background: ${c2}; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                    <div style="display: flex; width: 100%; height: 12px; border-radius: 6px; overflow: hidden; background: #1a1a20; box-shadow: inset 0 1px 4px rgba(0,0,0,0.6);">
+                        <div class="bar-fill" data-w="${w1}%" style="width: 0%; background: linear-gradient(90deg, #111, ${c1}); box-shadow: 0 0 15px ${c1}40; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                        <div class="bar-fill" data-w="${w2}%" style="width: 0%; background: linear-gradient(270deg, #111, ${c2}); box-shadow: 0 0 15px ${c2}40; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);"></div>
                     </div>
                 </div>`;
             };
 
             let barsHTML = `<div style="display: flex; flex-direction: column; width: 100%;">`;
             barsHTML += makeBar("Загалом балів", s1.total, s2.total, col1, col2);
-            barsHTML += makeBar("Середній бал", parseFloat(avg1), parseFloat(avg2), col1, col2);
+            barsHTML += makeBar("Середній бал", avg1, avg2, col1, col2);
             barsHTML += makeBar("Кваліфікації", s1.q, s2.q, col1, col2);
             barsHTML += makeBar("Гонки", s1.r, s2.r, col1, col2);
             barsHTML += makeBar("Спринти", s1.s, s2.s, col1, col2);
@@ -1973,7 +1983,25 @@
             barsHTML += makeBar("Рекорд балів", s1.best, s2.best, col1, col2);
             barsHTML += `</div>`;
             
-            document.getElementById('h2h-bars').innerHTML = barsHTML;
+            // Переконаємося, що HTML-структура дозволяє гнучко розподілити простір
+            let layoutHTML = `
+                <div style="display: flex; gap: 40px; align-items: center; justify-content: center; flex-wrap: wrap; flex: 1;">
+                    <div id="h2h-bars-inner" style="flex: 1; min-width: 400px; max-width: 800px;">
+                        ${barsHTML}
+                    </div>
+                    <div style="width: 450px; height: 450px; display: flex; justify-content: center; align-items: center;">
+                        <canvas id="h2hRadar"></canvas>
+                    </div>
+                </div>
+            `;
+
+            // Записуємо згенерований блок замість старого. 
+            // Зверни увагу: переконайся, що у твоєму index.html у блоці H2H 
+            // замість двох окремих div-ів стоїть один <div id="h2h-bars"></div> куди ми це вставимо.
+            let h2hBarsContainer = document.getElementById('h2h-bars');
+            if(h2hBarsContainer) {
+                h2hBarsContainer.innerHTML = layoutHTML;
+            }
 
             setTimeout(() => {
                 document.querySelectorAll('.bar-fill').forEach(el => {
@@ -1981,23 +2009,24 @@
                 });
             }, 50);
 
-            if (h2hRadarChartInst) h2hRadarChartInst.destroy();
+            if (typeof h2hRadarChartInst !== 'undefined' && h2hRadarChartInst) h2hRadarChartInst.destroy();
             const ctxR = document.getElementById('h2hRadar').getContext('2d');
             
             let maxQ = Math.max(s1.q, s2.q) || 1;
             let maxS = Math.max(s1.s, s2.s) || 1;
             let maxR = Math.max(s1.r, s2.r) || 1;
             let maxWins = Math.max(s1.wins, s2.wins) || 1;
-            let maxAvg = Math.max(parseFloat(avg1), parseFloat(avg2)) || 1;
+            let maxAvg = Math.max(avg1, avg2) || 1;
 
-            h2hRadarChartInst = new Chart(ctxR, {
+            // Робимо Chart глобальною змінною, якщо вона ще не була
+            window.h2hRadarChartInst = new Chart(ctxR, {
                 type: 'radar',
                 data: {
                     labels: ['Кваліфікація', 'Спринт', 'Гонка', 'Середній бал', 'Перемоги в дуелях'],
                     datasets: [
                         {
                             label: p1,
-                            data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (parseFloat(avg1)/maxAvg)*100, (s1.wins/maxWins)*100],
+                            data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (avg1/maxAvg)*100, (s1.wins/maxWins)*100],
                             backgroundColor: col1 + '40', 
                             borderColor: col1,
                             pointBackgroundColor: col1,
@@ -2005,7 +2034,7 @@
                         },
                         {
                             label: p2,
-                            data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (parseFloat(avg2)/maxAvg)*100, (s2.wins/maxWins)*100],
+                            data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (avg2/maxAvg)*100, (s2.wins/maxWins)*100],
                             backgroundColor: col2 + '40',
                             borderColor: col2,
                             pointBackgroundColor: col2,
@@ -2020,8 +2049,8 @@
                     scales: {
                         r: {
                             angleLines: { color: '#333' },
-                            grid: { color: '#333' },
-                            pointLabels: { color: '#aaa', font: { size: 10, weight: 'bold' } },
+                            grid: { color: '#444' },
+                            pointLabels: { color: '#ddd', font: { size: 12, weight: 'bold' } }, // Збільшено шрифт підписів радару
                             ticks: { display: false, min: 0, max: 100 }
                         }
                     }
@@ -2034,13 +2063,13 @@
             });
             thead += `</tr>`;
 
-            let tr1 = `<tr class="row-${t1 ? t1.id : ''}"><td><span style="color:${col1};">${p1}</span></td>`;
-            let tr2 = `<tr class="row-${t2 ? t2.id : ''}" style="border-bottom: 2px solid #333;"><td><span style="color:${col2};">${p2}</span></td>`;
+            let tr1 = `<tr class="row-${t1 ? t1.id : ''}"><td><span style="color:${col1}; font-weight:bold;">${p1}</span></td>`;
+            let tr2 = `<tr class="row-${t2 ? t2.id : ''}" style="border-bottom: 2px solid #333;"><td><span style="color:${col2}; font-weight:bold;">${p2}</span></td>`;
 
             for(let i=0; i<allGPs.length; i++) {
                 if(!r1Data[i].played) {
-                    tr1 += `<td class="empty">-</td>`;
-                    tr2 += `<td class="empty">-</td>`;
+                    tr1 += `<td class="empty" style="opacity: 0.3;">-</td>`;
+                    tr2 += `<td class="empty" style="opacity: 0.3;">-</td>`;
                     continue;
                 }
 
