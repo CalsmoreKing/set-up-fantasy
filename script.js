@@ -7,7 +7,7 @@
             'Маямі': { qualy: '2026-05-09T20:00:00Z', sprint: '2026-05-09T16:00:00Z', race: '2026-05-10T20:00:00Z' },
             'Монако': { qualy: '2026-05-23T14:00:00Z', race: '2026-05-24T13:00:00Z' },
             'Канада': { qualy: '2026-06-06T20:00:00Z', race: '2026-06-07T18:00:00Z' },
-            'Барселона': { qualy: '2026-06-13T13:00:00Z', race: '2026-06-14T13:00:00Z' },
+            'Барселона': { qualy: '2026-06-13T14:00:00Z', race: '2026-06-14T13:00:00Z' },
             'Австрія': { qualy: '2026-06-27T14:00:00Z', race: '2026-06-28T13:00:00Z' },
             'Британія': { qualy: '2026-07-04T14:00:00Z', race: '2026-07-05T14:00:00Z' },
             'Бельгія': { qualy: '2026-07-18T14:00:00Z', race: '2026-07-19T13:00:00Z' },
@@ -470,7 +470,7 @@
 
                 if (!db.pins) db.pins = {};
 
-                // Злиття лічильників змін
+                // Правильне злиття лічильників змін (пріоритет максимального значення)
                 if (!db.changes) db.changes = {};
                 if (cloudMain.changes) {
                     for (let gpKey in cloudMain.changes) {
@@ -478,6 +478,13 @@
                         for (let pName in cloudMain.changes[gpKey]) {
                             if (!db.changes[gpKey][pName]) {
                                 db.changes[gpKey][pName] = cloudMain.changes[gpKey][pName];
+                            } else {
+                                // Беремо максимальне значення між локальним і хмарним
+                                for (let sKey in cloudMain.changes[gpKey][pName]) {
+                                    let cVal = cloudMain.changes[gpKey][pName][sKey] || 0;
+                                    let lVal = db.changes[gpKey][pName][sKey] || 0;
+                                    db.changes[gpKey][pName][sKey] = Math.max(cVal, lVal);
+                                }
                             }
                         }
                     }
@@ -649,22 +656,24 @@
         function autoFormat(elem, pName) {
             if (elem.readOnly) return; 
             let val = elem.value.trim().toUpperCase();
-            if (val === '') return; // Ігноруємо пусті поля
+            if (val === '') {
+                tmp[sess].p[pName] = '';
+                save();
+                return; 
+            }
 
-            // 1. Перевірка на Швидке коло (FL, ФЛ, Швид, Найшвидше)
-            const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-Я]{3})$/i);
-            
-            // 2. Перевірка на позицію (напр. 1 ver, 1.ver, 1_ver, 1-ver)
-            const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-Я]{3})$/i);
+            const flMatch = val.match(/^(?:ШВИД|ШВИДКЕ КОЛО|НАЙШВИДШЕ|FL|ФЛ|КОЛО)[\s:\-.,_]*([A-ZА-ЯІЄЇ]{3})$/i);
+            const posMatch = val.match(/^(\d+)[\s\-.,_]+([A-ZА-ЯІЄЇ]{3})$/i);
 
             if (flMatch) {
                 val = `ШВИДКЕ КОЛО - ${flMatch[1]}`;
             } else if (posMatch) {
                 val = `${posMatch[1]} - ${posMatch[2]}`;
             } else {
-                alert(`⚠️ Формат не розпізнано: "${val}".\nВикористовуйте формати: "1 - VER" або "Швидке коло - VER".`);
-                elem.focus(); // Повертаємо курсор для виправлення
-                return; // Зупиняємо збереження помилкового формату
+                // Якщо формат неправильний - показуємо Toast і ПОВЕРТАЄМО текст до останнього валідного
+                showToast(`⚠️ Неправильний формат: "${val}". Використовуйте "1 - VER"`);
+                elem.value = tmp[sess].p[pName] || ''; 
+                return; // Зупиняємо збереження помилкового тексту!
             }
 
             elem.value = val;
@@ -673,8 +682,7 @@
             const gp = document.getElementById('gp-select').value;
             dirtyFields[`${gp}_${sess}_p_${pName}`] = true;
             
-            console.log(`[ЗБЕРЕЖЕННЯ] Формат виправлено для ${pName}:`, val);
-            logChange(pName, `Змінив текст прогнозу на: ${val}`, myPlayer || "Гість");
+            logChange(pName, `Змінив прогноз на: ${val}`, myPlayer || "Гість");
             save(); 
         }
 
@@ -1935,15 +1943,36 @@
             let avg1 = playedCount > 0 ? (s1.total / playedCount).toFixed(1) : 0;
             let avg2 = playedCount > 0 ? (s2.total / playedCount).toFixed(1) : 0;
 
+            // Вбудована функція для створення смужок з правильними пропорціями
+            const makeBar = (label, v1, v2, c1, c2) => {
+                let total = v1 + v2;
+                let w1 = total > 0 ? (v1 / total) * 100 : 50;
+                let w2 = total > 0 ? (v2 / total) * 100 : 50;
+                
+                return `
+                <div style="margin-bottom: 12px; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: #ccc;">
+                        <span style="color:${c1}; font-weight:bold;">${v1}</span>
+                        <span style="text-transform:uppercase; letter-spacing: 0.5px;">${label}</span>
+                        <span style="color:${c2}; font-weight:bold;">${v2}</span>
+                    </div>
+                    <div style="display: flex; width: 100%; height: 10px; border-radius: 4px; overflow: hidden; background: #222;">
+                        <div class="bar-fill" data-w="${w1}%" style="width: 0%; background: ${c1}; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                        <div class="bar-fill" data-w="${w2}%" style="width: 0%; background: ${c2}; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                    </div>
+                </div>`;
+            };
+
             let barsHTML = `<div style="display: flex; flex-direction: column; width: 100%;">`;
-            barsHTML += createH2HBar("Загалом балів", s1.total, s2.total, col1, col2);
-            barsHTML += createH2HBar("Середній бал", parseFloat(avg1), parseFloat(avg2), col1, col2);
-            barsHTML += createH2HBar("Кваліфікації", s1.q, s2.q, col1, col2);
-            barsHTML += createH2HBar("Гонки", s1.r, s2.r, col1, col2);
-            barsHTML += createH2HBar("Спринти", s1.s, s2.s, col1, col2);
-            barsHTML += createH2HBar("Дуелі", s1.wins, s2.wins, col1, col2);
-            barsHTML += createH2HBar("Рекорд балів", s1.best, s2.best, col1, col2);
+            barsHTML += makeBar("Загалом балів", s1.total, s2.total, col1, col2);
+            barsHTML += makeBar("Середній бал", parseFloat(avg1), parseFloat(avg2), col1, col2);
+            barsHTML += makeBar("Кваліфікації", s1.q, s2.q, col1, col2);
+            barsHTML += makeBar("Гонки", s1.r, s2.r, col1, col2);
+            barsHTML += makeBar("Спринти", s1.s, s2.s, col1, col2);
+            barsHTML += makeBar("Дуелі", s1.wins, s2.wins, col1, col2);
+            barsHTML += makeBar("Рекорд балів", s1.best, s2.best, col1, col2);
             barsHTML += `</div>`;
+            
             document.getElementById('h2h-bars').innerHTML = barsHTML;
 
             setTimeout(() => {
@@ -2360,12 +2389,28 @@
         }
 
         function showLogs() {
+            const modal = document.getElementById('logs-modal');
+            const content = document.getElementById('logs-content');
+            
             if (!db.logs || db.logs.length === 0) {
-                alert("Логів поки немає.");
-                return;
+                content.innerHTML = '<div style="color:#888; text-align:center;">Історія змін порожня.</div>';
+            } else {
+                let html = '';
+                db.logs.slice(0, 30).forEach(l => {
+                    // Виносимо дату в непомітний сірий колір, а дію підсвічуємо
+                    html += `
+                        <div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #333;">
+                            <div style="color: #666; font-size: 11px; margin-bottom: 4px;">${l.time} • Автор: ${l.actor}</div>
+                            <div style="color: #ddd;">
+                                <strong style="color: var(--warning);">${l.player}</strong>: ${l.action}
+                            </div>
+                        </div>
+                    `;
+                });
+                content.innerHTML = html;
             }
-            const logText = db.logs.slice(0, 20).map(l => `[${l.time}] ${l.player}: ${l.action} (Автор: ${l.actor})`).join('\n\n');
-            alert("ОСТАННІ 20 ЗМІН:\n\n" + logText);
+            
+            modal.style.display = 'flex';
         }
 
         // === МЕНЕДЖЕР ПАРОЛІВ ===
@@ -2416,4 +2461,12 @@ async function managePins() {
     } else {
         alert("Гравця з таким іменем не знайдено.");
     }
+}
+
+function showToast(msg) {
+    const t = document.createElement('div');
+    t.innerText = msg;
+    t.style.cssText = "position:fixed; top:20px; right:20px; background:var(--danger); color:#fff; padding:15px; border-radius:8px; z-index:10000; box-shadow:0 4px 15px rgba(0,0,0,0.5); font-weight:bold; transition: opacity 0.5s;";
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3500);
 }

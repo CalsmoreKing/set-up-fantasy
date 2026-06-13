@@ -189,12 +189,53 @@
         </div>
 
         <div id="tab-rules" class="tab-content">
-            <div class="panel" style="max-width: 800px; margin: 0 auto; text-align: left; padding: 20px; border: 1px solid #333; border-radius: 12px; background: var(--panel);">
-                <h2 style="text-align: center; color: var(--warning); margin-bottom: 20px;">Правила Ліги Set-up Fantasy</h2>
-                <div id="rules-text" style="line-height: 1.8; color: #ccc; font-size: 15px;">
-                    <p>1. Прогнози приймаються не пізніше ніж за 30 хвилин до старту сесії.</p>
-                    <p>2. Затверджений прогноз можна змінити лише 1 раз.</p>
-                    <p>3. Формат вводу: "1 - VER" та "Швидке коло - VER".</p>
+            <div class="panel" style="max-width: 850px; margin: 0 auto; text-align: left; padding: 30px; border: 1px solid #333; border-radius: 12px; background: var(--panel); box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                <h2 style="text-align: center; color: var(--warning); margin-bottom: 30px; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;">Правила Ліги Set-up Fantasy</h2>
+                
+                <div id="rules-text" style="line-height: 1.8; color: #ddd; font-size: 15px;">
+                    
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 10px; margin-top: 0;">Загальні організаційні положення</h3>
+                    <ul style="margin-bottom: 30px; padding-left: 20px;">
+                        <li style="margin-bottom: 10px;"><strong>Дедлайн:</strong> прийом прогнозів повністю закривається за <span style="color: var(--danger); font-weight: bold;">30 хвилин</span> до початку відповідної сесії.</li>
+                        <li><strong>Редагування:</strong> змінювати вже надісланий прогноз дозволяється суворо <span style="color: var(--warning); font-weight: bold;">1 раз</span> за етап.</li>
+                    </ul>
+
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 10px;">Формати етапів та нарахування балів</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; background: #111; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                            <tr style="background: #222; color: #fff; text-align: left;">
+                                <th style="padding: 15px; border-bottom: 1px solid #444;">Сесія</th>
+                                <th style="padding: 15px; border-bottom: 1px solid #444;">Завдання для гравця</th>
+                                <th style="padding: 15px; border-bottom: 1px solid #444;">Система балів</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding: 15px; border-bottom: 1px solid #333; color: var(--warning); font-weight: bold;">Кваліфікація (Рулетка)</td>
+                                <td style="padding: 15px; border-bottom: 1px solid #333;">Спрогнозувати точне місце свого унікального персонального гонщика за чистими результатами.</td>
+                                <td style="padding: 15px; border-bottom: 1px solid #333;">Точне влучання: <strong style="color: var(--success);">5 балів</strong>.<br>Похибка +/- 1 позиція: <strong style="color: var(--success);">2 бали</strong>.</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 15px; border-bottom: 1px solid #333; color: #3498db; font-weight: bold;">Спринт</td>
+                                <td style="padding: 15px; border-bottom: 1px solid #333;">Спрогнозувати першу п'ятірку пілотів на фініші (Топ-5).</td>
+                                <td style="padding: 15px; border-bottom: 1px solid #333;">Стандартні бали за точне вгадування позицій.</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 15px; color: var(--danger); font-weight: bold;">Гонка</td>
+                                <td style="padding: 15px;">Спрогнозувати першу десятку пілотів (Топ-10) та вказати володаря найшвидшого кола.</td>
+                                <td style="padding: 15px;">Стандартні бали за точні місця та швидке коло.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 10px;">Деталі формату «Кваліфікаційна рулетка»</h3>
+                    <ul style="padding-left: 20px;">
+                        <li style="margin-bottom: 10px;"><strong>Механіка:</strong> перед етапом кожному гравцю випадає 1 унікальний гонщик шляхом жеребкування.</li>
+                        <li style="margin-bottom: 10px;"><strong>Ліміти:</strong> гонщики не повторюються між гравцями на одному етапі. Гравець не може отримати одного й того ж гонщика двічі за сезон.</li>
+                        <li style="margin-bottom: 10px;"><strong>Чистий результат:</strong> бали рахуються за фактичним часом кваліфікації. Подальші штрафи за заміну деталей на стартовій решітці не враховуються.</li>
+                        <li><strong>Форс-мажори:</strong> прогноз закріплюється за болідом. Якщо основного пілота замінюють перед сесією, прогноз автоматично переноситься на резервного гонщика. У разі невиїзду (DNS) або дискваліфікації (DSQ) болід отримує останнє місце.</li>
+                    </ul>
+                    
                 </div>
             </div>
         </div>
@@ -235,6 +276,17 @@
             <button class="btn" style="background: #3366FF; width:100%; margin-bottom:10px; font-size: 13px;" onclick="saveManualDriver()">Зберегти код</button>
             <button class="btn" style="background: var(--danger); width:100%; margin-bottom:10px; font-size: 13px;" onclick="clearManualDriver()">Видалити пілота</button>
             <button class="btn" style="background: #333; width:100%; margin-top: 10px;" onclick="closeDriverModal()">Скасувати</button>
+        </div>
+    </div>
+
+    <div id="logs-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: var(--panel); width: 650px; max-width: 95%; border-radius: 12px; border: 1px solid #444; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
+            <div style="padding: 15px 20px; background: #111; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; color: #eee;">📋 Аудит змін бази даних</h3>
+                <button onclick="document.getElementById('logs-modal').style.display='none'" style="background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer;">&times;</button>
+            </div>
+            <div id="logs-content" style="padding: 20px; max-height: 60vh; overflow-y: auto; font-size: 14px;">
+                </div>
         </div>
     </div>
 
