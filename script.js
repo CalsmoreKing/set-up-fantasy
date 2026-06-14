@@ -415,15 +415,18 @@
         }
 
         function switchTab(tabId, btnElem) {
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
             document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).style.display = 'block';
             if(btnElem) btnElem.classList.add('active');
+            localStorage.setItem('last_tab', tabId);
 
-            if(tabId === 'tab-h2h') setTimeout(renderH2H, 50); 
-            if(tabId === 'tab-perf') setTimeout(initChart, 50); 
-            if(tabId === 'tab-details') updateDetailsTable();
+            // Даємо браузеру 10 мілісекунд на рендер блоку, щоб Chart.js міг виміряти його ширину
+            setTimeout(() => {
+                if (tabId === 'tab-h2h' && typeof renderH2H === 'function') renderH2H();
+                if (tabId === 'tab-perf' && typeof updateChartData === 'function') updateChartData();
+                if (tabId === 'tab-details' && typeof updateDetailsTable === 'function') updateDetailsTable();
+            }, 10);
         }
 
         function goToGP(gpName, e) {
@@ -1794,27 +1797,34 @@
                     else if (diff < 0) trend = `<span class="down">▼ <span style="font-size: 10px;">${Math.abs(diff)}</span></span>`;
                 }
 
-                // === РОЗРАХУНОК ЗАРОБЛЕНИХ БАЛІВ ЗА ПОТОЧНИЙ ЕТАП ===
+                // РОЗРАХУНОК ЛИШЕ ЗА ОСТАННЮ СЕСІЮ
                 let currentGp = document.getElementById('gp-select').value;
-                let currentGpDelta = 0;
+                let delta = 0;
+                let currentSessKey = sess === 'qualy' ? 'q' : sess === 'sprint' ? 's' : 'r';
+
                 if (db.hist[currentGp] && db.hist[currentGp][name]) {
-                    currentGpDelta = db.hist[currentGp][name].q + db.hist[currentGp][name].s + db.hist[currentGp][name].r;
+                    delta = db.hist[currentGp][name][currentSessKey] || 0;
                 }
-                let deltaStr = currentGpDelta > 0 ? `<span style="font-size:11px; color:var(--success); margin-left:6px; font-weight:bold;">+${currentGpDelta}</span>` : 
-                               (currentGpDelta < 0 ? `<span style="font-size:11px; color:var(--danger); margin-left:6px; font-weight:bold;">${currentGpDelta}</span>` : '');
+
+                let deltaStr = '';
+                if (!showDetailed && delta !== 0) {
+                    let color = delta > 0 ? 'var(--success)' : 'var(--danger)';
+                    let sign = delta > 0 ? '+' : '';
+                    deltaStr = `<span style="color:${color}; font-size:12px; font-weight:bold; margin-left: 4px;">${sign}${delta}</span>`;
+                }
 
                 let trHTML = `
                     <tr class="${pTeam ? 'row-' + pTeam.id : ''}">
                         <td>${idx+1}</td>
                         <td class="logo-cell">
-                            <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 4px;">
                                 <span>${name}</span>
                                 <span class="tg-handle">${tgHandles[name] || ''}</span>
                             </div>
                         </td>
-                        <td>
-                            ${d.pts} ${deltaStr}
-                            <button class="adj-btn" onclick="promptAdjustPts('${name}')">±</button>
+                        <td style="text-align: center; white-space: nowrap;">
+                            <span style="font-size: 15px; vertical-align: middle;">${item.totalPts}</span><span style="vertical-align: middle;">${deltaStr}</span>
+                            <button class="adj-btn" onclick="promptAdjustPts('${name}')" style="vertical-align: middle; margin-left: 4px;">±</button>
                         </td>`;
                 
                 if (showDetailed) {
@@ -1930,18 +1940,75 @@
 
         let h2hRadarChartInst = null;
 
+        const h2hLogos = {
+            'redbull': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/redbull.svg',
+            'mercedes': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/mercedes.svg',
+            'ferrari': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/ferrari.svg',
+            'mclaren': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/mclaren.svg',
+            'aston': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg',
+            'alpine': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg',
+            'alfaromeo': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg',
+            'rbr': 'https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg',
+            'audi': 'https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/audi.svg'
+        };
+
+        function buildH2HDropdown() {
+            let dropdown = document.getElementById('h2h-custom-dropdown');
+            if (!dropdown) return;
+            let html = '<div class="dropdown-item" onclick="setH2HTeam(\'ALL\')">Очистити (VS)</div>';
+            teams.forEach(t => {
+                let color = typeof teamTextColors !== 'undefined' && teamTextColors[t.id] ? teamTextColors[t.id] : '#fff';
+                html += `<div class="dropdown-item" style="color:${color};" onclick="setH2HTeam('${t.id}')">${t.n}</div>`;
+            });
+            dropdown.innerHTML = html;
+        }
+
+        function setH2HTeam(teamId) {
+            let sel1 = document.getElementById('h2h-p1');
+            let sel2 = document.getElementById('h2h-p2');
+            if (teamId !== 'ALL') {
+                let t = teams.find(x => x.id === teamId);
+                if (t && t.p.length >= 2) {
+                    sel1.value = t.p[0];
+                    sel2.value = t.p[1];
+                }
+            }
+            document.getElementById('h2h-custom-dropdown').classList.remove('show');
+            if (typeof renderH2H === 'function') renderH2H();
+        }
+
         function renderH2H() {
+            let sel1 = document.getElementById('h2h-p1');
+            let sel2 = document.getElementById('h2h-p2');
+            
+            // Якщо списки порожні - заповнюємо їх усіма гравцями з бази
+            if (sel1.options.length === 0) {
+                let allPlayers = teams.flatMap(t => t.p);
+                allPlayers.forEach(p => {
+                    sel1.add(new Option(p, p));
+                    sel2.add(new Option(p, p));
+                });
+                sel1.selectedIndex = 0; // Вибираємо першого гравця
+                sel2.selectedIndex = 1; // Вибираємо другого гравця
+            }
+
             let p1 = document.getElementById('h2h-p1').value;
             let p2 = document.getElementById('h2h-p2').value;
 
             let t1 = teams.find(t => t.p.includes(p1));
             let t2 = teams.find(t => t.p.includes(p2));
 
+            // Генеруємо меню, якщо воно порожнє
+            let dropdown = document.getElementById('h2h-custom-dropdown');
+            if (dropdown && dropdown.innerHTML === '') buildH2HDropdown();
+
             let logoContainer = document.getElementById('h2h-center-logo');
-            if (t1 && t2 && t1.id === t2.id && typeof teamLogos !== 'undefined' && teamLogos[t1.id]) {
-                logoContainer.style.backgroundImage = `url('${teamLogos[t1.id]}')`;
+            if (t1 && t2 && t1.id === t2.id && h2hLogos[t1.id]) {
+                // Якщо обрана одна команда - ставимо її логотип
+                logoContainer.style.backgroundImage = `url('${h2hLogos[t1.id]}')`;
                 logoContainer.innerHTML = '';
             } else {
+                // Якщо різні гравці - повертаємо напис VS
                 logoContainer.style.backgroundImage = 'none';
                 logoContainer.innerHTML = '<div class="vs-text">VS</div>';
             }
@@ -1985,73 +2052,67 @@
             let avg1 = playedCount > 0 ? parseFloat((s1.total / playedCount).toFixed(1)) : 0;
             let avg2 = playedCount > 0 ? parseFloat((s2.total / playedCount).toFixed(1)) : 0;
 
-            // Вбудована функція з фіксованим центром
-            const makeBar = (label, v1, v2, c1, c2, isFloat = false) => {
-                let val1 = isFloat ? parseFloat(v1) : parseInt(v1);
-                let val2 = isFloat ? parseFloat(v2) : parseInt(v2);
-                let maxVal = Math.max(val1, val2);
-                
-                // 100% для лідера, пропорційно для іншого
-                let w1 = maxVal > 0 ? (val1 / maxVal) * 100 : 0;
-                let w2 = maxVal > 0 ? (val2 / maxVal) * 100 : 0;
-                
-                let isV1Win = val1 >= val2;
-                let isV2Win = val2 >= val1;
+const makeBar = (label, v1, v2, c1, c2, isFloat = false) => {
+        let val1 = isFloat ? parseFloat(v1) : parseInt(v1);
+        let val2 = isFloat ? parseFloat(v2) : parseInt(v2);
+        let maxVal = Math.max(val1, val2);
+        
+        let w1 = maxVal > 0 ? (val1 / maxVal) * 100 : 0;
+        let w2 = maxVal > 0 ? (val2 / maxVal) * 100 : 0;
+        
+        let fw1 = val1 >= val2 ? '900' : '500';
+        let fs1 = val1 >= val2 ? '24px' : '16px'; 
+        let op1 = val1 >= val2 ? '1' : '0.6';
 
-                let fw1 = isV1Win ? '900' : '500';
-                let fs1 = isV1Win ? '24px' : '16px'; 
-                let op1 = isV1Win ? '1' : '0.6';
+        let fw2 = val2 >= val1 ? '900' : '500';
+        let fs2 = val2 >= val1 ? '24px' : '16px';
+        let op2 = val2 >= val1 ? '1' : '0.6';
 
-                let fw2 = isV2Win ? '900' : '500';
-                let fs2 = isV2Win ? '24px' : '16px';
-                let op2 = isV2Win ? '1' : '0.6';
-
-                return `
-                <div style="margin-bottom: 25px; width: 100%;">
-                    <div style="text-align: center; text-transform: uppercase; letter-spacing: 1px; font-size: 13px; color: #aaa; margin-bottom: 5px;">${label}</div>
-                    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px;">
-                        <div style="text-align: left; flex: 1;">
-                            <div style="color:${c1}; font-size:11px; font-weight:bold; margin-bottom:2px; text-transform:uppercase;">${p1}</div>
-                            <span style="color:${c1}; font-weight:${fw1}; font-size:${fs1}; opacity:${op1}; transition: all 0.3s ease;">${v1}</span>
-                        </div>
-                        <div style="text-align: right; flex: 1;">
-                            <div style="color:${c2}; font-size:11px; font-weight:bold; margin-bottom:2px; text-transform:uppercase;">${p2}</div>
-                            <span style="color:${c2}; font-weight:${fw2}; font-size:${fs2}; opacity:${op2}; transition: all 0.3s ease;">${v2}</span>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; width: 100%; height: 12px; border-radius: 6px; overflow: hidden; background: #1a1a20; box-shadow: inset 0 1px 4px rgba(0,0,0,0.6);">
-                        <div style="width: 50%; display: flex; justify-content: flex-end;">
-                            <div class="bar-fill" data-w="${w1}%" style="width: 0%; background-image: linear-gradient(270deg, ${c1}, transparent); box-shadow: 0 0 15px ${c1}50; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
-                        </div>
-                        <div style="width: 2px; background: #444; z-index: 2;"></div> <div style="width: 50%; display: flex; justify-content: flex-start;">
-                            <div class="bar-fill" data-w="${w2}%" style="width: 0%; background-image: linear-gradient(90deg, ${c2}, transparent); box-shadow: 0 0 15px ${c2}50; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
-                        </div>
-                    </div>
-                </div>`;
-            };
-
-            let barsHTML = `<div style="display: flex; flex-direction: column; width: 100%;">`;
-            barsHTML += makeBar("Загалом балів", s1.total, s2.total, col1, col2);
-            barsHTML += makeBar("Середній бал", avg1, avg2, col1, col2, true);
-            barsHTML += makeBar("Кваліфікації", s1.q, s2.q, col1, col2);
-            barsHTML += makeBar("Гонки", s1.r, s2.r, col1, col2);
-            barsHTML += makeBar("Спринти", s1.s, s2.s, col1, col2);
-            barsHTML += makeBar("Дуелі", s1.wins, s2.wins, col1, col2);
-            barsHTML += makeBar("Рекорд балів", s1.best, s2.best, col1, col2);
-            barsHTML += `</div>`;
-            
-            let layoutHTML = `
-                <div style="display: flex; gap: 40px; align-items: center; justify-content: center; flex-wrap: wrap; flex: 1;">
-                    <div id="h2h-bars-inner" style="flex: 1; min-width: 400px; max-width: 800px;">
-                        ${barsHTML}
-                    </div>
-                    <div style="width: 450px; height: 450px; display: flex; justify-content: center; align-items: center; order: 2;"> <canvas id="h2hRadar"></canvas>
-                    </div>
+        // Градієнт тепер йде від темного центру до яскравого краю
+        return `
+        <div style="margin-bottom: 25px; width: 100%;">
+            <div style="text-align: center; text-transform: uppercase; letter-spacing: 1px; font-size: 13px; color: #aaa; margin-bottom: 5px;">${label}</div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px;">
+                <div style="text-align: left; flex: 1;">
+                    <span style="color:${c1}; font-weight:${fw1}; font-size:${fs1}; opacity:${op1}; transition: all 0.3s ease;">${v1}</span>
                 </div>
-            `;
+                <div style="text-align: right; flex: 1;">
+                    <span style="color:${c2}; font-weight:${fw2}; font-size:${fs2}; opacity:${op2}; transition: all 0.3s ease;">${v2}</span>
+                </div>
+            </div>
+            
+            <div style="display: flex; width: 100%; height: 12px; border-radius: 6px; background: #1a1a20; box-shadow: inset 0 1px 4px rgba(0,0,0,0.6);">
+                <div style="width: 50%; display: flex; justify-content: flex-end;">
+                    <div class="bar-fill" data-w="${w1}%" style="width: 0%; background: linear-gradient(270deg, #111, ${c1}); box-shadow: -3px 0 10px ${c1}80; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1); border-top-left-radius: 6px; border-bottom-left-radius: 6px;"></div>
+                </div>
+                <div style="width: 2px; background: #444; z-index: 2;"></div>
+                <div style="width: 50%; display: flex; justify-content: flex-start;">
+                    <div class="bar-fill" data-w="${w2}%" style="width: 0%; background: linear-gradient(90deg, #111, ${c2}); box-shadow: 3px 0 10px ${c2}80; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1); border-top-right-radius: 6px; border-bottom-right-radius: 6px;"></div>
+                </div>
+            </div>
+        </div>`;
+    };
 
-            document.getElementById('h2h-bars').innerHTML = layoutHTML;
+    // Блок з іменами гравців над усіма смужками
+    let namesHeader = `
+    <div style="display: flex; justify-content: space-between; margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 10px;">
+        <div style="color:${col1}; font-size:18px; font-weight:900; text-transform:uppercase; text-shadow: 0 0 10px ${col1}80;">${p1}</div>
+        <div style="color:${col2}; font-size:18px; font-weight:900; text-transform:uppercase; text-shadow: 0 0 10px ${col2}80;">${p2}</div>
+    </div>`;
+
+    let barsHTML = namesHeader +
+                   makeBar("Загалом балів", s1.total, s2.total, col1, col2) +
+                   makeBar("Середній бал", avg1, avg2, col1, col2, true) +
+                   makeBar("Кваліфікації", s1.q, s2.q, col1, col2) +
+                   makeBar("Гонки", s1.r, s2.r, col1, col2) +
+                   makeBar("Спринти", s1.s, s2.s, col1, col2) +
+                   makeBar("Дуелі", s1.wins, s2.wins, col1, col2) +
+                   makeBar("Рекорд балів", s1.best, s2.best, col1, col2);
+    
+    let container = document.getElementById('h2h-bars');
+            if(container) {
+                container.innerHTML = barsHTML;
+            }
 
             setTimeout(() => {
                 document.querySelectorAll('.bar-fill').forEach(el => {
@@ -2060,43 +2121,42 @@
             }, 100);
 
             if (window.h2hRadarChartInst) window.h2hRadarChartInst.destroy();
-            const ctxR = document.getElementById('h2hRadar').getContext('2d');
-            
-            // Радар: Нормалізація до 100%, де 100% - це кращий результат між двома
-            let maxQ = Math.max(s1.q, s2.q) || 1;
-            let maxS = Math.max(s1.s, s2.s) || 1;
-            let maxR = Math.max(s1.r, s2.r) || 1;
-            let maxWins = Math.max(s1.wins, s2.wins) || 1;
-            let maxAvg = Math.max(avg1, avg2) || 1;
+            const canvasEl = document.getElementById('h2hRadar');
+            if(canvasEl) {
+                const ctxR = canvasEl.getContext('2d');
+                let maxQ = Math.max(s1.q, s2.q) || 1;
+                let maxS = Math.max(s1.s, s2.s) || 1;
+                let maxR = Math.max(s1.r, s2.r) || 1;
+                let maxWins = Math.max(s1.wins, s2.wins) || 1;
+                let maxAvg = Math.max(avg1, avg2) || 1;
 
-            window.h2hRadarChartInst = new Chart(ctxR, {
-                type: 'radar',
-                data: {
-                    labels: ['Кваліфікація', 'Спринт', 'Гонка', 'Середній бал', 'Перемоги в дуелях'],
-                    datasets: [
-                        { label: p1, data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (avg1/maxAvg)*100, (s1.wins/maxWins)*100], backgroundColor: col1 + '50', borderColor: col1, borderWidth: 2 },
-                        { label: p2, data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (avg2/maxAvg)*100, (s2.wins/maxWins)*100], backgroundColor: col2 + '50', borderColor: col2, borderWidth: 2 }
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { enabled: false } }, 
-                    scales: {
-                        r: {
-                            min: 0, max: 100, // Фіксує шкалу, щоб різниця виглядала адекватно відносно максимуму
-                            angleLines: { color: '#333' },
-                            grid: { color: '#444' },
-                            pointLabels: { color: '#ddd', font: { size: 13, weight: 'bold' } }, 
-                            ticks: { display: false }
+                window.h2hRadarChartInst = new Chart(ctxR, {
+                    type: 'radar',
+                    data: {
+                        labels: ['Кваліфікація', 'Спринт', 'Гонка', 'Середній бал', 'Перемоги в дуелях'],
+                        datasets: [
+                            { label: p1, data: [(s1.q/maxQ)*100, (s1.s/maxS)*100, (s1.r/maxR)*100, (avg1/maxAvg)*100, (s1.wins/maxWins)*100], backgroundColor: col1 + '50', borderColor: col1, borderWidth: 2 },
+                            { label: p2, data: [(s2.q/maxQ)*100, (s2.s/maxS)*100, (s2.r/maxR)*100, (avg2/maxAvg)*100, (s2.wins/maxWins)*100], backgroundColor: col2 + '50', borderColor: col2, borderWidth: 2 }
+                        ]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } }, 
+                        scales: {
+                            r: {
+                                min: 0, max: 100, 
+                                angleLines: { color: '#333' },
+                                grid: { color: '#444' },
+                                pointLabels: { color: '#ddd', font: { size: 13, weight: 'bold' } }, 
+                                ticks: { display: false }
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
 
             let thead = `<tr><th>ПІЛОТ</th>`;
-            allGPs.forEach(gp => {
-                thead += `<th title="${gp}">${gp.substring(0,3).toUpperCase()}</th>`;
-            });
+            allGPs.forEach(gp => { thead += `<th title="${gp}">${gp.substring(0,3).toUpperCase()}</th>`; });
             thead += `</tr>`;
 
             let tr1 = `<tr class="row-${t1 ? t1.id : ''}"><td><span style="color:${col1}; font-weight:bold;">${p1}</span></td>`;
@@ -2120,10 +2180,10 @@
                 tr1 += `<td class="${c1}">${pts1}</td>`;
                 tr2 += `<td class="${c2}">${pts2}</td>`;
             }
-            tr1 += '</tr>';
-            tr2 += '</tr>';
+            tr1 += '</tr>'; tr2 += '</tr>';
 
-            document.getElementById('h2h-table').innerHTML = thead + tr1 + tr2;
+            let tableEl = document.getElementById('h2h-table');
+            if(tableEl) tableEl.innerHTML = thead + tr1 + tr2;
         }
 
         /* ЛОГІКА PERFORMANCE CHART */
@@ -2134,9 +2194,11 @@
         function initChartSidebar() {
             let html = '';
             teams.forEach(t => {
-                let teamColor = teamColors[t.id][0]; 
+                let teamColor = typeof teamTextColors !== 'undefined' && teamTextColors[t.id] ? teamTextColors[t.id] : '#fff'; 
                 t.p.forEach(p => {
                     let pColor = getPlayerColor(p);
+                    // За замовчуванням всі активні, якщо activePlayers ще порожній
+                    if (activePlayers.size === 0) activePlayers.add(p);
                     let isActive = activePlayers.has(p) ? 'active' : '';
                     html += `
                         <div class="perf-player-item ${isActive}" onclick="toggleChartPlayer('${p}', this)">
@@ -2146,7 +2208,8 @@
                     `;
                 });
             });
-            document.getElementById('perf-players-list').innerHTML = html;
+            let list = document.getElementById('perf-players-list');
+            if (list) list.innerHTML = html;
         }
 
         function toggleChartPlayer(pName, elem) {
@@ -2219,7 +2282,33 @@
         }
 
         function updateChartData() {
-            if (!perfChart) return;
+            let canvas = document.getElementById('perfChart');
+            if (!canvas) return;
+
+            // 1. ФІКС ПОМИЛКИ КАНВАСУ: знищуємо старий графік перед створенням нового
+            if (window.perfChart instanceof Chart) {
+                window.perfChart.destroy();
+            }
+
+            // 2. ФІКС ПУСТОГО СПИСКУ: генеруємо список пілотів, якщо він порожній
+            let list = document.getElementById('perf-players-list');
+            if (list && list.innerHTML === '') {
+                initChartSidebar();
+            }
+
+            window.perfChart = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { 
+                        y: { grid: { color: '#333' }, ticks: { color: '#aaa' } }, 
+                        x: { grid: { color: '#333' }, ticks: { color: '#aaa' } } 
+                    }
+                }
+            });
 
             let allGPs = Array.from(document.getElementById('gp-select').options).map(o => o.value);
             let labels = [];
@@ -2229,26 +2318,21 @@
                 if (db.hist[gp]) labels.push(gp.substring(0, 3).toUpperCase()); 
             });
 
-            if (labels.length === 0) {
-                labels = [allGPs[0].substring(0, 3).toUpperCase()];
-            }
+            if (labels.length === 0) labels = [allGPs[0].substring(0, 3).toUpperCase()];
 
             teams.forEach(t => {
                 t.p.forEach(p => {
                     if (!activePlayers.has(p)) return;
-
                     let data = [];
                     let cumTotal = 0;
 
                     allGPs.forEach(gp => {
                         if (!db.hist[gp]) return; 
-
                         let gpPts = 0;
                         if (db.hist[gp][p]) {
                             let h = db.hist[gp][p];
                             gpPts = h.q + h.s + h.r + (h.b || 0); 
                         }
-
                         if (chartMode === 'cumulative') {
                             cumTotal += gpPts;
                             data.push(cumTotal);
@@ -2258,12 +2342,9 @@
                     });
 
                     if (data.length === 0) data = [0];
-
                     datasets.push({
-                        label: p,
-                        data: data,
-                        borderColor: getPlayerColor(p),
-                        backgroundColor: getPlayerColor(p),
+                        label: p, data: data,
+                        borderColor: getPlayerColor(p), backgroundColor: getPlayerColor(p),
                         pointBackgroundColor: '#111',
                         borderWidth: chartMode === 'cumulative' ? 3 : 2,
                         tension: chartMode === 'cumulative' ? 0.3 : 0 
@@ -2271,9 +2352,9 @@
                 });
             });
 
-            perfChart.data.labels = labels;
-            perfChart.data.datasets = datasets;
-            perfChart.update();
+            window.perfChart.data.labels = labels;
+            window.perfChart.data.datasets = datasets;
+            window.perfChart.update();
         }
 
         async function checkAuth(pName) {

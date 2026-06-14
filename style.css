@@ -208,8 +208,9 @@
         tr.row-aston td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/astonmartin.svg'); width: 170px; height: 190px; top: 55%; transform: translateY(-50%) rotate(-5deg); opacity: 0.20; }
         tr.row-alpine td.logo-cell::before { background-image: url('https://upload.wikimedia.org/wikipedia/commons/7/7e/Alpine_F1_Team_Logo.svg'); width: 150px; height: 150px; top: 100%; transform: translateY(-50%) rotate(-5deg); opacity: 0.18; }
         tr.row-alfaromeo td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg'); width: 130px; height: 130px; top: 58%; transform: translateY(-30%) rotate(-5deg); opacity: 0.20; }
-        tr.row-rbr td.logo-cell::before { background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg'); width: 180px; height: 180px; top: 50%; transform: translateY(calc(-50% - 2px)) rotate(-5deg); opacity: 0.20; }
         
+        /* Збільшено scale до 2.8 для компенсації порожніх полів у SVG */
+        tr.row-rbr td.logo-cell::before { background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg'); width: 220px; height: 220px; top: 50%; transform: translateY(-50%) rotate(-5deg) scale(2.8); opacity: 0.20; }
         .tt-wrapper { position: relative; display: inline-block; cursor: help; border-bottom: 1px dashed rgba(255,255,255,0.4); padding-bottom: 1px; }
         
         /* Базовий тултип (відкривається ВНИЗ) */
@@ -296,37 +297,37 @@
         .live-modal-content::-webkit-scrollbar-thumb { background-color: #555; border-radius: 4px; }
         .edit-modal-content { background: var(--panel); border-radius: 12px; border: 1px solid #444; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); width: 350px; text-align: center; }
 
-        .h2h-container { display: flex; flex-direction: column; min-height: calc(100vh - 120px); padding-bottom: 20px; }
-        .h2h-header { display: flex; justify-content: center; align-items: center; margin-bottom: 20px; gap: 40px; }
-        .h2h-select { background: #111; color: #fff; border: 1px solid #555; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; outline: none; transition: 0.3s; min-width: 220px; text-align: center; }
+        /* === АДАПТИВНИЙ H2H (Без скролу екрана) === */
+        .h2h-container { display: flex; flex-direction: column; height: calc(100vh - 120px); padding-bottom: 0; overflow: hidden; }
+        .h2h-header { display: flex; justify-content: center; align-items: center; margin-bottom: 10px; gap: 40px; flex-shrink: 0; }
+        .h2h-select { background: #111; color: #fff; border: 1px solid #555; padding: 10px 15px; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; outline: none; transition: 0.3s; min-width: 200px; text-align: center; }
         .h2h-select:hover { border-color: #888; background: #1a1a1a; }
         .h2h-select optgroup { background: #222; font-style: normal; font-weight: bold; }
         .h2h-select option { background: #111; color: #fff; font-weight: normal; }
         
-        .h2h-logo-wrap { position: relative; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; }
-        .h2h-logo { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; filter: brightness(0) invert(1); opacity: 0.8; transition: 0.5s ease; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        .vs-text { font-size: 36px; font-weight: 900; font-style: italic; color: #fff; text-shadow: 0 0 15px rgba(255,255,255,0.4); }
-        
-        .custom-dropdown { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); background: #1a1a1a; border: 1px solid #444; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 100; min-width: 180px; display: none; overflow: hidden; flex-direction: column; }
+        .h2h-logo-wrap { position: relative; width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; }
+        .h2h-logo { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; filter: brightness(0) invert(1); opacity: 0.8; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; z-index: 2; }
+        .vs-text { font-size: 24px; font-weight: 900; font-style: italic; color: #fff; }
+
+        /* Відновлені стилі випадаючого списку (Dropdown) */
+        .custom-dropdown { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); background: #1a1a1a; border: 1px solid #444; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 100; min-width: 180px; display: none; flex-direction: column; overflow: hidden; }
         .custom-dropdown.show { display: flex; animation: dropFade 0.2s ease forwards; }
         @keyframes dropFade { 
             from { opacity: 0; transform: translateX(-50%) translateY(10px); } 
             to { opacity: 1; transform: translateX(-50%) translateY(0); } 
         }
-
-        .dropdown-item { padding: 12px 15px; font-size: 13px; font-weight: bold; text-align: center; cursor: pointer; transition: 0.2s; border-bottom: 1px solid #222; }
+        .dropdown-item { padding: 12px 15px; font-size: 13px; font-weight: bold; text-align: center; cursor: pointer; transition: 0.2s; border-bottom: 1px solid #222; color: #fff; }
         .dropdown-item:last-child { border-bottom: none; }
         .dropdown-item:hover { background: #333; }
-
-        /* === НОВІ КЛАСИ ДЛЯ СТРУКТУРИ H2H === */
-        /* Радар праворуч, фіксований центр смужок */
-        .h2h-main-row { display: flex; gap: 40px; align-items: center; justify-content: center; flex-wrap: wrap; width: 100%; margin-top: 10px; }
-        .h2h-bars-wrap { flex: 1; min-width: 400px; max-width: 800px; }
-        .h2h-radar-wrap { width: 450px; height: 450px; display: flex; justify-content: center; align-items: center; order: 2; }
+        
+        .h2h-main-row { display: flex; gap: 20px; align-items: center; justify-content: center; width: 100%; margin-top: 5px; flex: 1; min-height: 0; overflow: hidden; }
+        .h2h-bars-wrap { flex: 1; min-width: 350px; max-width: 650px; overflow-y: auto; padding-right: 10px; }
+        .h2h-bars-wrap::-webkit-scrollbar { width: 4px; }
+        .h2h-bars-wrap::-webkit-scrollbar-thumb { background-color: #555; border-radius: 2px; }
+        .h2h-radar-wrap { width: 35vw; max-width: 350px; height: 35vw; max-height: 350px; display: flex; justify-content: center; align-items: center; order: 2; flex-shrink: 0; }
         .bar-fill { height: 100%; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1); width: 0%; } 
 
-        /* === ТАБЛИЦЯ H2H (Без скролу, притиснута донизу) === */
-        .rbr-wrapper { margin-top: auto; width: 100%; padding-top: 40px; overflow: hidden; }
+        .rbr-wrapper { margin-top: auto; width: 100%; padding-top: 15px; flex-shrink: 0; }
         .rbr-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: center; font-size: 13px; font-weight: bold; background: #111; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
         .rbr-table th, .rbr-table td { padding: 12px 5px; border: 1px solid #333; }
         .rbr-table th:first-child, .rbr-table td:first-child { width: 120px; text-align: left; padding-left: 15px; border-right: 2px solid #444; }
@@ -351,8 +352,9 @@
         .perf-player-item:not(.active) .perf-color-box { background: transparent !important; border-color: #555; }
         .perf-player-item:not(.active) .perf-p-name { color: #666; }
         
-        .perf-chart-area { flex: 1; padding: 20px; position: relative; }
-        .perf-controls { position: absolute; top: 15px; right: 25px; display: flex; gap: 10px; z-index: 10; }
+        .perf-chart-area { flex: 1; padding: 20px; display: flex; flex-direction: column; position: relative; }
+        .perf-controls { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 15px; z-index: 10; position: relative; flex-shrink: 0; }
+        #perfChart { flex: 1; min-height: 0; width: 100%; }
         .perf-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 5px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: 0.2s; }
         .perf-btn.active { background: #fff; color: #000; font-weight: bold; }
         
@@ -373,18 +375,17 @@
         .team-block.alfaromeo { border-left-color: var(--alfaromeo); }
         .team-block.rbr { border-left-color: var(--rbr); }
 
-        .team-block.rbr::before, .rbr::before {
+        tr.row-rbr td.logo-cell::before {
             content: ""; position: absolute;
-            top: 50%; left: 60%; /* Зсунуто праворуч */
+            top: 50%; left: 60%;
             transform: translate(-50%, -50%);
             width: 80%; height: 80%;
-            /* Base64 закодована емблема для миттєвого завантаження */
-            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><path fill="%231E41FF" d="M250,20C123.5,20,20,123.5,20,250s103.5,230,230,230s230-103.5,230-230S376.5,20,250,20z M250,50 c110.5,50,200,139.5,200,200s-89.5,200-200,200S50,360.5,50,250S139.5,50,250,50z M208.5,130.5l-83,235h48.5l18.5-55h115l18.5,55 h48.5l-83-235H208.5z M250,185l43.5,89.5h-87L250,185z M120,210v40h260v-40H120z"/></svg>');
+            background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg');
             background-size: contain; background-repeat: no-repeat; background-position: center;
             opacity: 0.15; z-index: 0; pointer-events: none;
         }
+
         .team-block.team-confirmed { opacity: 0.6; transform: scale(0.96); filter: grayscale(50%); transition: all 0.5s ease; border-color: var(--success); }
-        .team-block.team-confirmed::after { content: "✅"; position: absolute; top: 10px; right: 10px; font-size: 24px; }
 
         .player-row { display: flex; align-items: center; padding: 10px 15px; border-bottom: 1px solid #222; gap: 15px; transition: 0.2s; }
         .player-row:last-child { border-bottom: none; }
@@ -426,7 +427,9 @@
         }
         .table-scroll-wrapper::-webkit-scrollbar { display: none; }
 
-        /* 2. Базові стилі таблиць (повертаємо розтягування) */
+        /* =========================================
+        БАЗОВІ СТИЛІ ТАБЛИЦЬ (Вирівнювання та ширина)
+        ========================================= */
         #table-dr {
             min-width: 100%;
             width: max-content;
@@ -441,65 +444,133 @@
             border-spacing: 0;
         }
 
-        /* 3. Жорстка ширина колонок */
-        /* Колонка 1: Позиція */
+        /* Жорстка ширина колонок для стабільності */
         #table-dr th:nth-child(1), #table-dr td:nth-child(1),
-        #table-tm th:nth-child(1), #table-tm td:nth-child(1) {
-            width: 40px; min-width: 40px; text-align: center;
-        }
-        /* Колонка 2: Пілот / Команда */
+        #table-tm th:nth-child(1), #table-tm td:nth-child(1) { width: 40px; min-width: 40px; text-align: center; }
+
         #table-dr th:nth-child(2), #table-dr td:nth-child(2),
-        #table-tm th:nth-child(2), #table-tm td:nth-child(2) {
-            width: 280px; min-width: 280px; text-align: left;
-        }
-        /* Колонка 3: Бали */
+        #table-tm th:nth-child(2), #table-tm td:nth-child(2) { width: 280px; min-width: 280px; text-align: left; }
+
         #table-dr th:nth-child(3), #table-dr td:nth-child(3),
-        #table-tm th:nth-child(3), #table-tm td:nth-child(3) {
-            width: 80px; min-width: 80px; text-align: center;
-        }
+        #table-tm th:nth-child(3), #table-tm td:nth-child(3) { width: 80px; min-width: 80px; text-align: center; }
+
         /* Колонки 4+: Етапи Гран-прі (тільки для таблиці пілотів) */
-        #table-dr th:nth-child(n+4), #table-dr td:nth-child(n+4) {
-            width: 65px; min-width: 65px; text-align: center; z-index: 1;
-        }
+        #table-dr th:nth-child(n+4), #table-dr td:nth-child(n+4) { width: 65px; min-width: 65px; text-align: center; z-index: 1; }
 
         /* =========================================
-           ЛОГІКА ФІКСАЦІЇ (STICKY) ДЛЯ ТАБЛИЦІ ПІЛОТІВ
-           ========================================= */
-        
-        /* Робимо перші 3 колонки фіксованими з НЕПРОЗОРИМ фоном, щоб сховати скрол */
-        #table-dr th:nth-child(1), #table-dr td:nth-child(1) {
-            position: sticky; left: 0; z-index: 4; background-color: #141419;
-        }
-        #table-dr th:nth-child(2), #table-dr td:nth-child(2) {
-            position: sticky; left: 40px; z-index: 4; background-color: #141419;
-        }
-        #table-dr th:nth-child(3), #table-dr td:nth-child(3) {
-            position: sticky; left: 320px; z-index: 4; background-color: #141419;
-            border-right: 2px solid #333; /* Межа початку прокрутки */
-            box-shadow: 5px 0 10px -5px rgba(0,0,0,0.6); /* Тінь для глибини */
+        ЛОГІКА ФІКСАЦІЇ (STICKY) ДЛЯ ТАБЛИЦІ ПІЛОТІВ
+        ========================================= */
+        /* Перші три колонки (Місце, Пілот, Бали) фіксуємо ліворуч під час скролу */
+        #table-dr th:nth-child(1), #table-dr td:nth-child(1) { position: sticky; left: 0; z-index: 4; background-color: #141419; }
+        #table-dr th:nth-child(2), #table-dr td:nth-child(2) { position: sticky; left: 40px; z-index: 4; background-color: #141419; }
+        #table-dr th:nth-child(3), #table-dr td:nth-child(3) { 
+            position: sticky; left: 320px; z-index: 4; background-color: #141419; 
+            border-right: 2px solid #333; /* Межа, де починається скрол */
+            box-shadow: 5px 0 10px -5px rgba(0,0,0,0.6); 
         }
 
-        /* Шапка фіксованих колонок має бути вище за комірки */
-        #table-dr thead th:nth-child(1),
-        #table-dr thead th:nth-child(2),
-        #table-dr thead th:nth-child(3) {
-            background-color: #1a1a1a; z-index: 5;
-        }
+        /* Шапка фіксованих колонок має бути найвище (щоб не перекривалася при скролі вниз) */
+        #table-dr thead th:nth-child(1), 
+        #table-dr thead th:nth-child(2), 
+        #table-dr thead th:nth-child(3) { background-color: #1a1a1a; z-index: 5; }
 
         /* Відновлюємо підсвітку при наведенні для фіксованих колонок */
-        #table-dr tr:hover td:nth-child(1),
-        #table-dr tr:hover td:nth-child(2),
-        #table-dr tr:hover td:nth-child(3) {
-            background-color: #1c1c22 !important; 
-        }
+        #table-dr tr:hover td:nth-child(1), 
+        #table-dr tr:hover td:nth-child(2), 
+        #table-dr tr:hover td:nth-child(3) { background-color: #1c1c22 !important; }
 
         /* =========================================
-           ПОРЯТУНОК ЕМБЛЕМ ТА ТЕКСТУ
-           ========================================= */
-        #table-dr td.logo-cell::before, #table-tm td.logo-cell::before {
-            z-index: 0 !important; /* Логотип на самому дні */
+        ПОРЯТУНОК ЕМБЛЕМ ТА ТЕКСТУ В ТАБЛИЦЯХ
+        ========================================= */
+        /* Сама комірка має бути відносною і ховати те, що вилазить */
+        td.logo-cell { position: relative; overflow: hidden; z-index: 1; }
+
+        /* Емблема (background) має бути АБСОЛЮТНОЮ на дні комірки, щоб не перекривати інший контент чи скрол */
+        td.logo-cell::before { 
+            content: ""; position: absolute; 
+            background-repeat: no-repeat; background-size: contain; background-position: left center; 
+            filter: brightness(0) invert(1); pointer-events: none; z-index: 0; 
         }
-        #table-dr td.logo-cell div, #table-tm td.logo-cell div {
-            position: relative;
-            z-index: 2 !important; /* Текст та тег завжди поверх логотипу */
+
+        /* Текст всередині піднімаємо над емблемою */
+        td.logo-cell div { position: relative; z-index: 2; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+
+        /* Зсув емблем для таблиці пілотів */
+        #table-dr td.logo-cell::before { left: 160px; }
+        #table-dr tr.row-redbull td.logo-cell::before { left: 140px; }
+        #table-dr tr.row-mercedes td.logo-cell::before { left: 170px; }
+        #table-dr tr.row-ferrari td.logo-cell::before { left: 140px; } 
+        #table-dr tr.row-alpine td.logo-cell::before { left: 170px; }
+        #table-dr tr.row-alfaromeo td.logo-cell::before { left: 180px; }
+        #table-dr tr.row-aston td.logo-cell::before { left: 150px; }
+        #table-dr tr.row-rbr td.logo-cell::before { left: 140px; }
+
+        /* Зсув емблем для таблиці команд */
+        #table-tm td.logo-cell::before { left: 160px; }
+        #table-tm tr.row-redbull td.logo-cell::before { left: 140px; }
+        #table-tm tr.row-mercedes td.logo-cell::before { left: 170px; }
+        #table-tm tr.row-ferrari td.logo-cell::before { left: 140px; top: calc(170% + 10px); } 
+        #table-tm tr.row-alpine td.logo-cell::before { left: 170px; }
+        #table-tm tr.row-alfaromeo td.logo-cell::before { left: 180px; }
+        #table-tm tr.row-aston td.logo-cell::before { left: 150px; }
+        #table-tm tr.row-rbr td.logo-cell::before { left: 140px; }
+
+        /* =========================================
+        ГЛОБАЛЬНЕ ОБМЕЖЕННЯ ВИСОТИ ВКЛАДОК
+        ========================================= */
+        .tab-content {
+            height: calc(100vh - 140px); /* Жорстко фіксуємо висоту під екран */
+            overflow-y: auto; /* Скрол тільки всередині вкладки */
+            overflow-x: hidden;
+            padding-right: 10px;
         }
+        .tab-content::-webkit-scrollbar { width: 6px; }
+        .tab-content::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
+
+        /* === ВНУТРІШНІЙ СКРОЛ ДЛЯ ПРАВИЛ ТА ІНШИХ ДОВГИХ ВКЛАДОК === */
+        #tab-rules, #tab-details { 
+            height: calc(100vh - 120px); 
+            overflow-y: auto; 
+            padding-right: 10px; 
+        }
+        #tab-rules::-webkit-scrollbar, #tab-details::-webkit-scrollbar { width: 6px; }
+        #tab-rules::-webkit-scrollbar-thumb, #tab-details::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
+
+        /* === АДАПТИВНИЙ H2H === */
+        #tab-h2h.tab-content { overflow: hidden; padding-right: 0; }
+        .h2h-container { display: flex; flex-direction: column; height: 100%; padding-bottom: 0; }
+        .h2h-header { display: flex; justify-content: center; align-items: center; margin-bottom: 10px; gap: 40px; flex-shrink: 0; }
+        .h2h-select { background: #111; color: #fff; border: 1px solid #555; padding: 10px 15px; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; min-width: 200px; text-align: center; }
+        .h2h-select:hover { border-color: #888; background: #1a1a1a; }
+        .h2h-logo-wrap { position: relative; width: 65px; height: 65px; display: flex; align-items: center; justify-content: center; }
+        .h2h-logo { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center; filter: brightness(0) invert(1); opacity: 0.8; }
+        .vs-text { font-size: 24px; font-weight: 900; font-style: italic; color: #fff; }
+
+        .h2h-main-row { display: flex; gap: 20px; align-items: center; justify-content: center; flex: 1; min-height: 0; }
+        .h2h-bars-wrap { flex: 1; min-width: 350px; max-width: 600px; overflow-y: auto; max-height: 100%; padding-right: 10px; }
+        .h2h-bars-wrap::-webkit-scrollbar { width: 4px; }
+        .h2h-bars-wrap::-webkit-scrollbar-thumb { background-color: #555; border-radius: 2px; }
+        .h2h-radar-wrap { width: 320px; height: 320px; display: flex; justify-content: center; align-items: center; flex-shrink: 0; }
+        .bar-fill { height: 100%; transition: width 1s cubic-bezier(0.1, 0.7, 0.1, 1); width: 0%; } 
+
+        .rbr-wrapper { flex-shrink: 0; width: 100%; padding-top: 15px; }
+        .rbr-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: center; font-size: 13px; font-weight: bold; background: #111; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .rbr-table th, .rbr-table td { padding: 8px 5px; border: 1px solid #333; }
+        .rbr-table th:first-child, .rbr-table td:first-child { width: 120px; text-align: left; padding-left: 15px; border-right: 2px solid #444; }
+        .rbr-table th { background: #1a1a1a; color: #888; font-size: 10px; text-transform: uppercase; border-bottom: 2px solid #444; }
+        .rbr-table td.win { color: var(--success); font-weight: 900; background: rgba(0, 255, 0, 0.05); }
+        .rbr-table td.loss { color: var(--danger); font-weight: normal; background: rgba(255, 0, 0, 0.05); }
+        .rbr-table td.tie { color: #888; background: rgba(255, 255, 255, 0.02); }
+        .rbr-table td.empty { color: #444; font-weight: normal; }
+
+        /* === ПЕРФОРМАНС === */
+        .perf-container { display: flex; background: var(--panel); border-radius: 12px; border: 1px solid #333; height: 100%; }
+
+        /* === ВНУТРІШНІЙ СКРОЛ ДЛЯ ПРАВИЛ ТА ІНШИХ ДОВГИХ ВКЛАДОК === */
+        #tab-rules, #tab-details { 
+            height: calc(100vh - 120px); 
+            overflow-y: auto; 
+            padding-right: 10px; 
+        }
+        #tab-rules::-webkit-scrollbar, #tab-details::-webkit-scrollbar { width: 6px; }
+        #tab-rules::-webkit-scrollbar-thumb, #tab-details::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
