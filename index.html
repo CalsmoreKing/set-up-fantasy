@@ -22,6 +22,7 @@
             <button class="nav-tab" onclick="switchTab('tab-h2h', this)">Порівняння H2H</button>
             <button class="nav-tab" onclick="switchTab('tab-perf', this)">Перформанс</button>
             <button id="nav-btn-details" class="nav-tab" onclick="switchTab('tab-details', this)">Результати ГП</button>
+            <button class="nav-tab" onclick="switchTab('tab-calendar', this)">Календар</button>
             <button class="nav-tab" onclick="switchTab('tab-rules', this)">Правила</button>
         </div>
 
@@ -192,53 +193,90 @@
 
         <div id="tab-rules" class="tab-content" style="display: none; height: calc(100vh - 100px); overflow-y: auto; overflow-x: hidden; padding-bottom: 20px;">
             <div class="panel" style="max-width: 850px; margin: 0 auto; text-align: left; padding: 20px; border: 1px solid #333; border-radius: 12px; background: var(--panel); box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-                <h2 style="text-align: center; color: var(--warning); margin-bottom: 20px; font-size: 20px; text-transform: uppercase; letter-spacing: 1px;">Правила Ліги Set-up Fantasy</h2>
+                <h2 style="text-align: center; color: var(--warning); margin-bottom: 20px; font-size: 20px; text-transform: uppercase; letter-spacing: 1px;">Правила Ліги Прогнозистів Set-up Fantasy</h2>
                 
                 <div id="rules-text" style="line-height: 1.6; color: #ddd; font-size: 14px;">
                     
-                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; margin-top: 0; font-size: 16px;">Загальні організаційні положення</h3>
-                    <ul style="margin-bottom: 20px; padding-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Дедлайн:</strong> прийом прогнозів повністю закривається за <span style="color: var(--danger); font-weight: bold;">30 хвилин</span> до початку відповідної сесії.</li>
-                        <li><strong>Редагування:</strong> змінювати вже надісланий прогноз дозволяється суворо <span style="color: var(--warning); font-weight: bold;">1 раз</span> за етап.</li>
-                    </ul>
-
-                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; font-size: 16px;">Формати етапів та нарахування балів</h3>
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; margin-top: 0; font-size: 16px;">⏱️ Кваліфікація</h3>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #111; border-radius: 8px; overflow: hidden; font-size: 13px;">
                         <thead>
                             <tr style="background: #222; color: #fff; text-align: left;">
-                                <th style="padding: 10px; border-bottom: 1px solid #444;">Сесія</th>
-                                <th style="padding: 10px; border-bottom: 1px solid #444;">Завдання для гравця</th>
-                                <th style="padding: 10px; border-bottom: 1px solid #444;">Система балів</th>
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Точність прогнозу</th>
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Кількість балів</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr>
-                                <td style="padding: 10px; border-bottom: 1px solid #333; color: var(--warning); font-weight: bold;">Кваліфікація (Рулетка)</td>
-                                <td style="padding: 10px; border-bottom: 1px solid #333;">Спрогнозувати точне місце свого унікального персонального гонщика за чистими результатами.</td>
-                                <td style="padding: 10px; border-bottom: 1px solid #333;">Точне влучання: <strong style="color: var(--success);">5 балів</strong>.<br>Похибка +/- 1 позиція: <strong style="color: var(--success);">2 бали</strong>.</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border-bottom: 1px solid #333; color: #3498db; font-weight: bold;">Спринт</td>
-                                <td style="padding: 10px; border-bottom: 1px solid #333;">Спрогнозувати першу п'ятірку пілотів на фініші (Топ-5).</td>
-                                <td style="padding: 10px; border-bottom: 1px solid #333;">Стандартні бали за точне вгадування позицій.</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; color: var(--danger); font-weight: bold;">Гонка</td>
-                                <td style="padding: 10px;">Спрогнозувати першу десятку пілотів (Топ-10) та вказати володаря найшвидшого кола.</td>
-                                <td style="padding: 10px;">Стандартні бали за точні місця та швидке коло.</td>
-                            </tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Точне місце</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">6</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Похибка +/- 1 позиція</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">3</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Похибка +/- 2 позиції</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">1</td></tr>
                         </tbody>
                     </table>
 
-                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; font-size: 16px;">Деталі формату «Кваліфікаційна рулетка»</h3>
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; font-size: 16px;">💨 Спринт (Топ-5)</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #111; border-radius: 8px; overflow: hidden; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #222; color: #fff; text-align: left;">
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Точність прогнозу</th>
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Кількість балів</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Точне місце</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">3</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Похибка +/- 1 позиція</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">2</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333;">Похибка +/- 2 позиції</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">1</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; font-size: 16px;">🏁 Гонка (Топ-10)</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #111; border-radius: 8px; overflow: hidden; font-size: 13px; text-align: center;">
+                        <thead>
+                            <tr style="background: #222; color: #fff;">
+                                <th style="padding: 10px; border-bottom: 1px solid #444; text-align: left;">Точність прогнозу</th>
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Позиції 1–5</th>
+                                <th style="padding: 10px; border-bottom: 1px solid #444;">Позиції 6–10</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333; text-align: left;">Точне місце</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">5</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">6</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333; text-align: left;">Похибка +/- 1 позиція</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">2</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">3</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333; text-align: left;">Похибка +/- 2 позиції</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">1</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">2</td></tr>
+                            <tr><td style="padding: 10px; border-bottom: 1px solid #333; text-align: left;">Похибка 3+ позицій</td><td style="padding: 10px; border-bottom: 1px solid #333; color: #888;">0</td><td style="padding: 10px; border-bottom: 1px solid #333; color: var(--success); font-weight: bold;">1</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; font-size: 16px;">🎯 Додаткові умови та бонуси (Гонка)</h3>
                     <ul style="padding-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Механіка:</strong> перед етапом кожному гравцю випадає 1 унікальний гонщик шляхом жеребкування.</li>
-                        <li style="margin-bottom: 8px;"><strong>Ліміти:</strong> гонщики не повторюються між гравцями на одному етапі. Гравець не може отримати одного й того ж гонщика двічі за сезон.</li>
-                        <li style="margin-bottom: 8px;"><strong>Чистий результат:</strong> бали рахуються за фактичним часом кваліфікації. Подальші штрафи за заміну деталей на стартовій решітці не враховуються.</li>
-                        <li><strong>Форс-мажори:</strong> прогноз закріплюється за болідом. Якщо основного пілота замінюють перед сесією, прогноз автоматично переноситься на резервного гонщика. У разі невиїзду (DNS) або дискваліфікації (DSQ) болід отримує останнє місце.</li>
+                        <li style="margin-bottom: 8px;"><strong>Швидке коло:</strong> <span style="color: var(--success); font-weight: bold;">2 бали</span></li>
+                        <li style="margin-bottom: 8px;"><strong>Найбільший прорив:</strong> <span style="color: var(--success); font-weight: bold;">4 бали</span> (за точне вгадування пілота, який відіграв найбільше позицій відносно свого стартового місця)</li>
+                        <li style="margin-bottom: 8px;"><strong>Склад Топ-3:</strong> <span style="color: var(--success); font-weight: bold;">+2 бали</span> (якщо три обрані гравцем пілоти фінішували на подіумі, незалежно від їхнього точного порядку)</li>
+                        <li style="margin-bottom: 8px;"><strong>Склад Топ-5:</strong> <span style="color: var(--success); font-weight: bold;">+2 бали</span> (якщо п'ять обраних гравцем пілотів фінішували в першій п'ятірці, незалежно від їхнього точного порядку)</li>
+                        <li style="color: #aaa; font-size: 12px; margin-top: 10px; list-style-type: none;"><em>Примітка: за вгаданий Склад Топ-3 та Склад Топ-5 бонуси сумуються</em></li>
                     </ul>
-                    
+
                 </div>
+            </div>
+        </div>
+
+        <div id="tab-calendar" class="tab-content" style="display: none; height: calc(100vh - 120px); overflow-y: auto;">
+            <div class="cal-wrapper" style="max-width: 1000px; margin: 0 auto; background: var(--panel); border: 1px solid #333; border-radius: 12px; padding: 20px;">
+                
+                <div class="cal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <button class="btn" onclick="changeMonth(-1)" style="font-size: 16px;">&#9664;</button>
+                    <div class="cal-title" style="text-align: center;">
+                        <span id="cal-month-name" style="font-weight: 900; color: #fff; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;"></span>
+                        <span id="cal-year" style="color: #888; font-size: 24px; margin-left: 10px;"></span>
+                    </div>
+                    <button class="btn" onclick="changeMonth(1)" style="font-size: 16px;">&#9654;</button>
+                </div>
+
+                <div class="cal-grid-header" style="display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: bold; color: #aaa; margin-bottom: 10px; font-size: 12px;">
+                    <div>ПН</div><div>ВТ</div><div>СР</div><div>ЧТ</div><div>ПТ</div><div>СБ</div><div>НД</div>
+                </div>
+
+                <div id="cal-grid" class="cal-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px;">
+                    <!-- Сітка календаря генеруватиметься через JS -->
+                </div>
+
             </div>
         </div>
 

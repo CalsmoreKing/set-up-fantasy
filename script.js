@@ -426,7 +426,9 @@
                 if (tabId === 'tab-h2h' && typeof renderH2H === 'function') renderH2H();
                 if (tabId === 'tab-perf' && typeof updateChartData === 'function') updateChartData();
                 if (tabId === 'tab-details' && typeof updateDetailsTable === 'function') updateDetailsTable();
-            }, 10);
+                // Додаємо виклик для календаря
+                if (tabId === 'tab-calendar' && typeof initCalendar === 'function') initCalendar();
+            }, 50);
         }
 
         function goToGP(gpName, e) {
@@ -2636,4 +2638,193 @@ function showToast(msg) {
     t.style.cssText = "position:fixed; top:20px; right:20px; background:var(--danger); color:#fff; padding:15px; border-radius:8px; z-index:10000; box-shadow:0 4px 15px rgba(0,0,0,0.5); font-weight:bold; transition: opacity 0.5s;";
     document.body.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 3500);
+}
+
+// =========================================
+// ЛОГІКА КАЛЕНДАРЯ ГРАН-ПРІ
+// =========================================
+
+// База розкладу. Сюди ти зможеш додавати інші етапи у такому ж форматі (YYYY-MM-DD).
+// type може бути: 'prac' (Практика), 'qual' (Кваліфікація), 'sprint' (Спринт), 'race' (Гонка).
+const trackInfo = {
+    "Австрія": {
+        name: "RED BULL RING",
+        img: "https://upload.wikimedia.org/wikipedia/commons/2/20/Circuit_Red_Bull_Ring.svg", // SVG з Вікіпедії
+        length: "4.318 КМ",
+        turns: "10",
+        record: "1:05.619 (2020)",
+        opened: "1969, 2011",
+        capacity: "105,000",
+        grade: "1"
+    },
+    "Велика Британія": {
+        name: "SILVERSTONE CIRCUIT",
+        img: "https://upload.wikimedia.org/wikipedia/commons/d/d4/Silverstone_Circuit_2020.svg",
+        length: "5.891 КМ",
+        turns: "18",
+        record: "1:27.097 (2020)",
+        opened: "1948",
+        capacity: "150,000",
+        grade: "1"
+    }
+};
+
+const calendarEvents = [
+    // --- АВСТРІЯ ---
+    { date: "2026-06-26", title: "Практика 1", type: "prac", time: "14:30 - 15:30", gpId: "Австрія" },
+    { date: "2026-06-26", title: "Практика 2", type: "prac", time: "18:00 - 19:00", gpId: "Австрія" },
+    { date: "2026-06-27", title: "Практика 3", type: "prac", time: "13:30 - 14:30", gpId: "Австрія" },
+    { date: "2026-06-27", title: "Кваліфікація", type: "qual", time: "17:00 - 18:00", gpId: "Австрія" },
+    { date: "2026-06-28", title: "Гонка", type: "race", time: "16:00 - 18:00", gpId: "Австрія" },
+    
+    // --- ВЕЛИКА БРИТАНІЯ ---
+    { date: "2026-07-03", title: "Практика 1", type: "prac", time: "14:30 - 15:30", gpId: "Велика Британія" },
+    { date: "2026-07-03", title: "Практика 2", type: "prac", time: "18:00 - 19:00", gpId: "Велика Британія" },
+    { date: "2026-07-04", title: "Практика 3", type: "prac", time: "13:30 - 14:30", gpId: "Велика Британія" },
+    { date: "2026-07-04", title: "Кваліфікація", type: "qual", time: "17:00 - 18:00", gpId: "Велика Британія" },
+    { date: "2026-07-05", title: "Гонка", type: "race", time: "16:00 - 18:00", gpId: "Велика Британія" }
+];
+
+let currentCalDate = new Date(2026, 5, 1); // 5 = Червень (в JS місяці рахуються від 0)
+
+function initCalendar() {
+    renderCalendar(currentCalDate);
+}
+
+function changeMonth(offset) {
+    let grid = document.getElementById('cal-grid');
+    if (!grid) return;
+    
+    // Анімація зникнення
+    grid.style.opacity = 0; 
+    
+    setTimeout(() => {
+        currentCalDate.setMonth(currentCalDate.getMonth() + offset);
+        renderCalendar(currentCalDate);
+        // Анімація появи
+        grid.style.opacity = 1; 
+    }, 300); // 300мс збігається з transition у CSS
+}
+
+function renderCalendar(date) {
+    const grid = document.getElementById('cal-grid');
+    const monthNameEl = document.getElementById('cal-month-name');
+    const yearEl = document.getElementById('cal-year');
+    if (!grid || !monthNameEl) return;
+
+    const year = date.getFullYear();
+    const month = date.getMonth();
+
+    const monthNames = ["Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень", "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"];
+    monthNameEl.innerText = monthNames[month];
+    yearEl.innerText = year;
+
+    grid.innerHTML = '';
+
+    // Знаходимо перший день місяця (0 - неділя, 1 - понеділок...)
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // Адаптуємо для старту з понеділка (якщо неділя, то зміщуємо на 6 порожніх клітинок)
+    let startDay = firstDay === 0 ? 6 : firstDay - 1;
+
+    // Малюємо порожні клітинки до початку місяця
+    for (let i = 0; i < startDay; i++) {
+        grid.innerHTML += `<div class="cal-day empty"></div>`;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Обнуляємо час для чесного порівняння по днях
+
+    // Заповнюємо дні місяця
+    for (let day = 1; day <= daysInMonth; day++) {
+        let dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        let currentDayDate = new Date(year, month, day);
+        
+        let isPast = currentDayDate < today;
+        let pastClass = isPast ? 'past' : '';
+
+        // Шукаємо події для конкретного дня
+        let dayEvents = calendarEvents.filter(e => e.date === dateStr);
+        let eventsHTML = '';
+        let winnerHTML = '';
+
+        dayEvents.forEach(e => {
+            let gpFullSchedule = '';
+            let trackHTML = '';
+            
+            // Збираємо розклад усього вікенду
+            if (e.gpId) {
+                let gpEvents = calendarEvents.filter(ev => ev.gpId === e.gpId);
+                gpEvents.forEach(ev => {
+                    let d = ev.date.split('-'); // Розбиваємо YYYY-MM-DD
+                    gpFullSchedule += `
+                        <div class="tt-sch-row">
+                            <span class="tt-sch-date">${d[2]}.${d[1]}</span>
+                            <span class="tt-sch-name">${ev.title}</span>
+                            <span class="tt-sch-time">${ev.time}</span>
+                        </div>
+                    `;
+                });
+
+                // Підтягуємо інфо про трек
+                let tInfo = trackInfo[e.gpId];
+                if (tInfo) {
+                    trackHTML = `
+                        <div class="tt-track-section">
+                            <div class="tt-track-img" style="background-image: url('${tInfo.img}')"></div>
+                            <div class="tt-track-stats">
+                                <div class="tt-stats-title">ІНФОРМАЦІЯ ПРО ТРЕК</div>
+                                <div><span>ДОВЖИНА:</span> ${tInfo.length}</div>
+                                <div><span>ПОВОРОТИ:</span> ${tInfo.turns}</div>
+                                <div><span>РЕКОРД:</span> ${tInfo.record}</div>
+                                <div><span>ВІДКРИТИЙ:</span> ${tInfo.opened}</div>
+                                <div><span>МІСТКІСТЬ:</span> ${tInfo.capacity}</div>
+                                <div><span>FIA GRADE:</span> ${tInfo.grade}</div>
+                                <div><span>НАЗВА:</span> ${tInfo.name}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            eventsHTML += `
+                <div class="cal-event ${e.type}">
+                    ${e.title}
+                    <div class="cal-tooltip">
+                        <div class="tt-header">
+                            <div class="tt-title">РОЗКЛАД ГРАН-ПРІ</div>
+                            <div class="tt-gp">${e.gpId || ''}</div>
+                        </div>
+                        <div class="tt-schedule">
+                            ${gpFullSchedule}
+                        </div>
+                        ${trackHTML}
+                    </div>
+                </div>
+            `;
+
+            // Логіка переможця етапу (залишається без змін)
+            if (isPast && e.type === 'race' && typeof db !== 'undefined' && db.hist && db.hist[e.gpId]) {
+                let bestPlayer = null;
+                let maxPts = -1;
+                for (let p in db.hist[e.gpId]) {
+                    let h = db.hist[e.gpId][p];
+                    let pts = h.q + h.s + h.r + (h.b || 0);
+                    if (pts > maxPts) { maxPts = pts; bestPlayer = p; }
+                }
+                if (bestPlayer) {
+                    winnerHTML = `<div class="cal-winner" title="${maxPts} балів за етап">🏆 ${bestPlayer}</div>`;
+                }
+            }
+        });
+
+        grid.innerHTML += `
+            <div class="cal-day ${pastClass}">
+                <div class="cal-date">${day}</div>
+                ${eventsHTML}
+                ${winnerHTML}
+            </div>
+        `;
+    }
 }

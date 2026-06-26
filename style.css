@@ -210,7 +210,17 @@
         tr.row-alfaromeo td.logo-cell::before { background-image: url('https://cdn.jsdelivr.net/npm/simple-icons@11.0.0/icons/alfaromeo.svg'); width: 130px; height: 130px; top: 58%; transform: translateY(-30%) rotate(-5deg); opacity: 0.20; }
         
         /* Збільшено scale до 2.8 для компенсації порожніх полів у SVG */
-        tr.row-rbr td.logo-cell::before { background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg'); width: 220px; height: 220px; top: 50%; transform: translateY(-50%) rotate(-5deg) scale(2.8); opacity: 0.20; }
+        tr.row-rbr td.logo-cell::before {
+            background-image: url('https://en.wikipedia.org/wiki/Special:FilePath/Scuderia_Alpha-Tauri.svg') !important;
+            background-size: 140px auto !important; 
+            width: 83% !important;
+            height: 100% !important;
+            top: 0 !important;
+            left: 0 !important;
+            transform: none !important;
+            background-position: calc(100% - 40px) center !important; /* Відступ 40px від правого краю, по центру вертикалі */
+            opacity: 0.20 !important;
+        }
         .tt-wrapper { position: relative; display: inline-block; cursor: help; border-bottom: 1px dashed rgba(255,255,255,0.4); padding-bottom: 1px; }
         
         /* Базовий тултип (відкривається ВНИЗ) */
@@ -574,3 +584,175 @@
         }
         #tab-rules::-webkit-scrollbar, #tab-details::-webkit-scrollbar { width: 6px; }
         #tab-rules::-webkit-scrollbar-thumb, #tab-details::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
+
+        /* =========================================
+   КАЛЕНДАР ГРАН-ПРІ
+   ========================================= */
+.cal-wrapper {
+    max-width: 1000px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.cal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.cal-nav-btn {
+    background: #222;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+    font-size: 16px;
+    font-weight: bold;
+}
+.cal-nav-btn:hover { background: #444; border-color: #666; }
+
+.cal-grid-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
+    font-weight: bold;
+    color: #aaa;
+    margin-bottom: 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    transition: opacity 0.3s ease; /* Для плавної анімації перемикання місяців */
+}
+
+.cal-day {
+    background: #15151a;
+    border: 1px solid #2a2a35;
+    border-radius: 6px;
+    min-height: 110px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    transition: 0.2s;
+    position: relative;
+}
+.cal-day:hover { border-color: #555; background: #1c1c24; }
+.cal-day.empty { background: transparent; border: none; pointer-events: none; }
+.cal-day.past { opacity: 0.4; filter: grayscale(70%); }
+
+.cal-date {
+    font-weight: bold;
+    font-size: 16px;
+    color: #ddd;
+    margin-bottom: 8px;
+    padding-left: 4px;
+}
+
+/* Блоки подій у календарі */
+.cal-event {
+    position: relative;
+    color: #fff;
+    font-size: 11px;
+    padding: 5px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-weight: bold;
+    cursor: help;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-left: 3px solid transparent;
+}
+.cal-event.prac { background: rgba(255, 255, 255, 0.1); border-left-color: #888; color: #ccc; }
+.cal-event.qual { background: rgba(230, 126, 34, 0.2); border-left-color: var(--warning); color: #e67e22; }
+.cal-event.sprint { background: rgba(52, 152, 219, 0.2); border-left-color: #3498db; color: #3498db; }
+.cal-event.race { background: rgba(231, 76, 60, 0.2); border-left-color: var(--danger); color: #ff4d4d; }
+
+.cal-winner {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--success);
+    text-align: center;
+    font-weight: bold;
+    background: rgba(0, 255, 0, 0.1);
+    padding: 4px;
+    border-radius: 4px;
+    border: 1px dashed var(--success);
+}
+
+/* =========================================
+   КАРТКА-ТУЛТИП (ЯК НА ФОТО 2)
+   ========================================= */
+.cal-tooltip {
+    visibility: hidden;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 8px;
+    width: 320px;
+    z-index: 100;
+    box-shadow: 0 15px 40px rgba(0,0,0,0.9);
+    opacity: 0;
+    transition: all 0.2s ease;
+    pointer-events: none;
+    overflow: hidden;
+    cursor: default;
+}
+.cal-event:hover .cal-tooltip { visibility: visible; opacity: 1; transform: translateX(-50%) translateY(-5px); }
+
+/* Стрілочка під тултипом */
+.cal-tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -6px;
+    border-width: 6px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+.tt-header {
+    text-align: center;
+    padding: 15px 10px;
+    background: linear-gradient(to bottom, #1a1a1a, #111);
+    border-bottom: 2px solid #c0392b;
+}
+.tt-title { color: #c0392b; font-size: 14px; font-weight: 900; letter-spacing: 1px; margin-bottom: 5px; }
+.tt-gp { color: #fff; font-size: 18px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin: 0; }
+
+.tt-schedule { padding: 15px; background: #141419; border-bottom: 1px solid #222; }
+.tt-sch-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 11px; font-weight: bold; }
+.tt-sch-row:last-child { margin-bottom: 0; }
+.tt-sch-date { color: #c0392b; width: 45px; font-size: 13px; font-weight: 900; text-align: left; }
+.tt-sch-name { color: #ddd; flex: 1; text-transform: uppercase; }
+.tt-sch-time { color: #888; text-align: right; }
+
+.tt-track-section { display: flex; align-items: center; padding: 15px; gap: 15px; background: #111; }
+.tt-track-img { 
+    flex: 1; 
+    height: 90px; 
+    background-size: contain; 
+    background-position: center; 
+    background-repeat: no-repeat; 
+    /* Фільтр автоматично робить чорні SVG трас червоними */
+    filter: invert(24%) sepia(93%) saturate(2258%) hue-rotate(344deg) brightness(87%) contrast(92%);
+}
+.tt-track-stats { flex: 1; font-size: 9px; line-height: 1.4; color: #888; text-transform: uppercase; text-align: left; }
+.tt-stats-title { color: #c0392b; font-weight: 900; margin-bottom: 5px; font-size: 10px; }
+.tt-track-stats span { color: #fff; font-weight: bold; }
