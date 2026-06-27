@@ -756,75 +756,85 @@
             teams.forEach(t => {
                 const teamBlock = document.createElement('div');
                 teamBlock.className = `team-block ${t.id}`;
+
+        t.p.forEach(p => {
+            const isC = tmp[sess].c[p];
+            const row = document.createElement('div');
+            row.className = `player-row ${isC ? 'confirmed' : ''}`;
+
+            let changesCount = (db.changes && db.changes[gp] && db.changes[gp][p] && db.changes[gp][p][sess]) ? db.changes[gp][p][sess] : 0;
+            const isLockedPermanently = isC && changesCount >= 1 && !isAdmin;
+
+            const canEdit = isAdmin || (myPlayer === p && !isC);
+            const isLockedForMe = !isAdmin && myPlayer !== p;
+
+            let lockAction = '';
+            if (isLockedForMe) {
+                lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Авторизуватись"`;
+            } else if (timeLockedForUser) {
+                lockAction = 'readonly disabled style="background: #331a00; color: #888; cursor: not-allowed;" title="Час вийшов (менше 30 хв до старту)"';
+            } else if (isLockedPermanently) {
+                lockAction = 'readonly disabled style="background: #4a0000; color: #888; cursor: not-allowed;" title="Ліміт змін вичерпано"';
+            } else if (!canEdit) {
+                lockAction = 'readonly disabled style="background: #2a2a2a; color: #888;"';
+            }
+
+            const flHTML = (sess === 'race') 
+                ? `<input class="p-fl" value="${tmp[sess].fl[p] || ''}" oninput="updFL('${p}', this.value)" placeholder="Шв. коло" ${lockAction}>` 
+                : '';
+
+            const bmHTML = (sess === 'race' && gpIdx >= getGpIndex('Австрія')) 
+                ? `<input class="p-bm" value="${(tmp[sess].bm && tmp[sess].bm[p]) ? tmp[sess].bm[p] : ''}" oninput="updBM('${p}', this.value)" placeholder="Прорив" ${lockAction} style="width: 75px; margin-left: 5px; text-align: center; border-radius: 4px; border: 1px solid #333; background: #111; color: #fff;">` 
+                : '';
+
+            let inputHTML = '';
+            if (isNewQualy) {
+                let assignedDriver = (db.qDrivers[gp] && db.qDrivers[gp][p]) ? db.qDrivers[gp][p] : '???';
+                let assignClick = isAdmin ? `onclick="openDriverModal('${gp}', '${p}')"` : '';
                 
-                t.p.forEach(p => {
-                    const isC = tmp[sess].c[p];
-                    const row = document.createElement('div');
-                    row.className = `player-row ${isC ? 'confirmed' : ''}`;
+                // ТУТ ВСТАВЛЕНО ТУЛТИП ТА КЛАС qual-cell
+                inputHTML = `
+                    <div class="q-assigned qual-cell" title="${isAdmin ? 'Змінити пілота' : ''}" ${assignClick}>
+                        ${assignedDriver}
+                        ${getQualHistoryTooltip(p, f1Roster)}
+                    </div>
+                    <input type="text" class="p-pred" style="width: 80px; flex: none; text-align: center; font-size: 16px;" value="${tmp[sess].p[p] || ''}" oninput="updP('${p}', this.value)" placeholder="Місце" ${lockAction}>
+                `;
+            } else {
+                inputHTML = `<textarea class="p-pred" oninput="updP('${p}', this.value)" onblur="autoFormat(this, '${p}')" placeholder="${isLockedForMe ? '🔒 Натисніть для входу...' : 'Прогноз...'}" ${lockAction}>${tmp[sess].p[p] || ''}</textarea>`;
+            }
 
-                    let changesCount = (db.changes && db.changes[gp] && db.changes[gp][p] && db.changes[gp][p][sess]) ? db.changes[gp][p][sess] : 0;
-                    const isLockedPermanently = isC && changesCount >= 1 && !isAdmin;
+            let btnCheckHTML = '';
+            if (isAdmin || myPlayer === p) {
+                if (timeLockedForUser) {
+                    btnCheckHTML = `<button class="btn-check" style="background: #331a00; border-color: #e67e22; cursor: not-allowed;" title="Час вийшов">⏳</button>`;
+                } else if (isLockedPermanently) {
+                    btnCheckHTML = `<button class="btn-check" style="background: #4a0000; border-color: #ff3e3e; cursor: not-allowed;" title="Заблоковано">🔒</button>`;
+                } else {
+                    btnCheckHTML = `
+                        <button class="btn-check" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </button>`;
+                }
+            }
 
-                    const canEdit = isAdmin || (myPlayer === p && !isC);
-                    const isLockedForMe = !isAdmin && myPlayer !== p;
-
-                    let lockAction = '';
-                    if (isLockedForMe) {
-                        lockAction = `onclick="checkAuth('${p}')" readonly style="background: #2a2a2a; color: #aaa; cursor: pointer;" title="Авторизуватись"`;
-                    } else if (timeLockedForUser) {
-                        lockAction = 'readonly disabled style="background: #331a00; color: #888; cursor: not-allowed;" title="Час вийшов (менше 30 хв до старту)"';
-                    } else if (isLockedPermanently) {
-                        lockAction = 'readonly disabled style="background: #4a0000; color: #888; cursor: not-allowed;" title="Ліміт змін вичерпано"';
-                    } else if (!canEdit) {
-                        lockAction = 'readonly disabled style="background: #2a2a2a; color: #888;"';
-                    }
-
-                    const flHTML = (sess === 'race') 
-                        ? `<input class="p-fl" value="${tmp[sess].fl[p] || ''}" oninput="updFL('${p}', this.value)" placeholder="Шв. коло" ${lockAction}>` 
-                        : '';
-
-                    let inputHTML = '';
-                    if (isNewQualy) {
-                        let assignedDriver = (db.qDrivers[gp] && db.qDrivers[gp][p]) ? db.qDrivers[gp][p] : '???';
-                        let assignClick = isAdmin ? `onclick="openDriverModal('${gp}', '${p}')"` : '';
-                        inputHTML = `
-                            <div class="q-assigned" title="${isAdmin ? 'Змінити пілота' : ''}" ${assignClick}>${assignedDriver}</div>
-                            <input type="number" min="1" max="22" class="p-pred" style="width: 80px; flex: none; text-align: center; font-size: 16px;" value="${tmp[sess].p[p] || ''}" oninput="updP('${p}', this.value)" placeholder="Місце" ${lockAction}>
-                        `;
-                    } else {
-                        inputHTML = `<textarea class="p-pred" oninput="updP('${p}', this.value)" onblur="autoFormat(this, '${p}')" placeholder="${isLockedForMe ? '🔒 Натисніть для входу...' : 'Прогноз...'}" ${lockAction}>${tmp[sess].p[p] || ''}</textarea>`;
-                    }
-
-                    let btnCheckHTML = '';
-                    if (isAdmin || myPlayer === p) {
-                        if (timeLockedForUser) {
-                            btnCheckHTML = `<button class="btn-check" style="background: #331a00; border-color: #e67e22; cursor: not-allowed;" title="Час вийшов">⏳</button>`;
-                        } else if (isLockedPermanently) {
-                            btnCheckHTML = `<button class="btn-check" style="background: #4a0000; border-color: #ff3e3e; cursor: not-allowed;" title="Заблоковано">🔒</button>`;
-                        } else {
-                            btnCheckHTML = `
-                                <button class="btn-check" onclick="togC('${p}')" title="${isC ? 'Скасувати' : 'Затвердити'}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                                        <polyline points="20 6 9 17 4 12"></polyline>
-                                    </svg>
-                                </button>`;
-                        }
-                    }
-
-                    row.innerHTML = `
-                        <div class="p-info">
-                            <span class="p-name">${p}</span>
-                            <span class="p-tag">${typeof tgHandles !== 'undefined' && tgHandles[p] ? tgHandles[p] : ''}</span>
-                        </div>
-                        <div class="p-input-zone">
-                            ${inputHTML}
-                            ${flHTML}
-                        </div>
-                        <div class="p-live-pts" id="live-badge-${p}">0</div>
-                        ${btnCheckHTML}
-                    `;
-                    teamBlock.appendChild(row);
-                });
+            row.innerHTML = `
+                <div class="p-info">
+                    <span class="p-name">${p}</span>
+                    <span class="p-tag">${typeof tgHandles !== 'undefined' && tgHandles[p] ? tgHandles[p] : ''}</span>
+                </div>
+                <div class="p-input-zone">
+                    ${inputHTML}
+                    ${flHTML}
+                    ${bmHTML}
+                </div>
+                <div class="p-live-pts" id="live-badge-${p}">0</div>
+                ${btnCheckHTML}
+            `;
+            teamBlock.appendChild(row);
+        });
 
                 // Перевірка чи обидва гравці команди затвердили
                 if (t.p.every(p => tmp[sess].c[p])) {
@@ -957,6 +967,13 @@
             tmp[sess].fl[p] = v; 
             const gp = document.getElementById('gp-select').value;
             dirtyFields[`${gp}_${sess}_fl_${p}`] = true;
+        }
+
+        function updBM(p, val) {
+            if (!tmp[sess].bm) tmp[sess].bm = {};
+            tmp[sess].bm[p] = val.toUpperCase().trim();
+            dirtyFields[`${p}_bm`] = true; // Позначаємо, що були зміни для збереження в БД
+            if (typeof updateLiveBadges === 'function') updateLiveBadges();
         }
         
         function syncRealInput(elem) {
@@ -1211,8 +1228,8 @@
         }
 
         function parse(txt, isQ, isNewQualy) {
-            let d = []; let f = "";
-            if (!txt) return { d, f };
+            let d = []; let f = ""; let bm = "";
+            if (!txt) return { d, f, bm };
 
             const cyrToLat = {
                 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 
@@ -1225,7 +1242,7 @@
 
             if (isQ && !isNewQualy) {
                 let rawCode = txt.trim().split('\n')[0].replace(/^\d+[\s\-\–\.]+/, '');
-                return { d: [sanitizeCode(rawCode)], f: "" };
+                return { d: [sanitizeCode(rawCode)], f: "", bm: "" };
             }
             
             txt.split('\n').forEach(line => {
@@ -1234,83 +1251,171 @@
                 
                 let flm = line.match(/коло\s*[\-\–\.]\s*([A-Za-zА-Яа-я]+)/i);
                 if (flm) f = sanitizeCode(flm[1]);
+
+                // Зчитування Найбільшого прориву (BM)
+                let bmm = line.match(/(?:прорив|bm)\s*[\-\–\.]\s*([A-Za-zА-Яа-я]+)/i);
+                if (bmm) bm = sanitizeCode(bmm[1]);
             });
-            return { d, f };
+            return { d, f, bm };
         }
 
-        function calcSingleSessionPts(act, pr, pFL, sessionType, pName, currentGp) {
-            let pts = 0;
-            const points = [11, 9, 8, 7, 6, 5, 4, 3, 2, 1];
-            const gpIdx = getGpIndex(currentGp);
+        function calcSingleSessionPts(act, pr, pFL, pBM, sessionType, pName, currentGp) {
+    let pts = 0;
+    const points = [11, 9, 8, 7, 6, 5, 4, 3, 2, 1]; // Старі бали за гонку
+    const sprintOldPts = [5, 4, 3, 2, 1]; // Старі бали за спринт
+    
+    const gpIdx = getGpIndex(currentGp);
+    const isNewRules = gpIdx >= getGpIndex('Австрія');
+    const isCanadaRules = gpIdx >= getGpIndex('Канада');
 
-            if (sessionType === 'qualy') {
-                if (gpIdx >= getGpIndex('Канада')) {
-                    let assignedDriver = (db.qDrivers[currentGp] && db.qDrivers[currentGp][pName]) ? db.qDrivers[currentGp][pName] : null;
-                    let predictedPos = parseInt(tmp[sess].p[pName]);
-                    
-                    if (assignedDriver && !isNaN(predictedPos)) {
-                        let actualIdx = act.d.indexOf(assignedDriver);
-                        if (actualIdx !== -1) {
-                            let actualPos = actualIdx + 1;
-                            let diff = Math.abs(actualPos - predictedPos);
-                            if (diff === 0) pts += 5;
-                            else if (diff === 1) pts += 2;
-                        }
+    if (sessionType === 'qualy') {
+        if (isNewRules) {
+            // Австрія і далі: Підтримка 1, 2 або 3 пілотів
+            let assignedDrivers = (db.qDrivers[currentGp] && db.qDrivers[currentGp][pName]) ? String(db.qDrivers[currentGp][pName]).split(',').map(s => s.trim()) : [];
+            let preds = String(tmp[sess].p[pName] || "").split(',').map(s => parseInt(s.trim()));
+            
+            assignedDrivers.forEach((driver, idx) => {
+                let predPos = preds[idx];
+                if (driver && !isNaN(predPos)) {
+                    let actualIdx = act.d.indexOf(driver);
+                    if (actualIdx !== -1) {
+                        let actualPos = actualIdx + 1;
+                        let diff = Math.abs(actualPos - predPos);
+                        if (diff === 0) pts += 6;
+                        else if (diff === 1) pts += 3;
+                        else if (diff === 2 || diff === 3) pts += 1;
                     }
-                } else {
-                    if (pr.d[0] === act.d[0] && act.d[0]) pts += 1;
                 }
-            } else {
-                const ptsMap = sessionType === 'race' ? points : [5, 4, 3, 2, 1];
-                pr.d.forEach((drCode, prIdx) => {
-                    if(!drCode) return;
-                    const actIdx = act.d.indexOf(drCode);
-                    if(actIdx !== -1) {
-                        if(prIdx === actIdx) pts += (ptsMap[prIdx] || 0);
-                        else if(Math.abs(prIdx - actIdx) === 1) pts += 1;
-                    }
-                });
-                if (sessionType === 'race') {
-                    if (act.d.length >= 3 && pr.d.length >= 3) {
-                        const actP = act.d.slice(0,3).sort().join('');
-                        const prP = pr.d.slice(0,3).sort().join('');
-                        if (actP === prP && actP !== "") pts += 4;
-                    }
-                    if (pFL === act.f && act.f) pts += 1;
+            });
+        } else if (isCanadaRules) {
+            // Старі правила Канада-Іспанія
+            let assignedDriver = (db.qDrivers[currentGp] && db.qDrivers[currentGp][pName]) ? db.qDrivers[currentGp][pName] : null;
+            let predictedPos = parseInt(tmp[sess].p[pName]);
+            if (assignedDriver && !isNaN(predictedPos)) {
+                let actualIdx = act.d.indexOf(assignedDriver);
+                if (actualIdx !== -1) {
+                    let actualPos = actualIdx + 1;
+                    let diff = Math.abs(actualPos - predictedPos);
+                    if (diff === 0) pts += 5;
+                    else if (diff === 1) pts += 2;
                 }
             }
-            return pts;
+        } else {
+            // Старі правила до Канади
+            if (pr.d[0] === act.d[0] && act.d[0]) pts += 1;
         }
-
-        function updateLiveBadges() {
-            const gp = document.getElementById('gp-select').value;
-            const isNewQualy = (sess === 'qualy' && getGpIndex(gp) >= getGpIndex('Канада'));
-            const act = parse(tmp[sess].r, sess === 'qualy', isNewQualy);
-            
-            teams.forEach(t => t.p.forEach(p => {
-                const badge = document.getElementById(`live-badge-${p}`);
-                if (!badge) return;
-
-                if (!tmp[sess].r.trim()) {
-                    badge.classList.remove('show');
-                    return;
-                }
-
-                const pr = parse(tmp[sess].p[p], sess === 'qualy', isNewQualy);
-                const pFL = (tmp[sess].fl[p] || "").toUpperCase().trim();
-                const pts = calcSingleSessionPts(act, pr, pFL, sess, p, gp);
-
-                badge.classList.add('show');
-                // Цей шматок замінює старий вивід балів всередині updateLiveBadges
-                if (pts > 0) {
-                    badge.innerText = `+${pts}`;
-                    badge.className = 'p-live-pts active-pts';
+    } 
+    else if (sessionType === 'sprint') {
+        pr.d.forEach((drCode, prIdx) => {
+            if (!drCode) return;
+            const actIdx = act.d.indexOf(drCode);
+            if (actIdx !== -1) {
+                let diff = Math.abs(prIdx - actIdx);
+                if (isNewRules) {
+                    // Нові правила: бали лише якщо реальний фініш у Топ-5
+                    if (actIdx < 5) { 
+                        if (diff === 0) pts += 3;
+                        else if (diff === 1) pts += 2;
+                        else pts += 1; // Похибка 2 і більше
+                    }
                 } else {
-                    badge.innerText = `0`;
-                    badge.className = 'p-live-pts';
+                    // Старі правила
+                    if (diff === 0) pts += (sprintOldPts[prIdx] || 0);
+                    else if (diff === 1) pts += 1;
                 }
-            }));
+            }
+        });
+    } 
+    else if (sessionType === 'race') {
+        pr.d.forEach((drCode, prIdx) => {
+            if (!drCode) return;
+            const actIdx = act.d.indexOf(drCode);
+            if (actIdx !== -1) {
+                let diff = Math.abs(prIdx - actIdx);
+                let realPos = actIdx + 1;
+                
+                if (isNewRules) {
+                    // Спліт 1-5 місця
+                    if (realPos >= 1 && realPos <= 5) {
+                        if (diff === 0) pts += 5;
+                        else if (diff === 1) pts += 2;
+                        else if (diff === 2) pts += 1;
+                    } 
+                    // Спліт 6-10 місця
+                    else if (realPos >= 6 && realPos <= 10) {
+                        if (diff === 0) pts += 6;
+                        else if (diff === 1) pts += 3;
+                        else if (diff === 2) pts += 2;
+                        else if (diff >= 3) pts += 1;
+                    }
+                } else {
+                    // Старі правила позицій
+                    if (diff === 0) pts += (points[prIdx] || 0);
+                    else if (diff === 1) pts += 1;
+                }
+            }
+        });
+
+        // Бонуси Гонки
+        if (isNewRules) {
+            let actTop3 = act.d.slice(0, 3);
+            let actTop5 = act.d.slice(0, 5);
+            let prTop3 = pr.d.slice(0, 3);
+            let prTop5 = pr.d.slice(0, 5);
+
+            let intersect3 = prTop3.filter(x => actTop3.includes(x)).length;
+            let intersect5 = prTop5.filter(x => actTop5.includes(x)).length;
+
+            if (intersect3 === 3) pts += 2; // Склад Топ-3
+            if (intersect5 === 5) pts += 2; // Склад Топ-5
+            if (pFL === act.f && act.f) pts += 2; // Швидке коло (+2 бали)
+            if (pBM === act.bm && act.bm) pts += 4; // Найбільший прорив
+        } else {
+            // Старі бонуси
+            if (act.d.length >= 3 && pr.d.length >= 3) {
+                const actP = act.d.slice(0, 3).sort().join('');
+                const prP = pr.d.slice(0, 3).sort().join('');
+                if (actP === prP && actP !== "") pts += 4;
+            }
+            if (pFL === act.f && act.f) pts += 1;
         }
+    }
+    return pts;
+}
+
+function updateLiveBadges() {
+    const gp = document.getElementById('gp-select').value;
+    const isNewQualy = (sess === 'qualy' && getGpIndex(gp) >= getGpIndex('Канада'));
+    const act = parse(tmp[sess].r, sess === 'qualy', isNewQualy);
+    
+    teams.forEach(t => t.p.forEach(p => {
+        const badge = document.getElementById(`live-badge-${p}`);
+        if (!badge) return;
+
+        if (!tmp[sess].r.trim()) {
+            badge.classList.remove('show');
+            return;
+        }
+
+        const pr = parse(tmp[sess].p[p], sess === 'qualy', isNewQualy);
+        const pFL = (tmp[sess].fl && tmp[sess].fl[p]) ? tmp[sess].fl[p].toUpperCase().trim() : "";
+        
+        // Зчитуємо прогнозований "Найбільший прорив" (BM)
+        const pBM = (tmp[sess].bm && tmp[sess].bm[p]) ? tmp[sess].bm[p].toUpperCase().trim() : ""; 
+        
+        // Передаємо pBM у розрахунок
+        const pts = calcSingleSessionPts(act, pr, pFL, pBM, sess, p, gp);
+
+        badge.classList.add('show');
+        if (pts > 0) {
+            badge.innerText = `+${pts}`;
+            badge.className = 'p-live-pts active-pts';
+        } else {
+            badge.innerText = `0`;
+            badge.className = 'p-live-pts';
+        }
+    }));
+}
 
         function openLiveModal() {
             const sessName = sess === 'qualy' ? 'Кваліфікація' : sess === 'sprint' ? 'Спринт' : 'Гонка';
@@ -2644,12 +2749,10 @@ function showToast(msg) {
 // ЛОГІКА КАЛЕНДАРЯ ГРАН-ПРІ
 // =========================================
 
-// База розкладу. Сюди ти зможеш додавати інші етапи у такому ж форматі (YYYY-MM-DD).
-// type може бути: 'prac' (Практика), 'qual' (Кваліфікація), 'sprint' (Спринт), 'race' (Гонка).
 const trackInfo = {
     "Австрія": {
         name: "RED BULL RING",
-        img: "https://upload.wikimedia.org/wikipedia/commons/2/20/Circuit_Red_Bull_Ring.svg", // SVG з Вікіпедії
+        img: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Red_Bull_Ring_moto_2022.svg/250px-Red_Bull_Ring_moto_2022.svg.png",
         length: "4.318 КМ",
         turns: "10",
         record: "1:05.619 (2020)",
@@ -2685,7 +2788,7 @@ const calendarEvents = [
     { date: "2026-07-05", title: "Гонка", type: "race", time: "16:00 - 18:00", gpId: "Велика Британія" }
 ];
 
-let currentCalDate = new Date(2026, 5, 1); // 5 = Червень (в JS місяці рахуються від 0)
+let currentCalDate = new Date(2026, 5, 1); // 5 = Червень
 
 function initCalendar() {
     renderCalendar(currentCalDate);
@@ -2695,15 +2798,13 @@ function changeMonth(offset) {
     let grid = document.getElementById('cal-grid');
     if (!grid) return;
     
-    // Анімація зникнення
     grid.style.opacity = 0; 
     
     setTimeout(() => {
         currentCalDate.setMonth(currentCalDate.getMonth() + offset);
         renderCalendar(currentCalDate);
-        // Анімація появи
         grid.style.opacity = 1; 
-    }, 300); // 300мс збігається з transition у CSS
+    }, 300);
 }
 
 function renderCalendar(date) {
@@ -2721,22 +2822,17 @@ function renderCalendar(date) {
 
     grid.innerHTML = '';
 
-    // Знаходимо перший день місяця (0 - неділя, 1 - понеділок...)
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // Адаптуємо для старту з понеділка (якщо неділя, то зміщуємо на 6 порожніх клітинок)
     let startDay = firstDay === 0 ? 6 : firstDay - 1;
 
-    // Малюємо порожні клітинки до початку місяця
     for (let i = 0; i < startDay; i++) {
         grid.innerHTML += `<div class="cal-day empty"></div>`;
     }
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Обнуляємо час для чесного порівняння по днях
+    today.setHours(0, 0, 0, 0); 
 
-    // Заповнюємо дні місяця
     for (let day = 1; day <= daysInMonth; day++) {
         let dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         let currentDayDate = new Date(year, month, day);
@@ -2744,7 +2840,6 @@ function renderCalendar(date) {
         let isPast = currentDayDate < today;
         let pastClass = isPast ? 'past' : '';
 
-        // Шукаємо події для конкретного дня
         let dayEvents = calendarEvents.filter(e => e.date === dateStr);
         let eventsHTML = '';
         let winnerHTML = '';
@@ -2753,11 +2848,10 @@ function renderCalendar(date) {
             let gpFullSchedule = '';
             let trackHTML = '';
             
-            // Збираємо розклад усього вікенду
             if (e.gpId) {
                 let gpEvents = calendarEvents.filter(ev => ev.gpId === e.gpId);
                 gpEvents.forEach(ev => {
-                    let d = ev.date.split('-'); // Розбиваємо YYYY-MM-DD
+                    let d = ev.date.split('-');
                     gpFullSchedule += `
                         <div class="tt-sch-row">
                             <span class="tt-sch-date">${d[2]}.${d[1]}</span>
@@ -2767,12 +2861,12 @@ function renderCalendar(date) {
                     `;
                 });
 
-                // Підтягуємо інфо про трек
                 let tInfo = trackInfo[e.gpId];
                 if (tInfo) {
                     trackHTML = `
                         <div class="tt-track-section">
-                            <div class="tt-track-img" style="background-image: url('${tInfo.img}')"></div>
+                            <!-- Використовуємо тег img замість background, щоб обійти блокування Вікіпедії -->
+                            <img src="${tInfo.img}" class="tt-track-img" alt="${tInfo.name}">
                             <div class="tt-track-stats">
                                 <div class="tt-stats-title">ІНФОРМАЦІЯ ПРО ТРЕК</div>
                                 <div><span>ДОВЖИНА:</span> ${tInfo.length}</div>
@@ -2804,17 +2898,32 @@ function renderCalendar(date) {
                 </div>
             `;
 
-            // Логіка переможця етапу (залишається без змін)
-            if (isPast && e.type === 'race' && typeof db !== 'undefined' && db.hist && db.hist[e.gpId]) {
+            // Динамічне підтягування переможців з бази для конкретної сесії (Кваліфікація, Спринт, Гонка)
+            if (isPast && typeof db !== 'undefined' && db.hist && db.hist[e.gpId]) {
                 let bestPlayer = null;
                 let maxPts = -1;
-                for (let p in db.hist[e.gpId]) {
-                    let h = db.hist[e.gpId][p];
-                    let pts = h.q + h.s + h.r + (h.b || 0);
-                    if (pts > maxPts) { maxPts = pts; bestPlayer = p; }
+                
+                // Перевіряємо лише змагальні сесії
+                if (['qual', 'sprint', 'race'].includes(e.type)) {
+                    for (let p in db.hist[e.gpId]) {
+                        let h = db.hist[e.gpId][p];
+                        let pts = 0;
+                        
+                        // Беремо бали лише за ту сесію, яку зараз рендеримо
+                        if (e.type === 'qual') pts = h.q || 0;
+                        else if (e.type === 'sprint') pts = h.s || 0;
+                        else if (e.type === 'race') pts = h.r + (h.b || 0); // Гонка + бонуси
+                        
+                        if (pts > maxPts) { 
+                            maxPts = pts; 
+                            bestPlayer = p; 
+                        }
+                    }
                 }
-                if (bestPlayer) {
-                    winnerHTML = `<div class="cal-winner" title="${maxPts} балів за етап">🏆 ${bestPlayer}</div>`;
+                
+                if (bestPlayer && maxPts > 0) {
+                    let emoji = e.type === 'qual' ? '⏱️' : e.type === 'sprint' ? '💨' : '🏆';
+                    winnerHTML = `<div class="cal-winner" title="${maxPts} балів за ${e.title}" style="margin-top:2px;">${emoji} ${bestPlayer}</div>`;
                 }
             }
         });
@@ -2827,4 +2936,38 @@ function renderCalendar(date) {
             </div>
         `;
     }
+}
+
+// Змінна drivers має містити твій актуальний масив пілотів
+function getQualHistoryTooltip(playerName, driversArray) {
+    let usedPilots = new Set();
+
+    // Збираємо всіх пілотів, які випадали гравцеві в минулих етапах
+    if (typeof db !== 'undefined' && db.hist) {
+        for (let gp in db.hist) {
+            let record = db.hist[gp][playerName];
+            if (record && record.qPilot) {
+                // Якщо пілотів декілька (розділені комою), розбиваємо їх
+                let pilots = record.qPilot.split(',').map(p => p.trim());
+                pilots.forEach(p => usedPilots.add(p));
+            }
+        }
+    }
+
+    let listHTML = '';
+    driversArray.forEach(d => {
+        let icon = usedPilots.has(d) ? '✅' : '❌';
+        let color = usedPilots.has(d) ? 'var(--success)' : '#555';
+        listHTML += `<div class="qht-item"><span style="color: #fff">${d}</span> <span style="color: ${color}">${icon}</span></div>`;
+    });
+
+    return `
+        <div class="qual-hist-tooltip">
+            <div class="qht-list">${listHTML}</div>
+            <div class="qht-footer">
+                <span>Всього: ${usedPilots.size}</span>
+                <span class="qht-ratio">${usedPilots.size} / ${driversArray.length}</span>
+            </div>
+        </div>
+    `;
 }
