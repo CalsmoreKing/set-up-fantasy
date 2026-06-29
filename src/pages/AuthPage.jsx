@@ -31,7 +31,7 @@ export default function AuthPage() {
         await signIn(email, pass)
       } else if (mode === 'register') {
         if (pass !== pass2) throw new Error('Паролі не співпадають')
-        if (!pName) throw new Error('Оберіть своє ім'я')
+        if (!pName) throw new Error("Оберіть своє ім'я")
         await signUp(email, pass, pName)
         setMsg('Перевір пошту для підтвердження!')
       } else {
