@@ -1,16 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, PILOTS, PILOT_ABBR, DOUBLE_STAGES, calcRaceScore, calcQualScore, calcSprintScore } from '../lib/supabase'
+import { supabase, PILOTS, PILOT_ABBR, DOUBLE_STAGES, calcRaceScore, calcQualScore, calcSprintScore, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard from '../components/PlayerCard'
 import RaceResults from '../components/RaceResults'
 import QualResults from '../components/QualResults'
 import SprintResults from '../components/SprintResults'
 
-const TEAM_COLORS = {
-  'Макларен':'#FF8000','Мерседес':'#00D2BE','Феррарі':'#E8002D',
-  'Альпін':'#0090FF','Ред Булл':'#3671C6','Ауді':'#888888',
-  'Астон Мартін':'#358C75','Альфа Ромео':'#C92D4B','Ред Булл Альфа Таурі':'#5E8FAA',
-}
+const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
 export default function MainPage() {
   const { player: me, isAdmin } = useAuth()

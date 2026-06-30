@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { parseBulkText } from '../lib/supabase'
+import { parseBulkText, resolvePlayerName, resolvePilot } from '../lib/supabase'
 
 export default function BulkPanel({ open, onClose, mobile }) {
+  const [importType, setImportType] = useState('forecast')  // 'forecast' | 'quali'
   const [text, setText]       = useState('')
   const [parsed, setParsed]   = useState(null)
   const [warnings, setWarnings] = useState([])
-  const [status, setStatus]   = useState('')   // '', 'preview', 'done', 'error'
+  const [status, setStatus]   = useState('')
   const [busy, setBusy]       = useState(false)
   const [sessionId, setSessionId] = useState('')
   const [sessions, setSessions]   = useState([])
@@ -20,15 +21,39 @@ export default function BulkPanel({ open, onClose, mobile }) {
     const { data } = await supabase
       .from('sessions')
       .select('id, type, stages(name, flag, sort_order)')
-      .eq('is_locked', false)
       .order('sort_order', { referencedTable: 'stages' })
     setSessions(data || [])
   }
   loadSessions()
 
+  const filteredSessions = sessions.filter(s =>
+    importType === 'quali' ? s.type === 'qual' : true
+  )
+
   async function parseFn() {
     setStatus(''); setParsed(null); setWarnings([])
     const { data: players } = await supabase.from('players').select('id, name')
+
+    if (importType === 'quali') {
+      const lines = text.split('\n').map(l=>l.trim()).filter(Boolean)
+      const results = []
+      const warns = []
+      for (const line of lines) {
+        const m = line.match(/^(.+?)\s*[—\-:]\s*([A-Za-zÀ-ÿ]+)$/)
+        if (!m) { warns.push({ message: `Не розпізнано: "${line}"` }); continue }
+        const player = resolvePlayerName(m[1], players)
+        if (!player) { warns.push({ message: `Гравець "${m[1]}" не знайдений` }); continue }
+        const pilot = resolvePilot(m[2])
+        if (!pilot) { warns.push({ message: `${player.name}: невідомий пілот "${m[2]}"` }); continue }
+        if (player.name !== m[1].trim()) warns.push({ message: `"${m[1]}" → "${player.name}" (аліас)`, ok:true })
+        results.push({ player, pilot })
+      }
+      setParsed(results)
+      setWarnings(warns)
+      setStatus('preview')
+      return
+    }
+
     const { results, warnings: w } = parseBulkText(text, players)
     setParsed(results)
     setWarnings(w)
@@ -39,23 +64,34 @@ export default function BulkPanel({ open, onClose, mobile }) {
     if (!sessionId) { setStatus('error'); return }
     setBusy(true)
     try {
-      for (const r of parsed) {
-        const preds = {}
-        r.preds.forEach((p, i) => { if (p) preds[i+1] = p })
-        await supabase.from('forecasts').upsert({
-          session_id: sessionId,
-          player_id:  r.player.id,
-          predictions: preds,
-          fl_pick: r.fl || '',
-          ov_pick: r.ov || '',
-        }, { onConflict: 'session_id,player_id' })
-
-        // Audit log
-        await supabase.from('audit_log').insert({
-          action: 'bulk_import',
-          actor:  'admin',
-          details: { player: r.player.name, session: sessionId, preds, fl: r.fl, ov: r.ov }
-        })
+      if (importType === 'quali') {
+        for (const r of parsed) {
+          await supabase.from('qual_assignments').upsert({
+            session_id: sessionId,
+            player_id:  r.player.id,
+            pilot_1:    r.pilot,
+          }, { onConflict: 'session_id,player_id' })
+          await supabase.from('audit_log').insert({
+            action: 'bulk_quali_assign', actor: 'admin',
+            details: { player: r.player.name, pilot: r.pilot, session: sessionId }
+          })
+        }
+      } else {
+        for (const r of parsed) {
+          const preds = {}
+          r.preds.forEach((p, i) => { if (p) preds[i+1] = p })
+          await supabase.from('forecasts').upsert({
+            session_id: sessionId,
+            player_id:  r.player.id,
+            predictions: preds,
+            fl_pick: r.fl || '',
+            ov_pick: r.ov || '',
+          }, { onConflict: 'session_id,player_id' })
+          await supabase.from('audit_log').insert({
+            action: 'bulk_import', actor: 'admin',
+            details: { player: r.player.name, session: sessionId, preds, fl: r.fl, ov: r.ov }
+          })
+        }
       }
       setStatus('done')
       setText(''); setParsed(null)
@@ -77,11 +113,18 @@ export default function BulkPanel({ open, onClose, mobile }) {
         <button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:9}} onClick={onClose}>✕</button>
       </div>
 
+      <div style={{display:'flex',gap:6,marginBottom:10}}>
+        <button className={`session-btn${importType==='forecast'?' active':''}`} style={{flex:1}}
+          onClick={()=>{setImportType('forecast');setText('');setParsed(null);setStatus('')}}>ПРОГНОЗИ</button>
+        <button className={`session-btn${importType==='quali'?' active':''}`} style={{flex:1}}
+          onClick={()=>{setImportType('quali');setText('');setParsed(null);setStatus('')}}>ПІЛОТИ КВАЛІФІКАЦІЇ</button>
+      </div>
+
       <div style={{marginBottom:8}}>
         <label style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)',letterSpacing:2,display:'block',marginBottom:5}}>СЕСІЯ</label>
         <select className="stage-select" value={sessionId} onChange={e=>setSessionId(e.target.value)} style={{width:'100%',minHeight:36}}>
           <option value="">— Оберіть сесію —</option>
-          {sessions.map(s => (
+          {filteredSessions.map(s => (
             <option key={s.id} value={s.id}>
               {s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}
             </option>
@@ -91,13 +134,15 @@ export default function BulkPanel({ open, onClose, mobile }) {
 
       <div style={{marginBottom:8}}>
         <label style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)',letterSpacing:2,display:'block',marginBottom:5}}>
-          ПРОГНОЗИ (всі гравці підряд)
+          {importType === 'quali' ? 'ПІЛОТИ (Гравець — КОД)' : 'ПРОГНОЗИ (всі гравці підряд)'}
         </label>
         <textarea
           className="bulk-textarea"
           value={text}
           onChange={e=>{setText(e.target.value);setStatus('');setParsed(null)}}
-          placeholder={"Ярослав\n1-VER 2-HAM 3-NOR 4-LEC 5-PIA 6-RUS 7-HAD 8-ANT 9-GAS 10-HUL ШК-HAM Прорив-HAD\n\nМія\n1-NOR 2-PIA ..."}
+          placeholder={importType === 'quali'
+            ? "Ярослав — COL\nМія — BEA\nНептун — NOR\nХонда — ANT\n..."
+            : "Ярослав\n1-VER 2-RUS 3-LEC 4-NOR 5-HAM 6-ANT 7-PIA 8-LAW 9-GAS 10-LIN ШК-VER Прорив-HAD\n\nМія\n1-NOR 2-PIA ..."}
           onMouseDown={e=>e.stopPropagation()}
           onTouchStart={e=>e.stopPropagation()}
         />
@@ -106,8 +151,8 @@ export default function BulkPanel({ open, onClose, mobile }) {
       {warnings.length > 0 && (
         <div>
           {warnings.map((w,i) => (
-            <div key={i} className={w.type === 'alias_resolved' ? 'bulk-ok' : 'bulk-warn'}>
-              {w.type === 'alias_resolved' ? `ℹ ${w.message}` : `⚠ ${w.message}`}
+            <div key={i} className={w.ok ? 'bulk-ok' : 'bulk-warn'}>
+              {w.ok ? `ℹ ${w.message}` : `⚠ ${w.message}`}
             </div>
           ))}
         </div>
@@ -115,15 +160,24 @@ export default function BulkPanel({ open, onClose, mobile }) {
 
       {parsed && status === 'preview' && (
         <div className="bulk-preview">
-          {parsed.map(r => (
-            <div key={r.player.id} style={{marginBottom:6}}>
-              <span style={{color:'var(--red)',fontFamily:'Orbitron,sans-serif',fontSize:10,fontWeight:700}}>▶ {r.player.name} </span>
-              {r.preds.map((p,i) => p ? <span key={i} style={{marginRight:4,fontSize:11}}>P{i+1}:{p}</span> : null)}
-              {r.fl && <span style={{color:'var(--gold)',marginLeft:4}}>⚡{r.fl}</span>}
-              {r.ov && <span style={{color:'var(--gold)',marginLeft:4}}>🚀{r.ov}</span>}
-              {r.errors?.length > 0 && r.errors.map((e,i) => <div key={i} className="bulk-err">⚠ {e.message}</div>)}
-            </div>
-          ))}
+          {importType === 'quali' ? (
+            parsed.map(r => (
+              <div key={r.player.id}>
+                <span style={{color:'var(--red)',fontFamily:'Orbitron,sans-serif',fontSize:10,fontWeight:700}}>▶ {r.player.name}</span>
+                {' '}<span style={{color:'var(--gold)'}}>{r.pilot}</span>
+              </div>
+            ))
+          ) : (
+            parsed.map(r => (
+              <div key={r.player.id} style={{marginBottom:6}}>
+                <span style={{color:'var(--red)',fontFamily:'Orbitron,sans-serif',fontSize:10,fontWeight:700}}>▶ {r.player.name} </span>
+                {r.preds.map((p,i) => p ? <span key={i} style={{marginRight:4,fontSize:11}}>P{i+1}:{p}</span> : null)}
+                {r.fl && <span style={{color:'var(--gold)',marginLeft:4}}>⚡{r.fl}</span>}
+                {r.ov && <span style={{color:'var(--gold)',marginLeft:4}}>🚀{r.ov}</span>}
+                {r.errors?.length > 0 && r.errors.map((e,i) => <div key={i} className="bulk-err">⚠ {e.message}</div>)}
+              </div>
+            ))
+          )}
         </div>
       )}
 

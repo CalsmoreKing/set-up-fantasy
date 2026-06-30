@@ -128,12 +128,22 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .session-btn:hover, .session-btn.active { border-color: var(--red); color: var(--text); background: rgba(225,6,0,.1); }
 
 /* ── Cards ── */
-.player-card { background: var(--card2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 0; }
+.player-card { background: var(--card2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 0; transition: border-color .2s; }
+.player-card:hover { border-color: var(--team-color, var(--border)); }
 .card-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 13px 9px; background: var(--card); border-bottom: 1px solid var(--border);
+  padding: 10px 13px 9px; border-bottom: 1px solid var(--border);
   cursor: pointer; user-select: none; position: relative;
   min-height: 48px;
+  background: linear-gradient(90deg, var(--team-glow, rgba(255,255,255,.03)) 0%, var(--card) 60%);
+}
+.team-chip {
+  font-family: 'Orbitron', sans-serif; font-size: 8px; font-weight: 700;
+  letter-spacing: 1px; padding: 2px 6px; border-radius: 2px;
+  border: 1px solid var(--team-color, var(--border));
+  color: var(--team-color, var(--muted));
+  background: color-mix(in srgb, var(--team-color, transparent) 12%, transparent);
+  white-space: nowrap; flex-shrink: 0;
 }
 .card-header-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .card-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -162,7 +172,7 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 @media (min-width: 700px) { .players-grid { grid-template-columns: 1fr 1fr; } }
 
 /* ── Forecast inputs ── */
-.forecast-inputs { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.forecast-inputs { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(5, auto); grid-auto-flow: column; gap: 5px; }
 .input-row { display: flex; align-items: center; gap: 5px; }
 .pos-label { font-family: 'Orbitron', sans-serif; font-size: 10px; font-weight: 700; color: var(--muted); width: 20px; flex-shrink: 0; text-align: center; }
 .pilot-select {
@@ -232,8 +242,9 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .base-select:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ── Sprint results ── */
-.sprint-results { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
-.sprint-slot { display: flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--red); padding: 6px 9px; border-radius: 3px; flex: 1; min-width: 120px; }
+.sprint-results { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 16px; }
+@media (max-width: 500px) { .sprint-results { grid-template-columns: repeat(3, 1fr); } }
+.sprint-slot { display: flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--red); padding: 6px 9px; border-radius: 3px; }
 
 /* ── Qual player card ── */
 .qual-pilot-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }

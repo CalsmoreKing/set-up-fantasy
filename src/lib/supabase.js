@@ -100,7 +100,18 @@ export function resolvePilot(token) {
   return full || null
 }
 
-// ── Рахунок для гонки ────────────────────────────────
+// ── Команди: кольори, скорочення (емблема-замінник без ліцензованих логотипів) ──
+export const TEAM_META = {
+  'Макларен':             { color:'#FF8000', code:'MCL', glyph:'🟧' },
+  'Мерседес':              { color:'#00D2BE', code:'MER', glyph:'⬛' },
+  'Феррарі':               { color:'#E8002D', code:'FER', glyph:'🟥' },
+  'Альпін':                { color:'#0090FF', code:'ALP', glyph:'🟦' },
+  'Ред Булл':              { color:'#3671C6', code:'RBR', glyph:'🟦' },
+  'Ауді':                  { color:'#888888', code:'AUD', glyph:'⬜' },
+  'Астон Мартін':          { color:'#358C75', code:'AMR', glyph:'🟩' },
+  'Альфа Ромео':           { color:'#C92D4B', code:'ALF', glyph:'🟥' },
+  'Ред Булл Альфа Таурі':  { color:'#5E8FAA', code:'RBAT', glyph:'🟦' },
+}
 export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv) {
   const breakdown = []
   let total = 0

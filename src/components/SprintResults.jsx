@@ -23,7 +23,7 @@ export default function SprintResults({ session, isAdmin, onUpdate }) {
       <div className="sprint-results">
         {slots.map((p, i) => (
           <div key={i} className="sprint-slot">
-            <span className="sprint-pos" style={{fontFamily:'Orbitron,sans-serif',fontSize:11,fontWeight:700,color:'var(--muted)',width:16}}>{i+1}</span>
+            <span style={{fontFamily:'Orbitron,sans-serif',fontSize:11,fontWeight:700,color:'var(--muted)',width:16,flexShrink:0}}>{i+1}</span>
             {isAdmin ? (
               <select className="base-select" style={{flex:1}} value={p} onChange={e=>change(i,e.target.value)}>
                 <option value="">—</option>

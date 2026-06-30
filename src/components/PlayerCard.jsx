@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS } from '../lib/supabase'
+import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 
 const PILOT_OPTIONS = ['', ...PILOTS]
@@ -9,6 +9,7 @@ export default function PlayerCard({
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
   stageKey, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId
 }) {
+  const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const [open, setOpen]   = useState(false)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -140,10 +141,15 @@ export default function PlayerCard({
     <div className="player-card" id={`player-card-${player.id}`}>
       <div
         className="card-header"
-        style={{ borderLeft: `3px solid ${teamColor}` }}
+        style={{
+          borderLeft: `4px solid ${teamColor}`,
+          '--team-color': teamColor,
+          '--team-glow': `${teamColor}14`,
+        }}
         onClick={toggleOpen}
       >
         <div className="card-header-left">
+          <span className="team-chip">{teamCode}</span>
           <span
             className="player-name-tag"
             data-player-id={player.id}
@@ -234,10 +240,27 @@ export default function PlayerCard({
                   </>
                 ) : (
                   <>
-                    {(isAdmin || isMe) && !isLocked
-                      ? <button className="roulette-btn" onClick={()=>rollPilot(idx)}>🎲 РУЛЕТКА</button>
-                      : <span style={{color:'var(--muted)',fontSize:11}}>пілот не призначений</span>
-                    }
+                    {(isAdmin || isMe) && !isLocked && (
+                      <>
+                        <button className="roulette-btn" onClick={()=>rollPilot(idx)}>🎲 РУЛЕТКА</button>
+                        {isAdmin && (
+                          <select
+                            className="pos-input"
+                            style={{width:100}}
+                            value=""
+                            onChange={e => {
+                              if (!e.target.value) return
+                              const n=[...qPilots]; n[idx]=e.target.value; setQPilots(n)
+                              onSaveQual(n[0],n[1],parseInt(qPos[0])||null,parseInt(qPos[1])||null)
+                            }}
+                          >
+                            <option value="">вручну...</option>
+                            {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        )}
+                      </>
+                    )}
+                    {!isAdmin && !isMe && <span style={{color:'var(--muted)',fontSize:11}}>пілот не призначений</span>}
                   </>
                 )}
               </div>

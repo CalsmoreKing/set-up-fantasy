@@ -1,19 +1,14 @@
 import { useState, useEffect } from 'react'
-import { supabase, calcRaceScore, calcQualScore, calcSprintScore } from '../lib/supabase'
+import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
-const TEAM_COLORS = {
-  'Макларен':'#FF8000','Мерседес':'#00D2BE','Феррарі':'#E8002D',
-  'Альпін':'#0090FF','Ред Булл':'#3671C6','Ауді':'#888888',
-  'Астон Мартін':'#358C75','Альфа Ромео':'#C92D4B','Ред Булл Альфа Таурі':'#5E8FAA',
-}
+const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
 export default function StandingsPage() {
   const { isAdmin } = useAuth()
   const [players,   setPlayers]   = useState([])
   const [loading,   setLoading]   = useState(true)
   const [saving,    setSaving]    = useState(null)
-  const [tooltip,   setTooltip]   = useState(null) // { player, x, y }
 
   useEffect(() => {
     supabase.from('players').select('*').order('base_pts', {ascending:false})
@@ -34,7 +29,6 @@ export default function StandingsPage() {
 
   const sorted = [...players].sort((a,b) => b.base_pts - a.base_pts)
 
-  // Team totals
   const teamTotals = {}
   players.forEach(p => {
     if (!teamTotals[p.team]) teamTotals[p.team] = { team:p.team, pts:0, color:TEAM_COLORS[p.team]||'#888', members:[] }
@@ -61,8 +55,10 @@ export default function StandingsPage() {
           <tbody>
             {sorted.map((p, idx) => {
               const rank = idx + 1
+              const tc = TEAM_COLORS[p.team] || '#888'
+              const code = TEAM_META[p.team]?.code || p.team.slice(0,3).toUpperCase()
               return (
-                <tr key={p.id} className={rank<=3?`p${rank}`:''}>
+                <tr key={p.id} className={rank<=3?`p${rank}`:''} style={{borderLeft:`3px solid ${tc}`}}>
                   <td><span className={`rank${rank<=3?` r${rank}`:''}`}>{rank}</span></td>
                   <td>
                     <span className="name-hover" style={{fontWeight:600}}>
@@ -70,8 +66,8 @@ export default function StandingsPage() {
                     </span>
                   </td>
                   <td>
-                    <span className="team-badge" style={{borderColor:TEAM_COLORS[p.team]||'#888',color:TEAM_COLORS[p.team]||'#888'}}>
-                      {p.team}
+                    <span className="team-badge" style={{borderColor:tc,color:tc}}>
+                      {code} · {p.team}
                     </span>
                   </td>
                   <td>
@@ -111,9 +107,9 @@ export default function StandingsPage() {
         </thead>
         <tbody>
           {teamSorted.map((t, idx) => (
-            <tr key={t.team}>
+            <tr key={t.team} style={{borderLeft:`3px solid ${t.color}`}}>
               <td><span className={`rank${idx<3?` r${idx+1}`:''}`}>{idx+1}</span></td>
-              <td><span className="team-name" style={{color:t.color}}>{t.team}</span></td>
+              <td><span className="team-name" style={{color:t.color}}>{TEAM_META[t.team]?.code} · {t.team}</span></td>
               <td style={{color:'var(--muted)',fontSize:12}}>{t.members.join(' · ')}</td>
               <td><span className="team-score">{t.pts}</span></td>
             </tr>
