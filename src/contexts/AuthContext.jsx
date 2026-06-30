@@ -39,9 +39,11 @@ export function AuthProvider({ children }) {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) throw error
     if (data.user) {
-      await supabase.from('players')
-        .update({ auth_user_id: data.user.id })
-        .eq('name', playerName)
+      const { data: linked, error: linkErr } = await supabase.rpc('link_player_to_auth', {
+        p_player_name: playerName
+      })
+      if (linkErr) throw new Error(`Не вдалось прив'язати гравця: ${linkErr.message}`)
+      if (linked === false) throw new Error('Цей гравець вже має акаунт. Обери інше ім\'я або відновлюй пароль.')
     }
     return data
   }

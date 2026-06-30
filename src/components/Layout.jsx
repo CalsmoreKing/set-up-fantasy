@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import BulkPanel from './BulkPanel'
 
 export default function Layout() {
@@ -8,22 +8,10 @@ export default function Layout() {
   const nav = useNavigate()
   const loc = useLocation()
   const [bulkOpen, setBulkOpen] = useState(false)
-  const bulkWrapRef = useRef(null)
 
   const isMain     = loc.pathname === '/'
   const isTable    = loc.pathname === '/table'
   const isAdminP   = loc.pathname === '/admin'
-
-  // Close bulk on outside click
-  useEffect(() => {
-    function handler(e) {
-      if (bulkWrapRef.current && !bulkWrapRef.current.contains(e.target)) {
-        setBulkOpen(false)
-      }
-    }
-    if (bulkOpen) document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [bulkOpen])
 
   return (
     <>
@@ -47,12 +35,9 @@ export default function Layout() {
           <button className={`nav-btn${isTable?' active':''}`}  onClick={()=>nav('/table')}>ТАБЛИЦЯ</button>
           {isAdmin && <button className={`nav-btn${isAdminP?' active':''}`} onClick={()=>nav('/admin')}>АДМІН</button>}
           {isAdmin && (
-            <div className="bulk-wrap" ref={bulkWrapRef} style={{position:'relative'}}>
-              <button className={`nav-btn${bulkOpen?' active':''}`} onClick={()=>setBulkOpen(v=>!v)}>
-                ІМПОРТ {bulkOpen?'▲':'▼'}
-              </button>
-              <BulkPanel open={bulkOpen} onClose={()=>setBulkOpen(false)} />
-            </div>
+            <button className={`nav-btn${bulkOpen?' active':''}`} onClick={()=>setBulkOpen(true)}>
+              ІМПОРТ ▼
+            </button>
           )}
           <button className="nav-btn" onClick={signOut}>ВИЙТИ</button>
         </nav>
@@ -69,7 +54,7 @@ export default function Layout() {
           <span className="icon">🏆</span>ТАБЛИЦЯ
         </button>
         {isAdmin && (
-          <button className="bottom-nav-btn" onClick={()=>setBulkOpen(v=>!v)}>
+          <button className="bottom-nav-btn" onClick={()=>setBulkOpen(true)}>
             <span className="icon">📋</span>ІМПОРТ
           </button>
         )}
@@ -83,13 +68,13 @@ export default function Layout() {
         </button>
       </nav>
 
-      {/* Mobile bulk panel overlay */}
+      {/* Bulk import modal — full overlay, closes ONLY via explicit X or backdrop click */}
       {isAdmin && bulkOpen && (
-        <div style={{position:'fixed',inset:0,zIndex:400,display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>
-          <div style={{background:'rgba(0,0,0,.6)',flex:1}} onClick={()=>setBulkOpen(false)} />
-          <div style={{background:'#1c1c1c',borderTop:'2px solid var(--red)',padding:'0 0 calc(70px + env(safe-area-inset-bottom))',maxHeight:'85dvh',overflowY:'auto'}}>
-            <BulkPanel open={true} mobile onClose={()=>setBulkOpen(false)} />
-          </div>
+        <div
+          style={{position:'fixed',inset:0,zIndex:5000,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'70px 16px 16px',background:'rgba(0,0,0,.7)'}}
+          onClick={(e) => { if (e.target === e.currentTarget) setBulkOpen(false) }}
+        >
+          <BulkPanel open={true} onClose={()=>setBulkOpen(false)} standalone />
         </div>
       )}
     </>

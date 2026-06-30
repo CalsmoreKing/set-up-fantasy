@@ -25,8 +25,12 @@ export default function MainPage() {
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('players').select('*').order('name'),
     ]).then(([s, p]) => {
-      setStages(s.data || [])
+      const stagesData = s.data || []
+      setStages(stagesData)
       setPlayers(p.data || [])
+      // Auto-select first unlocked stage as default
+      const firstOpen = stagesData.find(st => !st.is_locked)
+      if (firstOpen) setStageKey(firstOpen.key)
       setLoading(false)
     })
   }, [])

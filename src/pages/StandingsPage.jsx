@@ -4,6 +4,28 @@ import { useAuth } from '../contexts/AuthContext'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
+function RankArrow({ delta }) {
+  if (!delta) return <span style={{color:'var(--muted)',fontSize:11,width:34,display:'inline-block'}}>–</span>
+  const up = delta > 0
+  return (
+    <span style={{
+      color: up ? 'var(--green)' : '#ff6b6b',
+      fontSize: 11, fontFamily:'Orbitron,sans-serif', fontWeight:700,
+      display:'inline-flex', alignItems:'center', gap:2, width:34
+    }}>
+      {up ? '▲' : '▼'}{Math.abs(delta)}
+    </span>
+  )
+}
+function ScoreDelta({ delta }) {
+  if (!delta) return null
+  return (
+    <span style={{color:'var(--green)',fontSize:11,fontFamily:'Orbitron,sans-serif',fontWeight:700,marginLeft:6}}>
+      ▲+{delta}
+    </span>
+  )
+}
+
 export default function StandingsPage() {
   const { isAdmin } = useAuth()
   const [players,   setPlayers]   = useState([])
@@ -47,6 +69,7 @@ export default function StandingsPage() {
           <thead>
             <tr>
               <th>#</th>
+              <th>Δ</th>
               <th>Гравець</th>
               <th>Команда</th>
               <th>Бали</th>
@@ -60,6 +83,7 @@ export default function StandingsPage() {
               return (
                 <tr key={p.id} className={rank<=3?`p${rank}`:''} style={{borderLeft:`3px solid ${tc}`}}>
                   <td><span className={`rank${rank<=3?` r${rank}`:''}`}>{rank}</span></td>
+                  <td><RankArrow delta={p.last_rank_delta} /></td>
                   <td>
                     <span className="name-hover" style={{fontWeight:600}}>
                       {p.name}
@@ -84,6 +108,7 @@ export default function StandingsPage() {
                     ) : (
                       <span className="score-total">{p.base_pts}</span>
                     )}
+                    <ScoreDelta delta={p.last_session_delta} />
                     {saving===p.id && <span style={{color:'var(--muted)',fontSize:10,marginLeft:6}}>...</span>}
                   </td>
                 </tr>

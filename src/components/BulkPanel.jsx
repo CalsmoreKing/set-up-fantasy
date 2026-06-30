@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseBulkText, resolvePlayerName, resolvePilot } from '../lib/supabase'
 
-export default function BulkPanel({ open, onClose, mobile }) {
+export default function BulkPanel({ open, onClose, standalone }) {
   const [importType, setImportType] = useState('forecast')  // 'forecast' | 'quali'
   const [text, setText]       = useState('')
   const [parsed, setParsed]   = useState(null)
@@ -102,12 +102,12 @@ export default function BulkPanel({ open, onClose, mobile }) {
     }
   }
 
-  const style = mobile
-    ? { background:'#1c1c1c', borderTop:'2px solid var(--red)', padding:16, maxHeight:'70dvh', overflowY:'auto' }
+  const style = standalone
+    ? { position:'static', display:'block', width:'min(560px, 100%)', maxHeight:'85dvh', overflowY:'auto' }
     : { }
 
   return (
-    <div className={`bulk-panel open`} style={style} onClick={e=>e.stopPropagation()}>
+    <div className={`bulk-panel${standalone?' open':' open'}`} style={style} onClick={e=>e.stopPropagation()}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
         <span style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2}}>МАСОВИЙ ІМПОРТ</span>
         <button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:9}} onClick={onClose}>✕</button>
@@ -143,8 +143,6 @@ export default function BulkPanel({ open, onClose, mobile }) {
           placeholder={importType === 'quali'
             ? "Ярослав — COL\nМія — BEA\nНептун — NOR\nХонда — ANT\n..."
             : "Ярослав\n1-VER 2-RUS 3-LEC 4-NOR 5-HAM 6-ANT 7-PIA 8-LAW 9-GAS 10-LIN ШК-VER Прорив-HAD\n\nМія\n1-NOR 2-PIA ..."}
-          onMouseDown={e=>e.stopPropagation()}
-          onTouchStart={e=>e.stopPropagation()}
         />
       </div>
 
