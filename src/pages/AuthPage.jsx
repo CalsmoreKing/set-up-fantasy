@@ -18,12 +18,16 @@ export default function AuthPage() {
 
   useEffect(() => { if (user) nav('/') }, [user])
   useEffect(() => {
+<<<<<<< HEAD
     supabase.from('players').select('name').order('name').then(({ data, error }) => {
       if (error) {
         console.error('Supabase players query failed:', error)
         setErr(`Помилка завантаження гравців: ${error.message}`)
         return
       }
+=======
+    supabase.from('players').select('name').order('name').then(({ data }) => {
+>>>>>>> eb9f478b3057575d01f2c63db4f6d0f28f3f6704
       setPlayers((data || []).map(p => p.name))
     })
   }, [])
@@ -36,7 +40,11 @@ export default function AuthPage() {
         await signIn(email, pass)
       } else if (mode === 'register') {
         if (pass !== pass2) throw new Error('Паролі не співпадають')
+<<<<<<< HEAD
         if (!pName) throw new Error('Оберіть своє ім'я')
+=======
+        if (!pName) throw new Error("Оберіть своє ім'я")
+>>>>>>> eb9f478b3057575d01f2c63db4f6d0f28f3f6704
         await signUp(email, pass, pName)
         setMsg('Перевір пошту для підтвердження!')
       } else {
