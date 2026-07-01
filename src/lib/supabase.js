@@ -16,22 +16,22 @@ if (!SUPABASE_URL || !SUPABASE_ANON) {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
-// ── Пілоти ──────────────────────────────────────────
+// ── Пілоти (порядок = поточна позиція в сезоні) ──────
 export const PILOTS = [
-  'Verstappen','Hamilton','Leclerc','Norris','Sainz',
-  'Russell','Pérez','Alonso','Piastri','Stroll',
-  'Gasly','Ocon','Bottas','Colapinto','Bearman',
-  'Hülkenberg','Bortoleto','Lawson','Albon','Lindblad',
-  'Antonelli','Hadjar'
+  'Antonelli','Russell','Hamilton','Piastri','Norris',
+  'Leclerc','Verstappen','Hadjar','Gasly','Lawson',
+  'Bearman','Colapinto','Lindblad','Sainz','Albon',
+  'Ocon','Bortoleto','Alonso','Hülkenberg','Bottas',
+  'Pérez','Stroll'
 ]
 
 export const PILOT_ABBR = {
-  VER:'Verstappen', HAM:'Hamilton',  LEC:'Leclerc',    NOR:'Norris',
-  SAI:'Sainz',      RUS:'Russell',   PER:'Pérez',       ALO:'Alonso',
-  PIA:'Piastri',    STR:'Stroll',    GAS:'Gasly',       OCO:'Ocon',
-  BOT:'Bottas',     COL:'Colapinto', BEA:'Bearman',     HUL:'Hülkenberg',
-  BOR:'Bortoleto',  LAW:'Lawson',    ALB:'Albon',       LIN:'Lindblad',
-  ANT:'Antonelli',  HAD:'Hadjar',
+  ANT:'Antonelli', RUS:'Russell',  HAM:'Hamilton',  PIA:'Piastri',
+  NOR:'Norris',    LEC:'Leclerc',  VER:'Verstappen',HAD:'Hadjar',
+  GAS:'Gasly',     LAW:'Lawson',   BEA:'Bearman',   COL:'Colapinto',
+  LIN:'Lindblad',  SAI:'Sainz',    ALB:'Albon',     OCO:'Ocon',
+  BOR:'Bortoleto', ALO:'Alonso',   HUL:'Hülkenberg',BOT:'Bottas',
+  PER:'Pérez',     STR:'Stroll',
 }
 
 // Скорочення для швидкого введення в bulk
@@ -110,7 +110,7 @@ export const TEAM_META = {
   'Ауді':                  { color:'#888888', code:'AUD', glyph:'⬜' },
   'Астон Мартін':          { color:'#358C75', code:'AMR', glyph:'🟩' },
   'Альфа Ромео':           { color:'#C92D4B', code:'ALF', glyph:'🟥' },
-  'Ред Булл Альфа Таурі':  { color:'#5E8FAA', code:'RBAT', glyph:'🟦' },
+  'Ред Булл Рейсінг':     { color:'#1E3A8A', code:'RB',   glyph:'🔷' },
 }
 export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv) {
   const breakdown = []

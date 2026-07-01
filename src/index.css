@@ -376,3 +376,182 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .badge-admin { color: var(--red); border-color: var(--red); }
 input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+
+/* ═══════════════════════════════════════════
+   ENHANCED DESIGN — Particles, Depth, Animation
+   ═══════════════════════════════════════════ */
+
+/* ── Animated racing line background ── */
+@keyframes raceLine {
+  0%   { transform: translateX(-100%) skewX(-20deg); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateX(110vw) skewX(-20deg); opacity: 0; }
+}
+@keyframes raceLineFade {
+  0%   { transform: translateX(-100%) skewX(-20deg) scaleY(1); opacity: 0; }
+  5%   { opacity: 0.6; }
+  95%  { opacity: 0.4; }
+  100% { transform: translateX(110vw) skewX(-20deg) scaleY(1); opacity: 0; }
+}
+@keyframes particleDrift {
+  0%   { transform: translateX(-20px) translateY(0px); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateX(105vw) translateY(-30px); opacity: 0; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(225,6,0,.2); }
+  50%       { box-shadow: 0 0 18px rgba(225,6,0,.45); }
+}
+@keyframes scanline {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100px; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Canvas particle layer ── */
+#particle-canvas {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 0; opacity: .5;
+}
+
+/* ── Global depth background ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 40% at 15% 80%, rgba(225,6,0,.04) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 60% at 85% 20%, rgba(225,6,0,.03) 0%, transparent 60%),
+    repeating-linear-gradient(0deg, transparent, transparent 99px, rgba(255,255,255,.012) 100px);
+  animation: scanline 8s linear infinite;
+}
+
+/* ── Header glow ── */
+.site-header {
+  box-shadow: 0 2px 20px rgba(225,6,0,.12), inset 0 -1px 0 rgba(225,6,0,.15);
+}
+.header-logo {
+  text-shadow: 0 0 20px rgba(225,6,0,.4), 0 0 40px rgba(225,6,0,.15);
+  animation: pulse-glow 3s ease-in-out infinite;
+  display: inline-block;
+}
+
+/* ── Cards animation on enter ── */
+.player-card {
+  animation: fadeInUp .3s ease both;
+  position: relative; z-index: 1;
+}
+.player-card:nth-child(2)  { animation-delay: .04s; }
+.player-card:nth-child(3)  { animation-delay: .08s; }
+.player-card:nth-child(4)  { animation-delay: .12s; }
+.player-card:nth-child(5)  { animation-delay: .16s; }
+.player-card:nth-child(6)  { animation-delay: .20s; }
+.player-card:nth-child(7)  { animation-delay: .24s; }
+.player-card:nth-child(8)  { animation-delay: .28s; }
+.player-card:nth-child(9)  { animation-delay: .32s; }
+.player-card:nth-child(10) { animation-delay: .36s; }
+.player-card:nth-child(11) { animation-delay: .40s; }
+.player-card:nth-child(12) { animation-delay: .44s; }
+
+/* ── Card depth ── */
+.player-card {
+  box-shadow: 0 2px 8px rgba(0,0,0,.4), 0 0 0 0 transparent;
+  transition: box-shadow .25s ease, border-color .25s ease, transform .2s ease;
+}
+.player-card:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,.5), 0 0 12px rgba(225,6,0,.08);
+  transform: translateY(-1px);
+}
+
+/* ── Card header gradient (team-aware) ── */
+.card-header {
+  background: linear-gradient(105deg,
+    color-mix(in srgb, var(--team-color, #333) 8%, #141414) 0%,
+    #141414 50%
+  ) !important;
+}
+
+/* ── Live score pulse when > 0 ── */
+.live-score-active {
+  animation: pulse-glow 2s ease-in-out infinite;
+  border-radius: 3px; padding: 0 4px;
+}
+
+/* ── Standings table ── */
+.standings td, .team-table td {
+  transition: background .15s;
+}
+.standings tr.p1 td { background: linear-gradient(90deg, rgba(255,215,0,.07) 0%, transparent 80%) !important; }
+.standings tr.p2 td { background: linear-gradient(90deg, rgba(192,192,192,.05) 0%, transparent 80%) !important; }
+.standings tr.p3 td { background: linear-gradient(90deg, rgba(205,127,50,.05) 0%, transparent 80%) !important; }
+
+/* ── F1 stripe animation ── */
+.f1-stripe {
+  background: repeating-linear-gradient(90deg,
+    var(--red) 0, var(--red) 55px,
+    var(--bg) 55px, var(--bg) 74px
+  );
+  background-size: 200% 100%;
+  animation: stripeScroll 20s linear infinite;
+}
+@keyframes stripeScroll {
+  0%   { background-position: 0 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Stage bar ── */
+.stage-bar {
+  background: linear-gradient(135deg, #161616 0%, #111 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 2px 10px rgba(0,0,0,.3);
+}
+
+/* ── Session active btn ── */
+.session-btn.active {
+  background: linear-gradient(135deg, rgba(225,6,0,.15) 0%, rgba(225,6,0,.08) 100%) !important;
+  box-shadow: 0 0 10px rgba(225,6,0,.15);
+}
+
+/* ── DnD pool ── */
+.pilot-pool {
+  background: linear-gradient(135deg, #161616, #121212);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+}
+.pilot-chip {
+  transition: border-color .15s, transform .15s, box-shadow .15s;
+}
+.pilot-chip:hover:not(.used) {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 10px rgba(0,0,0,.4);
+  border-color: var(--red);
+}
+
+/* ── Commit button pulse ── */
+.btn-red {
+  position: relative; overflow: hidden;
+}
+.btn-red::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.08) 50%, transparent 100%);
+  transform: translateX(-100%);
+  transition: transform .4s ease;
+}
+.btn-red:hover::after { transform: translateX(100%); }
+
+/* ── Section label line ── */
+.section-label::after {
+  background: linear-gradient(90deg, var(--red) 0%, rgba(225,6,0,.3) 40%, transparent 100%);
+  height: 1px;
+}
+
+/* ── Tooltip depth ── */
+.breakdown-tooltip {
+  box-shadow: 0 8px 40px rgba(0,0,0,.9), 0 0 1px rgba(225,6,0,.3);
+  backdrop-filter: blur(4px);
+}
+
+main { position: relative; z-index: 1; }

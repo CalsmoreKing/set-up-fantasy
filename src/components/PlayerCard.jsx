@@ -76,13 +76,14 @@ export default function PlayerCard({
   }
 
   // Fill count
+  // Fill indicator — shows only when PREDICTION is entered, not just pilot assigned
   const fillCount = sessionType === 'qual'
-    ? qPilots.filter(Boolean).length
+    ? qPos.filter(p => p !== '' && p !== null && p !== undefined).length
     : sessionType === 'sprint'
     ? preds.slice(0,5).filter(Boolean).length
     : preds.filter(Boolean).length
   const fillTotal = sessionType === 'qual' ? (isDouble?2:1) : sessionType === 'sprint' ? 5 : 10
-  const isFull = fillCount === fillTotal
+  const isFull = fillCount === fillTotal && fillTotal > 0
 
   // Qual available pilots
   function getAvailable() {
