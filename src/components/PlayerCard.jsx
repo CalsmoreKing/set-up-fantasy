@@ -315,7 +315,7 @@ function getPts(i, pilot, results, type) {
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
   const top5 = i < 5
-  const pts = diff===0?(top5?5:6):diff===1?(top5?2:3):diff===2?(top5?1:2):(top5?0:1)
+  const pts = diff===0?(top5?5:6):diff===1?(top5?2:3):diff===2?(top5?1:2):diff===3?(top5?0:1):0
   return pts > 0 ? pts : ''
 }
 function getQualPts(pilot, predPos, results) {

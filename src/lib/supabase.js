@@ -126,7 +126,8 @@ export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv) {
     let pts = diff === 0 ? (top5 ? 5 : 6)
             : diff === 1 ? (top5 ? 2 : 3)
             : diff === 2 ? (top5 ? 1 : 2)
-            : top5 ? 0 : 1
+            : diff === 3 ? (top5 ? 0 : 1)
+            : 0
     if (pts > 0) {
       total += pts
       breakdown.push({ label: `P${i+1} ${predicted} → факт P${actualPos+1}`, pts })

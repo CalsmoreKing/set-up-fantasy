@@ -205,7 +205,6 @@ export default function AdminPage() {
 
   const tabs = [
     { key:'stages', label:'ЕТАПИ' },
-    { key:'commit', label:'ЗАРАХУВАННЯ' },
     { key:'users',  label:'ГРАВЦІ' },
     { key:'teams',  label:'КОМАНДИ' },
     { key:'log',    label:'ЛОГ' },
