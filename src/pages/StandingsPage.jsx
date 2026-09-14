@@ -79,11 +79,25 @@ export default function StandingsPage() {
 
   const teamTotals = {}
   players.forEach(p => {
-    if (!teamTotals[p.team]) teamTotals[p.team] = { team:p.team, pts:0, color:TEAM_COLORS[p.team]||'#888', members:[] }
+    if (!teamTotals[p.team]) teamTotals[p.team] = { team:p.team, pts:0, weekendPts:0, color:TEAM_COLORS[p.team]||'#888', members:[] }
     teamTotals[p.team].pts += p.base_pts
+    teamTotals[p.team].weekendPts += (p.last_session_delta || 0)
     teamTotals[p.team].members.push(p.name)
   })
   const teamSorted = Object.values(teamTotals).sort((a,b)=>b.pts-a.pts)
+
+  // Compute team rank change: current pts vs pts-before-last-weekend (pts - weekendPts)
+  const teamPrevSorted = [...Object.values(teamTotals)]
+    .map(t => ({ ...t, prevPts: t.pts - t.weekendPts }))
+    .sort((a,b) => b.prevPts - a.prevPts)
+  const prevRankByTeam = {}
+  teamPrevSorted.forEach((t, i) => { prevRankByTeam[t.team] = i + 1 })
+  const teamRankDelta = {}
+  teamSorted.forEach((t, i) => {
+    const currentRank = i + 1
+    const prevRank = prevRankByTeam[t.team] || currentRank
+    teamRankDelta[t.team] = prevRank - currentRank
+  })
 
   const selectedStage = stages.find(s => s.key === stageTab)
 
@@ -160,14 +174,22 @@ export default function StandingsPage() {
       {/* ── TEAM TABLE ── */}
       <div className="section-label">Таблиця команд</div>
       <table className="team-table">
-        <thead><tr><th>#</th><th>Команда</th><th>Гравці</th><th>Бали</th></tr></thead>
+        <thead><tr><th>#</th><th>Δ</th><th>Команда</th><th>Гравці</th><th>Бали</th></tr></thead>
         <tbody>
           {teamSorted.map((t, idx) => (
             <tr key={t.team} style={{borderLeftColor:t.color}}>
               <td><span className={`rank${idx<3?` r${idx+1}`:''}`}>{idx+1}</span></td>
+              <td><RankArrow delta={teamRankDelta[t.team]} /></td>
               <td><span className="team-name" style={{color:t.color}}>{TEAM_META[t.team]?.code} · {t.team}</span></td>
               <td style={{color:'var(--muted)',fontSize:12}}>{t.members.join(' · ')}</td>
-              <td><span className="team-score">{t.pts}</span></td>
+              <td>
+                <span className="team-score">{t.pts}</span>
+                {t.weekendPts > 0 && (
+                  <span style={{color:'var(--green)',fontSize:11,fontFamily:'Orbitron,sans-serif',fontWeight:700,marginLeft:6}}>
+                    ▲+{t.weekendPts}
+                  </span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

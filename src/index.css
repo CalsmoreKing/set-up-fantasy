@@ -278,6 +278,14 @@ main { position: relative; z-index: 2; padding: 16px; max-width: 960px; margin: 
 .pilot-select:focus { border-color: var(--red); }
 .pilot-select:disabled { opacity: .35; cursor: not-allowed; }
 .pilot-select.conflict { border-color: #f59e0b; background-color: rgba(245,158,11,.05); }
+/* Fix white-on-white dropdown options — browsers often ignore parent styling for <option> */
+select.pilot-select option,
+select.base-select option,
+select.pos-input option,
+select.stage-select option {
+  background: #0d0d0d;
+  color: #F0F0F0;
+}
 .pts-badge { font-family: 'Orbitron', sans-serif; font-size: 10px; font-weight: 700; color: var(--gold); width: 18px; text-align: right; flex-shrink: 0; }
 
 .specials-bar { display: flex; gap: 8px; padding: 0 12px 10px; }

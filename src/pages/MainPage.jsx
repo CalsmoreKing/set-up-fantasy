@@ -147,12 +147,12 @@ export default function MainPage() {
     if (data) setForecasts(prev => ({ ...prev, [playerId]: data }))
   }
 
-  async function saveQualAssign(playerId, pilot1, pilot2, pos1, pos2) {
+  async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession) return
     const { data } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id, player_id: playerId,
-      pilot_1: pilot1||'', pilot_2: pilot2||'',
-      pred_pos_1: pos1||null, pred_pos_2: pos2||null,
+      pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
+      pred_pos_1: positions[0]||null, pred_pos_2: positions[1]||null, pred_pos_3: positions[2]||null,
     }, { onConflict: 'session_id,player_id' }).select().single()
     if (data) setQualAssign(prev => ({ ...prev, [playerId]: data }))
   }
@@ -187,7 +187,7 @@ export default function MainPage() {
       } else if (sessionType === 'qual') {
         for (const qa of (qualData||[])) {
           let total = 0, breakdown = []
-          for (const [pilot, pos] of [[qa.pilot_1, qa.pred_pos_1],[qa.pilot_2, qa.pred_pos_2]]) {
+          for (const [pilot, pos] of [[qa.pilot_1, qa.pred_pos_1],[qa.pilot_2, qa.pred_pos_2],[qa.pilot_3, qa.pred_pos_3]]) {
             if (!pilot || !pos) continue
             const r = calcQualScore(pilot, pos, results)
             total += r.total; breakdown.push(...r.breakdown)
@@ -205,6 +205,10 @@ export default function MainPage() {
           await supabase.from('forecasts').update({ score: total, score_breakdown: breakdown }).eq('id', f.id)
         }
       }
+
+      // Reset previous weekend deltas for everyone first, so stale values from
+      // a prior session don't linger on players who didn't forecast this time
+      await supabase.from('players').update({ last_session_delta: 0 }).neq('id', '00000000-0000-0000-0000-000000000000')
 
       for (const u of updates) {
         if (u.id) await supabase.from('players').update({ base_pts: u.base_pts, last_session_delta: u.delta }).eq('id', u.id)
@@ -364,7 +368,7 @@ export default function MainPage() {
                 liveScores[p.id] = total
               } else if (sessionType === 'qual' && qa) {
                 let tot = 0
-                for (const [pilot, pos] of [[qa.pilot_1,qa.pred_pos_1],[qa.pilot_2,qa.pred_pos_2]]) {
+                for (const [pilot, pos] of [[qa.pilot_1,qa.pred_pos_1],[qa.pilot_2,qa.pred_pos_2],[qa.pilot_3,qa.pred_pos_3]]) {
                   if (pilot && pos) { const r = calcQualScore(pilot, pos, resultsList); tot += r.total }
                 }
                 liveScores[p.id] = tot
@@ -421,7 +425,7 @@ export default function MainPage() {
                         allQualAssign={qualAssign}
                         forecastHidden={!canSeeForecast}
                         onSaveForecast={(preds, fl, ov) => saveForecast(p.id, preds, fl, ov)}
-                        onSaveQual={(p1, p2, pos1, pos2) => saveQualAssign(p.id, p1, p2, pos1, pos2)}
+                        onSaveQual={(pilots, positions) => saveQualAssign(p.id, pilots, positions)}
                         teamSiblingId={siblingId}
                         liveScore={isLiveMode ? liveScores[p.id] : undefined}
                         liveRank={isLiveMode ? idx+1 : undefined}
@@ -440,70 +444,64 @@ export default function MainPage() {
 
 async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, isDouble) {
   if (!sessionId) { alert('Спочатку оберіть сесію'); return }
-  const { USED_PILOTS, PILOTS } = await import('../lib/supabase')
-  const count = isDouble ? 2 : 1
+  const { USED_PILOTS, PILOTS, getSlotCountForPlayer } = await import('../lib/supabase')
+
+  // Per-player slot count (1, 2, or 3 for catch-up players like Pedri/Hexi)
+  const slotCountFor = {}
+  players.forEach(p => { slotCountFor[p.id] = getSlotCountForPlayer(p.name, stageKey, isDouble) })
+  const maxSlots = Math.max(...Object.values(slotCountFor))
 
   // Load ALL qual assignments across ALL stages to know full pilot history
   const { data: allAssignData } = await supabase
     .from('qual_assignments')
-    .select('player_id, pilot_1, pilot_2')
+    .select('player_id, pilot_1, pilot_2, pilot_3')
 
-  // Build used-pilots set per player (from ALL past stages)
   const playerUsed = {}
   players.forEach(p => {
     playerUsed[p.id] = new Set(USED_PILOTS[p.name] || [])
   })
   allAssignData?.forEach(a => {
-    // Exclude assignments from THIS session (we're re-rolling it)
     if (a.pilot_1 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_1)
     if (a.pilot_2 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_2)
+    if (a.pilot_3 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_3)
   })
 
-  // For each slot, we do a global assignment to guarantee uniqueness ACROSS all players
-  // Slot 1: assign one unique pilot per player, no duplicates within this slot
-  // Slot 2 (if double): same, also different from slot 1 per player
-
-  function assignSlot(slotIndex) {
-    // Available pilots per player for this slot
+  function assignSlot() {
     const available = {}
     players.forEach(p => {
       available[p.id] = PILOTS.filter(pilot => !playerUsed[p.id].has(pilot))
     })
-
-    const assignment = {} // player_id → pilot
+    const assignment = {}
     const usedThisSlot = new Set()
-
-    // Shuffle players to randomize priority
     const shuffled = [...players].sort(() => Math.random() - 0.5)
 
     for (const player of shuffled) {
       const pool = available[player.id].filter(p => !usedThisSlot.has(p))
-      // If no unique pilot available (very rare edge case), pick from all available
       const finalPool = pool.length > 0 ? pool : available[player.id]
-      if (!finalPool.length) {
-        assignment[player.id] = ''
-        continue
-      }
+      if (!finalPool.length) { assignment[player.id] = ''; continue }
       const pilot = finalPool[Math.floor(Math.random() * finalPool.length)]
       assignment[player.id] = pilot
       usedThisSlot.add(pilot)
-      // Mark as used for subsequent slots of same player
       playerUsed[player.id].add(pilot)
     }
     return assignment
   }
 
-  const slot1 = assignSlot(0)
-  const slot2 = count === 2 ? assignSlot(1) : {}
+  // Roll up to maxSlots rounds; each player only receives up to their own slotCount
+  const slots = []
+  for (let i = 0; i < maxSlots; i++) slots.push(assignSlot())
 
-  const updates = players.map(p => ({
-    session_id: sessionId,
-    player_id: p.id,
-    pilot_1: slot1[p.id] || '',
-    pilot_2: count === 2 ? (slot2[p.id] || '') : '',
-    pred_pos_1: null,
-    pred_pos_2: null,
-  }))
+  const updates = players.map(p => {
+    const myCount = slotCountFor[p.id]
+    return {
+      session_id: sessionId,
+      player_id: p.id,
+      pilot_1: myCount >= 1 ? (slots[0]?.[p.id] || '') : '',
+      pilot_2: myCount >= 2 ? (slots[1]?.[p.id] || '') : '',
+      pilot_3: myCount >= 3 ? (slots[2]?.[p.id] || '') : '',
+      pred_pos_1: null, pred_pos_2: null, pred_pos_3: null,
+    }
+  })
 
   const { data } = await supabase
     .from('qual_assignments')
@@ -518,6 +516,6 @@ async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssi
 
   await supabase.from('audit_log').insert({
     action: 'roll_all_qual', actor: 'admin',
-    details: { session_id: sessionId, stage: stageKey, assignments: slot1 }
+    details: { session_id: sessionId, stage: stageKey }
   })
 }

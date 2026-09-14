@@ -17,11 +17,9 @@ if (!SUPABASE_URL || !SUPABASE_ANON) {
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
 // ═══════════════════════════════════════════════════════
-// ТИМЧАСОВА ЗАМІНА: Хаджар травмований, Цунода їде замість нього.
-// Коли Хаджар повернеться — заміни назад:
-//   'Tsunoda' → 'Hadjar'  (в PILOTS нижче)
-//   HAD:'Tsunoda' → HAD:'Hadjar'  (в PILOT_ABBR нижче)
-// USED_PILOTS не чіпати — там історія минулих кваліфікацій, вона коректна.
+// Хаджар травмований, Цунода їде замість нього в тій же машині.
+// Для фентезі-цілей це один "слот" — всюди використовується ім'я Tsunoda,
+// щоб уникнути дублікату при підрахунку used/available пілотів.
 // ═══════════════════════════════════════════════════════
 // ── Пілоти (порядок = поточна позиція в сезоні) ──────
 export const PILOTS = [
@@ -50,17 +48,54 @@ export const BULK_OV_KEYS   = ['прорив','ov','overtake']
 // Андрій, Кітасу, Миколапка мають 19 вільних — їм дістанеться +1 в одному з подвійних
 export const DOUBLE_STAGES = new Set(['brazil','qatar','uae'])
 
+// ── Індивідуальні винятки кількості пілотів на кваліфікацію ──
+// Формат: { playerName: { stageKey: count } }
+// Використовується для новачків що доганяють інших (напр. команда Порше).
+// Якщо гравця й етапу тут немає — застосовується стандартна логіка (1 або 2 через DOUBLE_STAGES).
+export const PLAYER_SLOT_OVERRIDES = {
+  'Педрі': {
+    'azerbaijan': 3,
+    'bahrain2':   3,
+    'singapore':  3,
+    // далі всі наступні етапи по 2 (усі окрім вже перелічених вище)
+    'usa':        2,
+    'mexico':     2,
+    'brazil':     2,
+    'lasvegas':   2,
+    'qatar':      2,
+    'uae':        2,
+  },
+  'Хексі': {
+    'azerbaijan': 3,
+    'bahrain2':   3,
+    'singapore':  3,
+    'usa':        2,
+    'mexico':     2,
+    'brazil':     2,
+    'lasvegas':   2,
+    'qatar':      2,
+    'uae':        2,
+  },
+}
+
+// Повертає скільки пілотів гравець отримує на цьому етапі кваліфікації
+export function getSlotCountForPlayer(playerName, stageKey, isDoubleStage) {
+  const override = PLAYER_SLOT_OVERRIDES[playerName]?.[stageKey]
+  if (override) return override
+  return isDoubleStage ? 2 : 1
+}
+
 // ── Вже використані пілоти кваліфікації ─────────────
 export const USED_PILOTS = {
   'Ярослав':   ['Colapinto','Russell','Antonelli','Ocon'],
-  'Мія':       ['Bearman','Norris','Hadjar','Stroll'],
+  'Мія':       ['Bearman','Norris','Tsunoda','Stroll'],
   'Нептун':    ['Norris','Lawson','Hülkenberg','Bortoleto'],
   'Хонда':     ['Antonelli','Verstappen','Bortoleto','Bearman'],
-  'Іванна':    ['Hadjar','Bortoleto','Lawson','Verstappen'],
+  'Іванна':    ['Tsunoda','Bortoleto','Lawson','Verstappen'],
   'Марго':     ['Bottas','Colapinto','Hamilton','Alonso'],
   'Чак':       ['Hamilton','Gasly','Sainz','Bottas'],
   'Калсмор':   ['Gasly','Leclerc','Colapinto','Hamilton'],
-  'Іван':      ['Albon','Hadjar','Lindblad','Lawson'],
+  'Іван':      ['Albon','Tsunoda','Lindblad','Lawson'],
   'Ігор':      ['Lawson','Bearman','Norris','Antonelli'],
   'Ярік':      ['Sainz','Hülkenberg','Albon','Leclerc'],
   'Анастасія': ['Alonso','Antonelli','Ocon','Gasly'],

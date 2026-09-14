@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
+import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META, getSlotCountForPlayer } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 
 const PILOT_OPTIONS = ['', ...PILOTS]
@@ -12,6 +12,7 @@ export default function PlayerCard({
   forecastHidden, liveScore, liveRank
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
+  const slotCount = getSlotCountForPlayer(player.name, stageKey, isDouble)
   const [open, setOpen]   = useState(false)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -25,8 +26,8 @@ export default function PlayerCard({
   const [preds, setPreds]   = useState(initPreds)
   const [fl,    setFl]      = useState(forecast?.fl_pick || '')
   const [ov,    setOv]      = useState(forecast?.ov_pick || '')
-  const [qPilots, setQPilots] = useState([qualAssign?.pilot_1||'', qualAssign?.pilot_2||''])
-  const [qPos,    setQPos]    = useState([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||''])
+  const [qPilots, setQPilots] = useState([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
+  const [qPos,    setQPos]    = useState([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
 
   // Sync from DB
   useEffect(() => {
@@ -87,7 +88,7 @@ export default function PlayerCard({
     : sessionType === 'sprint'
     ? preds.slice(0,5).filter(Boolean).length
     : preds.filter(Boolean).length
-  const fillTotal = sessionType === 'qual' ? (isDouble?2:1) : sessionType === 'sprint' ? 5 : 10
+  const fillTotal = sessionType === 'qual' ? slotCount : sessionType === 'sprint' ? 5 : 10
   const isFull = fillCount === fillTotal && fillTotal > 0
 
   // Qual available pilots
@@ -95,10 +96,13 @@ export default function PlayerCard({
     const used = new Set(USED_PILOTS[player.name] || [])
     // Add all previously assigned in other stages
     Object.values(allQualAssign || {}).forEach(a => {
-      if (a.player_id === player.id) { if (a.pilot_1) used.add(a.pilot_1); if (a.pilot_2) used.add(a.pilot_2) }
+      if (a.player_id === player.id) {
+        if (a.pilot_1) used.add(a.pilot_1)
+        if (a.pilot_2) used.add(a.pilot_2)
+        if (a.pilot_3) used.add(a.pilot_3)
+      }
     })
-    if (qPilots[0]) used.add(qPilots[0])
-    if (qPilots[1]) used.add(qPilots[1])
+    qPilots.forEach(p => { if (p) used.add(p) })
     return PILOTS.filter(p => !used.has(p))
   }
 
@@ -106,7 +110,7 @@ export default function PlayerCard({
     const taken = new Set(
       Object.values(allQualAssign || {})
         .filter(a => a.player_id !== player.id)
-        .map(a => idx===0 ? a.pilot_1 : a.pilot_2)
+        .map(a => idx===0 ? a.pilot_1 : idx===1 ? a.pilot_2 : a.pilot_3)
         .filter(Boolean)
     )
     const available = getAvailable().filter(p => !taken.has(p))
@@ -117,7 +121,7 @@ export default function PlayerCard({
     setQPilots(nPilots)
     const nPos = [...qPos]; nPos[idx] = ''
     setQPos(nPos)
-    onSaveQual(nPilots[0], nPilots[1], parseInt(nPos[0])||null, parseInt(nPos[1])||null)
+    onSaveQual(nPilots, nPos.map(v=>parseInt(v)||null))
   }
 
   // Tooltip state
@@ -244,18 +248,18 @@ export default function PlayerCard({
         {/* QUAL */}
         {sessionType === 'qual' && (
           <div style={{padding:'10px 12px'}}>
-            {[0, ...(isDouble?[1]:[])].map(idx => (
+            {Array.from({length: slotCount}, (_,i)=>i).map(idx => (
               <div className="qual-pilot-row" key={idx}>
                 {qPilots[idx] ? (
                   <>
-                    <span className={`pilot-tag${isDouble?' double':''}`}>{qPilots[idx]}</span>
+                    <span className={`pilot-tag${slotCount>1?' double':''}`}>{qPilots[idx]}</span>
                     <select
                       className="pos-input"
                       value={qPos[idx]}
                       disabled={!canEdit}
                       onChange={e => {
                         const n=[...qPos]; n[idx]=e.target.value; setQPos(n)
-                        onSaveQual(qPilots[0],qPilots[1],parseInt(n[0])||null,parseInt(n[1])||null)
+                        onSaveQual(qPilots, n.map(v=>parseInt(v)||null))
                       }}
                     >
                       <option value="">місце?</option>
@@ -265,7 +269,7 @@ export default function PlayerCard({
                     {canEditQualPilot && (
                       <>
                         <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>rollPilot(idx)} title="Перекинути іншого пілота">🎲</button>
-                        <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>{const n=[...qPilots];n[idx]='';setQPilots(n);const np=[...qPos];np[idx]='';setQPos(np);onSaveQual(n[0],n[1],parseInt(np[0])||null,parseInt(np[1])||null)}}>✕</button>
+                        <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>{const n=[...qPilots];n[idx]='';setQPilots(n);const np=[...qPos];np[idx]='';setQPos(np);onSaveQual(n, np.map(v=>parseInt(v)||null))}}>✕</button>
                       </>
                     )}
                   </>
@@ -281,7 +285,7 @@ export default function PlayerCard({
                           onChange={e => {
                             if (!e.target.value) return
                             const n=[...qPilots]; n[idx]=e.target.value; setQPilots(n)
-                            onSaveQual(n[0],n[1],parseInt(qPos[0])||null,parseInt(qPos[1])||null)
+                            onSaveQual(n, qPos.map(v=>parseInt(v)||null))
                           }}
                         >
                           <option value="">вручну...</option>

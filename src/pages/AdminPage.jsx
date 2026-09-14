@@ -422,6 +422,22 @@ export default function AdminPage() {
 // ════════════════════════════════════════
 import { useState as useStateD, useEffect as useEffectD } from 'react'
 
+// Визначає чи дата підпадає під літній час в Польщі (CEST, UTC+2)
+// Правило ЄС: останню неділю березня по останню неділю жовтня
+function isPolandDST(year, month, day) {
+  function lastSundayOfMonth(y, m) {
+    const d = new Date(Date.UTC(y, m, 0)) // last day of month m (1-indexed)
+    const dow = d.getUTCDay()
+    return d.getUTCDate() - dow
+  }
+  const marchLastSunday   = lastSundayOfMonth(year, 3)
+  const octoberLastSunday = lastSundayOfMonth(year, 10)
+  const current = new Date(Date.UTC(year, month - 1, day))
+  const dstStart = new Date(Date.UTC(year, 2, marchLastSunday))   // March, 1 AM UTC transition
+  const dstEnd   = new Date(Date.UTC(year, 9, octoberLastSunday)) // October
+  return current >= dstStart && current < dstEnd
+}
+
 function DeadlinesTab({ sessions, setSessions, setMsg }) {
   const [allSessions, setAllSessions] = useStateD([])
   const [saving, setSaving] = useStateD(null)
@@ -435,17 +451,20 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
 
   async function updateDeadline(sessionId, newDeadlineLocal) {
     setSaving(sessionId)
-    // newDeadlineLocal is datetime-local string (e.g. "2026-07-04T12:30")
-    // Treat it as Europe/Warsaw time — convert to UTC
-    // Since we can't do timezone math easily in browser without a lib,
-    // we'll store it directly and note it's in local machine time.
-    // Best approach: store as-is and add offset manually.
-    // User is in Poland (UTC+2 in summer), so subtract 2h for UTC.
-    const localDate = new Date(newDeadlineLocal)
-    // Attempt to get Polish offset — since user is in Poland this should be correct
-    const polandOffset = -120 // CEST = UTC+2 = -120 minutes from UTC perspective
-    const utcMs = localDate.getTime() - (polandOffset * 60000)
-    const utcDate = new Date(utcMs)
+    // newDeadlineLocal = "2026-07-04T15:00" — це час у Польщі (CEST/CET), НЕ час браузера.
+    // Будуємо UTC мітку вручну з компонентів дати, щоб уникнути подвійної конвертації
+    // через локальний часовий пояс браузера (звідки й був баг 15:00 → 17:00).
+    const [datePart, timePart] = newDeadlineLocal.split('T')
+    const [year, month, day] = datePart.split('-').map(Number)
+    const [hour, minute] = timePart.split(':').map(Number)
+
+    // Визначаємо чи ця дата підпадає під літній час (CEST, UTC+2) чи зимовий (CET, UTC+1)
+    // Європа: літній час з останньої неділі березня по останню неділю жовтня
+    const isDST = isPolandDST(year, month, day)
+    const polandUtcOffsetHours = isDST ? 2 : 1
+
+    // Будуємо UTC час напряму: віднімаємо офсет Польщі від введеного польського часу
+    const utcDate = new Date(Date.UTC(year, month - 1, day, hour - polandUtcOffsetHours, minute))
     const utcStr = utcDate.toISOString()
 
     const { error } = await supabase.from('sessions')
@@ -463,7 +482,8 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
 
   async function clearDeadline(sessionId) {
     setSaving(sessionId)
-    await supabase.from('sessions').update({ deadline_utc: null }).eq('id', sessionId)
+    const { error } = await supabase.from('sessions').update({ deadline_utc: null }).eq('id', sessionId)
+    if (error) { setMsg(`⚠ ${error.message}`); setSaving(null); return }
     setAllSessions(prev => prev.map(s => s.id === sessionId ? { ...s, deadline_utc: null } : s))
     setMsg('✓ Дедлайн знятий')
     setSaving(null)
@@ -471,7 +491,8 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
 
   async function forceUnlock(sessionId) {
     setSaving(sessionId)
-    await supabase.from('sessions').update({ is_locked: false }).eq('id', sessionId)
+    const { error } = await supabase.from('sessions').update({ is_locked: false }).eq('id', sessionId)
+    if (error) { setMsg(`⚠ ${error.message}`); setSaving(null); return }
     setAllSessions(prev => prev.map(s => s.id === sessionId ? { ...s, is_locked: false } : s))
     setMsg('✓ Сесію розблоковано')
     setSaving(null)
@@ -479,7 +500,8 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
 
   async function forceLock(sessionId) {
     setSaving(sessionId)
-    await supabase.from('sessions').update({ is_locked: true }).eq('id', sessionId)
+    const { error } = await supabase.from('sessions').update({ is_locked: true }).eq('id', sessionId)
+    if (error) { setMsg(`⚠ ${error.message}`); setSaving(null); return }
     setAllSessions(prev => prev.map(s => s.id === sessionId ? { ...s, is_locked: true } : s))
     setMsg('✓ Сесію заблоковано')
     setSaving(null)
@@ -497,9 +519,10 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
 
   function toLocalInput(utcStr) {
     if (!utcStr) return ''
-    // Convert UTC to Poland time (UTC+2) for display
     const d = new Date(utcStr)
-    const polandMs = d.getTime() + (120 * 60000)
+    const isDST = isPolandDST(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate())
+    const offsetHours = isDST ? 2 : 1
+    const polandMs = d.getTime() + (offsetHours * 60 * 60000)
     const pd = new Date(polandMs)
     return pd.toISOString().slice(0, 16)
   }
