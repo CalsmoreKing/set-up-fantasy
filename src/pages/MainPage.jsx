@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualScore, calcSprintScore, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import PlayerCard from '../components/PlayerCard'
+import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
@@ -10,6 +10,7 @@ export default function MainPage() {
   const { player: me, isAdmin } = useAuth()
   const [stages,    setStages]    = useState([])
   const [players,   setPlayers]   = useState([])
+  const [formData,  setFormData]  = useState({})
   const [sessions,  setSessions]  = useState({})
   const [forecasts, setForecasts] = useState({})
   const [qualAssign,setQualAssign]= useState({})
@@ -25,13 +26,15 @@ export default function MainPage() {
       supabase.from('players').select('*').order('name'),
     ]).then(([s, p]) => {
       const stagesData = s.data || []
+      const playersData = p.data || []
       setStages(stagesData)
-      setPlayers(p.data || [])
+      setPlayers(playersData)
       const firstOpen = stagesData.find(st => !st.is_locked)
       if (firstOpen) {
         setStageKey(firstOpen.key)
       }
       setLoading(false)
+      loadFormData(playersData).then(setFormData)
     })
   }, [])
 
@@ -227,6 +230,7 @@ export default function MainPage() {
 
       setSessions(prev => ({ ...prev, [sessionType]: { ...prev[sessionType], is_locked:true, committed:true } }))
       setCommitMsg(`✓ Зараховано! ${bdLog.map(b=>`${b.player}:+${b.score}`).join(' · ')}`)
+      loadFormData(players).then(setFormData)
     } catch(e) {
       setCommitMsg(`⚠ Помилка: ${e.message}`)
     } finally {
@@ -413,7 +417,7 @@ export default function MainPage() {
                         sessionType={sessionType}
                         session={currentSession}
                         forecast={canSeeForecast ? forecasts[p.id] : null}
-                        qualAssign={qualAssign[p.id]}
+                        qualAssign={canSeeForecast ? qualAssign[p.id] : null}
                         results={resultsList}
                         flResult={currentSession?.fl_pilot}
                         ovResult={currentSession?.ov_pilot}
@@ -427,6 +431,7 @@ export default function MainPage() {
                         onSaveForecast={(preds, fl, ov) => saveForecast(p.id, preds, fl, ov)}
                         onSaveQual={(pilots, positions) => saveQualAssign(p.id, pilots, positions)}
                         teamSiblingId={siblingId}
+                        formData={formData}
                         liveScore={isLiveMode ? liveScores[p.id] : undefined}
                         liveRank={isLiveMode ? idx+1 : undefined}
                       />
@@ -444,12 +449,9 @@ export default function MainPage() {
 
 async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, isDouble) {
   if (!sessionId) { alert('Спочатку оберіть сесію'); return }
-  const { USED_PILOTS, PILOTS, getSlotCountForPlayer } = await import('../lib/supabase')
+  const { USED_PILOTS, PILOTS, getStandardSlotCount, hasBonusSlot } = await import('../lib/supabase')
 
-  // Per-player slot count (1, 2, or 3 for catch-up players like Pedri/Hexi)
-  const slotCountFor = {}
-  players.forEach(p => { slotCountFor[p.id] = getSlotCountForPlayer(p.name, stageKey, isDouble) })
-  const maxSlots = Math.max(...Object.values(slotCountFor))
+  const standardCount = getStandardSlotCount(isDouble) // 1 or 2, same for everyone
 
   // Load ALL qual assignments across ALL stages to know full pilot history
   const { data: allAssignData } = await supabase
@@ -466,39 +468,106 @@ async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssi
     if (a.pilot_3 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_3)
   })
 
-  function assignSlot() {
+  const teammateOf = {}
+  players.forEach(p => {
+    const sibling = players.find(pp => pp.team === p.team && pp.id !== p.id)
+    if (sibling) teammateOf[p.id] = sibling.id
+  })
+
+  // ── STANDARD POOL: shared across everyone, team-protected ──
+  function assignStandardSlot() {
     const available = {}
     players.forEach(p => {
       available[p.id] = PILOTS.filter(pilot => !playerUsed[p.id].has(pilot))
     })
     const assignment = {}
     const usedThisSlot = new Set()
-    const shuffled = [...players].sort(() => Math.random() - 0.5)
+    const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
 
-    for (const player of shuffled) {
-      const pool = available[player.id].filter(p => !usedThisSlot.has(p))
-      const finalPool = pool.length > 0 ? pool : available[player.id]
-      if (!finalPool.length) { assignment[player.id] = ''; continue }
-      const pilot = finalPool[Math.floor(Math.random() * finalPool.length)]
-      assignment[player.id] = pilot
-      usedThisSlot.add(pilot)
-      playerUsed[player.id].add(pilot)
+    for (const player of shuffledPlayers) {
+      if (assignment[player.id] !== undefined) continue
+      const teammateId = teammateOf[player.id]
+      const teammate = teammateId ? players.find(pp => pp.id === teammateId) : null
+
+      const pool1 = available[player.id].filter(p => !usedThisSlot.has(p))
+      const finalPool1 = pool1.length > 0 ? pool1 : available[player.id]
+      const pilot1 = finalPool1.length ? finalPool1[Math.floor(Math.random()*finalPool1.length)] : ''
+      if (pilot1) { assignment[player.id] = pilot1; usedThisSlot.add(pilot1); playerUsed[player.id].add(pilot1) }
+      else assignment[player.id] = ''
+
+      if (teammate && assignment[teammate.id] === undefined) {
+        const pool2 = available[teammate.id].filter(p => !usedThisSlot.has(p) && p !== pilot1)
+        const fallback2 = available[teammate.id].filter(p => p !== pilot1)
+        const finalPool2 = pool2.length > 0 ? pool2 : (fallback2.length > 0 ? fallback2 : available[teammate.id].filter(p=>p!==pilot1))
+        const pilot2 = finalPool2.length ? finalPool2[Math.floor(Math.random()*finalPool2.length)] : ''
+        if (pilot2) { assignment[teammate.id] = pilot2; usedThisSlot.add(pilot2); playerUsed[teammate.id].add(pilot2) }
+        else assignment[teammate.id] = ''
+      }
     }
     return assignment
   }
 
-  // Roll up to maxSlots rounds; each player only receives up to their own slotCount
-  const slots = []
-  for (let i = 0; i < maxSlots; i++) slots.push(assignSlot())
+  const standardSlots = []
+  for (let i = 0; i < standardCount; i++) standardSlots.push(assignStandardSlot())
 
+  // ── BONUS POOL: fully independent — its own copy of playerUsed history,
+  // never touches or is touched by the standard pool assignments above.
+  // Only guarantees: unique within player's own history, and never same
+  // pilot as own teammate's bonus pilot this round. ──
+  const bonusPlayers = players.filter(p => hasBonusSlot(p.name, stageKey))
+  const bonusAssignment = {}
+  if (bonusPlayers.length) {
+    const bonusUsed = {}
+    bonusPlayers.forEach(p => { bonusUsed[p.id] = new Set(USED_PILOTS[p.name] || []) })
+    allAssignData?.forEach(a => {
+      if (bonusUsed[a.player_id]) {
+        if (a.pilot_1) bonusUsed[a.player_id].add(a.pilot_1)
+        if (a.pilot_2) bonusUsed[a.player_id].add(a.pilot_2)
+        if (a.pilot_3) bonusUsed[a.player_id].add(a.pilot_3)
+      }
+    })
+    // Also exclude what was just assigned in the standard pool this round
+    standardSlots.forEach(slot => {
+      bonusPlayers.forEach(p => { if (slot[p.id] && bonusUsed[p.id]) bonusUsed[p.id].add(slot[p.id]) })
+    })
+
+    const usedThisBonusRound = new Set()
+    const shuffledBonus = [...bonusPlayers].sort(() => Math.random() - 0.5)
+    for (const player of shuffledBonus) {
+      if (bonusAssignment[player.id] !== undefined) continue
+      const teammateId = teammateOf[player.id]
+      const teammate = teammateId ? bonusPlayers.find(pp => pp.id === teammateId) : null
+
+      const pool1 = PILOTS.filter(p => !bonusUsed[player.id].has(p) && !usedThisBonusRound.has(p))
+      const fallback1 = PILOTS.filter(p => !bonusUsed[player.id].has(p))
+      const finalPool1 = pool1.length > 0 ? pool1 : (fallback1.length > 0 ? fallback1 : PILOTS)
+      const pilot1 = finalPool1.length ? finalPool1[Math.floor(Math.random()*finalPool1.length)] : ''
+      if (pilot1) { bonusAssignment[player.id] = pilot1; usedThisBonusRound.add(pilot1); bonusUsed[player.id].add(pilot1) }
+      else bonusAssignment[player.id] = ''
+
+      if (teammate && bonusAssignment[teammate.id] === undefined) {
+        const pool2 = PILOTS.filter(p => !bonusUsed[teammate.id].has(p) && !usedThisBonusRound.has(p) && p !== pilot1)
+        const fallback2 = PILOTS.filter(p => !bonusUsed[teammate.id].has(p) && p !== pilot1)
+        const finalPool2 = pool2.length > 0 ? pool2 : (fallback2.length > 0 ? fallback2 : PILOTS.filter(p=>p!==pilot1))
+        const pilot2 = finalPool2.length ? finalPool2[Math.floor(Math.random()*finalPool2.length)] : ''
+        if (pilot2) { bonusAssignment[teammate.id] = pilot2; usedThisBonusRound.add(pilot2); bonusUsed[teammate.id].add(pilot2) }
+        else bonusAssignment[teammate.id] = ''
+      }
+    }
+  }
+
+  // ── Combine: standard slots fill pilot_1/pilot_2, bonus fills the next free slot ──
   const updates = players.map(p => {
-    const myCount = slotCountFor[p.id]
+    const myBonus = bonusAssignment[p.id] || ''
+    const pilots = []
+    for (let i = 0; i < standardCount; i++) pilots.push(standardSlots[i]?.[p.id] || '')
+    if (myBonus) pilots.push(myBonus)
     return {
       session_id: sessionId,
       player_id: p.id,
-      pilot_1: myCount >= 1 ? (slots[0]?.[p.id] || '') : '',
-      pilot_2: myCount >= 2 ? (slots[1]?.[p.id] || '') : '',
-      pilot_3: myCount >= 3 ? (slots[2]?.[p.id] || '') : '',
+      pilot_1: pilots[0] || '',
+      pilot_2: pilots[1] || '',
+      pilot_3: pilots[2] || '',
       pred_pos_1: null, pred_pos_2: null, pred_pos_3: null,
     }
   })

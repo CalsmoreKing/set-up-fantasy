@@ -16,15 +16,10 @@ if (!SUPABASE_URL || !SUPABASE_ANON) {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
-// ═══════════════════════════════════════════════════════
-// Хаджар травмований, Цунода їде замість нього в тій же машині.
-// Для фентезі-цілей це один "слот" — всюди використовується ім'я Tsunoda,
-// щоб уникнути дублікату при підрахунку used/available пілотів.
-// ═══════════════════════════════════════════════════════
 // ── Пілоти (порядок = поточна позиція в сезоні) ──────
 export const PILOTS = [
   'Antonelli','Russell','Hamilton','Piastri','Norris',
-  'Leclerc','Verstappen','Tsunoda','Gasly','Lawson',
+  'Leclerc','Verstappen','Hadjar','Gasly','Lawson',
   'Bearman','Colapinto','Lindblad','Sainz','Albon',
   'Ocon','Bortoleto','Alonso','Hülkenberg','Bottas',
   'Pérez','Stroll'
@@ -32,7 +27,7 @@ export const PILOTS = [
 
 export const PILOT_ABBR = {
   ANT:'Antonelli', RUS:'Russell',  HAM:'Hamilton',  PIA:'Piastri',
-  NOR:'Norris',    LEC:'Leclerc',  VER:'Verstappen',HAD:'Tsunoda', // тимчасово: Хаджар → Цунода (травма)
+  NOR:'Norris',    LEC:'Leclerc',  VER:'Verstappen',HAD:'Hadjar',
   GAS:'Gasly',     LAW:'Lawson',   BEA:'Bearman',   COL:'Colapinto',
   LIN:'Lindblad',  SAI:'Sainz',    ALB:'Albon',     OCO:'Ocon',
   BOR:'Bortoleto', ALO:'Alonso',   HUL:'Hülkenberg',BOT:'Bottas',
@@ -48,54 +43,44 @@ export const BULK_OV_KEYS   = ['прорив','ov','overtake']
 // Андрій, Кітасу, Миколапка мають 19 вільних — їм дістанеться +1 в одному з подвійних
 export const DOUBLE_STAGES = new Set(['brazil','qatar','uae'])
 
-// ── Індивідуальні винятки кількості пілотів на кваліфікацію ──
-// Формат: { playerName: { stageKey: count } }
-// Використовується для новачків що доганяють інших (напр. команда Порше).
-// Якщо гравця й етапу тут немає — застосовується стандартна логіка (1 або 2 через DOUBLE_STAGES).
-export const PLAYER_SLOT_OVERRIDES = {
-  'Педрі': {
-    'azerbaijan': 3,
-    'bahrain2':   3,
-    'singapore':  3,
-    // далі всі наступні етапи по 2 (усі окрім вже перелічених вище)
-    'usa':        2,
-    'mexico':     2,
-    'brazil':     2,
-    'lasvegas':   2,
-    'qatar':      2,
-    'uae':        2,
-  },
-  'Хексі': {
-    'azerbaijan': 3,
-    'bahrain2':   3,
-    'singapore':  3,
-    'usa':        2,
-    'mexico':     2,
-    'brazil':     2,
-    'lasvegas':   2,
-    'qatar':      2,
-    'uae':        2,
-  },
+// ── БОНУСНІ слоти для новачків, що доганяють інших ──
+// Формат: { playerName: Set(stageKey, ...) }
+// Гравець в цьому списку на цьому етапі отримує ОДИН додатковий пілот
+// ПОНАД стандартну кількість (яку визначає DOUBLE_STAGES як завжди).
+// Бонусний пілот генерується з ОКРЕМОГО кошика — не конкурує з основним
+// розподілом пілотів решти гравців, лише унікальний в межах своєї команди.
+export const BONUS_SLOT_STAGES = {
+  'Педрі': new Set(['azerbaijan','malaysia','singapore']),
+  'Хексі': new Set(['azerbaijan','malaysia','singapore']),
 }
 
-// Повертає скільки пілотів гравець отримує на цьому етапі кваліфікації
-export function getSlotCountForPlayer(playerName, stageKey, isDoubleStage) {
-  const override = PLAYER_SLOT_OVERRIDES[playerName]?.[stageKey]
-  if (override) return override
+// Скільки СТАНДАРТНИХ слотів (з загального кошика) отримує гравець
+export function getStandardSlotCount(isDoubleStage) {
   return isDoubleStage ? 2 : 1
+}
+
+// Чи отримує гравець додатковий БОНУСНИЙ слот на цьому етапі
+export function hasBonusSlot(playerName, stageKey) {
+  return !!BONUS_SLOT_STAGES[playerName]?.has(stageKey)
+}
+
+// Загальна кількість слотів (для UI — скільки віконець показувати)
+export function getSlotCountForPlayer(playerName, stageKey, isDoubleStage) {
+  const standard = getStandardSlotCount(isDoubleStage)
+  return standard + (hasBonusSlot(playerName, stageKey) ? 1 : 0)
 }
 
 // ── Вже використані пілоти кваліфікації ─────────────
 export const USED_PILOTS = {
   'Ярослав':   ['Colapinto','Russell','Antonelli','Ocon'],
-  'Мія':       ['Bearman','Norris','Tsunoda','Stroll'],
+  'Мія':       ['Bearman','Norris','Hadjar','Stroll'],
   'Нептун':    ['Norris','Lawson','Hülkenberg','Bortoleto'],
   'Хонда':     ['Antonelli','Verstappen','Bortoleto','Bearman'],
-  'Іванна':    ['Tsunoda','Bortoleto','Lawson','Verstappen'],
+  'Іванна':    ['Hadjar','Bortoleto','Lawson','Verstappen'],
   'Марго':     ['Bottas','Colapinto','Hamilton','Alonso'],
   'Чак':       ['Hamilton','Gasly','Sainz','Bottas'],
   'Калсмор':   ['Gasly','Leclerc','Colapinto','Hamilton'],
-  'Іван':      ['Albon','Tsunoda','Lindblad','Lawson'],
+  'Іван':      ['Albon','Hadjar','Lindblad','Lawson'],
   'Ігор':      ['Lawson','Bearman','Norris','Antonelli'],
   'Ярік':      ['Sainz','Hülkenberg','Albon','Leclerc'],
   'Анастасія': ['Alonso','Antonelli','Ocon','Gasly'],

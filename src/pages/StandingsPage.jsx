@@ -46,30 +46,42 @@ export default function StandingsPage() {
     const stage = stages.find(s => s.key === stageTab)
     if (!stage) return
 
-    supabase.from('sessions').select('id, type, committed')
+    supabase.from('sessions').select('id, type, committed, results')
       .eq('stage_id', stage.id)
       .then(async ({ data: sessList }) => {
         const scores = {}
+        const { calcQualScore } = await import('../lib/supabase')
         for (const sess of (sessList||[])) {
           if (!sess.committed) continue
           if (sess.type === 'qual') {
             const { data: qas } = await supabase.from('qual_assignments')
-              .select('player_id, score').eq('session_id', sess.id)
+              .select('player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3')
+              .eq('session_id', sess.id)
+            const resultsList = sess.results
+              ? Object.entries(sess.results).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
+              : []
             ;(qas||[]).forEach(qa => {
-              if (!scores[qa.player_id]) scores[qa.player_id] = { qual:0, sprint:0, race:0 }
-              scores[qa.player_id].qual = qa.score || 0
+              if (!scores[qa.player_id]) scores[qa.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
+              // Primary pilot (slot 1) — the standard quali score, 0-6 range
+              const primary = calcQualScore(qa.pilot_1, qa.pred_pos_1, resultsList)
+              scores[qa.player_id].qual = primary.total
+              // Bonus pilots (slot 2, 3) — catch-up mechanic for new players
+              let bonus = 0
+              if (qa.pilot_2) bonus += calcQualScore(qa.pilot_2, qa.pred_pos_2, resultsList).total
+              if (qa.pilot_3) bonus += calcQualScore(qa.pilot_3, qa.pred_pos_3, resultsList).total
+              scores[qa.player_id].qualBonus = bonus
             })
           } else {
             const { data: fcs } = await supabase.from('forecasts')
               .select('player_id, score').eq('session_id', sess.id)
             ;(fcs||[]).forEach(fc => {
-              if (!scores[fc.player_id]) scores[fc.player_id] = { qual:0, sprint:0, race:0 }
+              if (!scores[fc.player_id]) scores[fc.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
               scores[fc.player_id][sess.type] = fc.score || 0
             })
           }
         }
         Object.keys(scores).forEach(pid => {
-          scores[pid].total = (scores[pid].qual||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
+          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
         })
         setStageScores(scores)
       })
@@ -116,7 +128,8 @@ export default function StandingsPage() {
   const stagePlayersSorted = [...players].sort((a,b) => {
     const sa = stageScores[a.id] || {}
     const sb = stageScores[b.id] || {}
-    const va = sa[sortCol]??0, vb = sb[sortCol]??0
+    const getVal = (s) => sortCol === 'qual' ? (s.qual||0) + (s.qualBonus||0) : (s[sortCol] ?? 0)
+    const va = getVal(sa), vb = getVal(sb)
     return sortDir==='desc' ? vb-va : va-vb
   })
 
@@ -231,7 +244,14 @@ export default function StandingsPage() {
                 return (
                   <tr key={p.id}>
                     <td><span className="player-name-plain">{p.name}</span></td>
-                    <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>{sc.qual ?? '—'}</td>
+                    <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
+                      {sc.qual ?? '—'}
+                      {sc.qualBonus > 0 && (
+                        <span style={{color:'var(--gold)',fontSize:10,marginLeft:5}} title="Бонусні бали за додаткових пілотів (новачок)">
+                          +{sc.qualBonus}
+                        </span>
+                      )}
+                    </td>
                     {selectedStage?.has_sprint && (
                       <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.sprint?'var(--text)':'var(--muted)'}}>{sc.sprint ?? '—'}</td>
                     )}

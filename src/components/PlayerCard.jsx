@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META, getSlotCountForPlayer } from '../lib/supabase'
+import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META, getSlotCountForPlayer, getStandardSlotCount, hasBonusSlot } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 
 const PILOT_OPTIONS = ['', ...PILOTS]
@@ -9,10 +9,12 @@ export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
   stageKey, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
-  forecastHidden, liveScore, liveRank
+  forecastHidden, liveScore, liveRank, formData
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const slotCount = getSlotCountForPlayer(player.name, stageKey, isDouble)
+  const standardCount = getStandardSlotCount(isDouble)
+  const isBonusStage = hasBonusSlot(player.name, stageKey)
   const [open, setOpen]   = useState(false)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -188,6 +190,7 @@ export default function PlayerCard({
             }}>#{liveRank}</span>
           )}
           <span className={`fill-pill${isFull?' full':''}`}>{fillCount}/{fillTotal}</span>
+          <FormIndicator playerId={player.id} allFormData={formData} />
           <span className="live-score">{score}<small>pts</small></span>
           <span className={`collapse-icon${open?' open':''}`}>▼</span>
         </div>
@@ -253,6 +256,11 @@ export default function PlayerCard({
                 {qPilots[idx] ? (
                   <>
                     <span className={`pilot-tag${slotCount>1?' double':''}`}>{qPilots[idx]}</span>
+                    {isBonusStage && idx >= standardCount && (
+                      <span style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'var(--gold)',border:'1px solid var(--gold)',borderRadius:2,padding:'1px 5px',marginLeft:4}}>
+                        БОНУС
+                      </span>
+                    )}
                     <select
                       className="pos-input"
                       value={qPos[idx]}
@@ -472,3 +480,85 @@ function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, sco
   )
 }
 
+
+// ── FORM INDICATOR — colored dot showing accuracy trend ──
+// Green = high % of exact predictions among all players, Red = lowest.
+// Recalculates on every mount (i.e. after each score recalculation the
+// underlying forecasts table changes, so a fresh load reflects it).
+export function FormIndicator({ playerId, allFormData }) {
+  const data = allFormData?.[playerId]
+  if (!data || data.total === 0) return null
+
+  const accuracy = data.exact / data.total // 0..1
+  const { rank, count } = data
+
+  // Color gradient: red (worst) → yellow (mid) → green (best), based on rank among peers
+  const t = count > 1 ? 1 - (rank - 1) / (count - 1) : 0.5 // 1 = best, 0 = worst
+  const hue = Math.round(t * 120) // 0=red, 120=green
+  const color = `hsl(${hue}, 70%, 55%)`
+
+  return (
+    <span
+      title={`Форма: ${Math.round(accuracy*100)}% точних прогнозів (${data.exact}/${data.total})`}
+      style={{
+        fontFamily: 'Orbitron,sans-serif', fontSize: 9, fontWeight: 700,
+        color, border: `1px solid ${color}`, borderRadius: 2,
+        padding: '2px 5px', minWidth: 28, textAlign: 'center', flexShrink: 0,
+      }}
+    >
+      {Math.round(accuracy*100)}%
+    </span>
+  )
+}
+
+// Computes form data for all players: % of exact-position predictions
+// across all committed race/sprint forecasts and qual assignments this season.
+export async function loadFormData(players) {
+  const stats = {}
+  players.forEach(p => { stats[p.id] = { exact: 0, total: 0 } })
+
+  const { data: forecasts } = await supabase
+    .from('forecasts')
+    .select('player_id, predictions, score_breakdown')
+    .not('score_breakdown', 'is', null)
+
+  forecasts?.forEach(f => {
+    const bd = f.score_breakdown || []
+    if (!stats[f.player_id]) return
+    // Count entries in breakdown as "predictions scored"; exact = pts at max tier (5 or 6 for race, 3 for sprint)
+    bd.forEach(b => {
+      stats[f.player_id].total += 1
+      if (b.pts >= 5) stats[f.player_id].exact += 1 // treat top-tier points as "exact"
+    })
+  })
+
+  const { data: quals } = await supabase
+    .from('qual_assignments')
+    .select('player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, score')
+    .gt('score', -1)
+
+  // Qual score of 6 per pilot = exact; approximate using average score per assigned pilot
+  quals?.forEach(qa => {
+    if (!stats[qa.player_id]) return
+    const pilots = [qa.pilot_1, qa.pilot_2, qa.pilot_3].filter(Boolean)
+    if (!pilots.length) return
+    // We don't have per-pilot breakdown here, so treat qa.score/pilots.length >= 6 as exact-ish signal
+    const avgPerPilot = (qa.score || 0) / pilots.length
+    pilots.forEach(() => {
+      stats[qa.player_id].total += 1
+      if (avgPerPilot >= 6) stats[qa.player_id].exact += 1
+    })
+  })
+
+  // Rank players by accuracy (only those with data)
+  const withData = players
+    .map(p => ({ id: p.id, acc: stats[p.id].total > 0 ? stats[p.id].exact / stats[p.id].total : null }))
+    .filter(x => x.acc !== null)
+    .sort((a,b) => b.acc - a.acc)
+
+  const result = {}
+  withData.forEach((x, i) => {
+    result[x.id] = { ...stats[x.id], rank: i+1, count: withData.length }
+  })
+  return result
+}
