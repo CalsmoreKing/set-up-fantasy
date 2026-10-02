@@ -50,8 +50,8 @@ export const DOUBLE_STAGES = new Set(['brazil','qatar','uae'])
 // Бонусний пілот генерується з ОКРЕМОГО кошика — не конкурує з основним
 // розподілом пілотів решти гравців, лише унікальний в межах своєї команди.
 export const BONUS_SLOT_STAGES = {
-  'Педрі': new Set(['azerbaijan','malaysia','singapore']),
-  'Хексі': new Set(['azerbaijan','malaysia','singapore']),
+  'Педрі': new Set(['malaysia','singapore','usa']),
+  'Хексі': new Set(['malaysia','singapore','usa']),
 }
 
 // Скільки СТАНДАРТНИХ слотів (з загального кошика) отримує гравець

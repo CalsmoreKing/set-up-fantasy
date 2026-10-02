@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import StatsModal from '../components/StatsModal'
+import PodiumCalendar from '../components/PodiumCalendar'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -19,6 +21,8 @@ export default function StandingsPage() {
   const [stagesWithCommit,setStagesWithCommit]= useState(new Set())
   const [loading,         setLoading]         = useState(true)
   const [sortCol,         setSortCol]         = useState('total')
+  const [statsOpen,       setStatsOpen]       = useState(false)
+  const [podiumOpen,      setPodiumOpen]      = useState(false)
   const [sortDir,         setSortDir]         = useState('desc')
 
   // Load players + stages + committed sessions
@@ -144,6 +148,15 @@ export default function StandingsPage() {
   return (
     <main>
       {/* ── PLAYER STANDINGS ── */}
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        <button className="btn btn-gold" onClick={()=>setStatsOpen(true)}>
+          📊 СТАТИСТИКА ГРАВЦЯ
+        </button>
+        <button className="btn btn-gold" onClick={()=>setPodiumOpen(true)}>
+          🏆 КАЛЕНДАР ПОДІУМІВ
+        </button>
+      </div>
+
       <div className="section-label">Турнірна таблиця</div>
       <div style={{overflowX:'auto'}}>
         <table className="standings">
@@ -264,6 +277,9 @@ export default function StandingsPage() {
           </table>
         </div>
       )}
+
+      <StatsModal open={statsOpen} onClose={()=>setStatsOpen(false)} players={players} />
+      <PodiumCalendar open={podiumOpen} onClose={()=>setPodiumOpen(false)} />
     </main>
   )
 }
