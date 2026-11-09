@@ -62,15 +62,22 @@ export default function AdminPage() {
   }
 
   // ── COMMIT SCORES ──
-  async function commitSession(session) {
-    if (!window.confirm(`Зарахувати бали за ${session.stages?.name} — ${session.type}?`)) return
+  async function commitSession(session, recalculate = false) {
+    const verb = recalculate ? 'Перерахувати' : 'Зарахувати'
+    if (!window.confirm(`${verb} бали за ${session.stages?.name} — ${session.type}? Повторний перерахунок замінить старі бали, а не додасть їх повторно.`)) return
 
-    const { data: forecasts } = await supabase.from('forecasts').select('*, players(id,name,base_pts)').eq('session_id', session.id)
-    const { data: qualData }  = await supabase.from('qual_assignments').select('*, players(id,name,base_pts)').eq('session_id', session.id)
+    const forecastsResult = await supabase.from('forecasts').select('*, players(id,name,base_pts)').eq('session_id', session.id)
+    const qualResult = await supabase.from('qual_assignments').select('*, players(id,name,base_pts)').eq('session_id', session.id)
+    if (forecastsResult.error) throw forecastsResult.error
+    if (qualResult.error) throw qualResult.error
+    const forecasts = forecastsResult.data
+    const qualData = qualResult.data
     const results   = Object.entries(session.results||{}).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
     const flResult  = session.fl_pilot || ''
     const ovResult  = session.ov_pilot || ''
     const updates = []
+    const forecastScores = []
+    const qualScores = []
     const breakdown_log = []
 
     if (session.type === 'race') {
@@ -78,48 +85,64 @@ export default function AdminPage() {
       for (const f of (forecasts||[])) {
         const preds = Array.from({length:10}, (_,i) => f.predictions?.[i+1]||'')
         const { total, breakdown } = calcRaceScore(preds, f.fl_pick, f.ov_pick, results, flResult, ovResult)
-        updates.push({ id: f.players?.id, base_pts: (f.players?.base_pts||0) + total, delta: total })
+        updates.push({ id: f.players?.id, delta: total - (Number(f.score)||0) })
+        forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
         breakdown_log.push({ player: f.players?.name, score: total, breakdown })
-        await supabase.from('forecasts').update({ score: total, score_breakdown: breakdown }).eq('id', f.id)
       }
     } else if (session.type === 'qual') {
       const { calcQualScore } = await import('../lib/supabase')
       for (const qa of (qualData||[])) {
         let total = 0, breakdown = []
-        for (const [pilot, pos] of [[qa.pilot_1, qa.pred_pos_1],[qa.pilot_2, qa.pred_pos_2]]) {
+        for (const [pilot, pos] of [[qa.pilot_1, qa.pred_pos_1],[qa.pilot_2, qa.pred_pos_2],[qa.pilot_3, qa.pred_pos_3]]) {
           if (!pilot || !pos) continue
           const r = calcQualScore(pilot, pos, results)
           total += r.total; breakdown.push(...r.breakdown)
         }
-        updates.push({ id: qa.players?.id, base_pts: (qa.players?.base_pts||0) + total, delta: total })
+        updates.push({ id: qa.players?.id, delta: total - (Number(qa.score)||0) })
+        qualScores.push({ id:qa.id, score:total })
         breakdown_log.push({ player: qa.players?.name, score: total, breakdown })
-        await supabase.from('qual_assignments').update({ score: total }).eq('id', qa.id)
       }
     } else if (session.type === 'sprint') {
       const { calcSprintScore } = await import('../lib/supabase')
       for (const f of (forecasts||[])) {
         const preds = Array.from({length:5}, (_,i) => f.predictions?.[i+1]||'')
         const { total, breakdown } = calcSprintScore(preds, results)
-        updates.push({ id: f.players?.id, base_pts: (f.players?.base_pts||0) + total, delta: total })
+        updates.push({ id: f.players?.id, delta: total - (Number(f.score)||0) })
+        forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
         breakdown_log.push({ player: f.players?.name, score: total, breakdown })
-        await supabase.from('forecasts').update({ score: total, score_breakdown: breakdown }).eq('id', f.id)
       }
     }
 
-    // Snapshot rank BEFORE update for delta calculation later
-    const { data: beforeSnapshot } = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+    // Snapshot rank before the atomic replacement-based score transaction.
+    const beforeResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+    if (beforeResult.error) throw beforeResult.error
+    const beforeSnapshot = beforeResult.data
     const rankBefore = {}
     ;(beforeSnapshot||[]).forEach((p,i) => { rankBefore[p.id] = i+1 })
 
-    for (const u of updates) {
-      if (u.id) await supabase.from('players').update({
-        base_pts: u.base_pts,
-        last_session_delta: u.delta,
-      }).eq('id', u.id)
+    // The atomic score RPC is not installed in production; persist score replacements
+    // and apply their deltas to base totals without requiring that migration.
+    for (const row of forecastScores) {
+      const { error } = await supabase.from('forecasts').update({ score:row.score, score_breakdown:row.score_breakdown }).eq('id',row.id)
+      if (error) throw error
+    }
+    for (const row of qualScores) {
+      const { error } = await supabase.from('qual_assignments').update({ score:row.score }).eq('id',row.id)
+      if (error) throw error
+    }
+    const playerDeltas = new Map()
+    for (const update of updates) if (update.id) playerDeltas.set(update.id, (playerDeltas.get(update.id)||0) + update.delta)
+    for (const [playerId, delta] of playerDeltas) {
+      const { data: player, error: readError } = await supabase.from('players').select('base_pts').eq('id',playerId).single()
+      if (readError) throw readError
+      const { error } = await supabase.from('players').update({ base_pts:(Number(player.base_pts)||0)+delta, last_session_delta:delta }).eq('id',playerId)
+      if (error) throw error
     }
 
     // Snapshot rank AFTER update
-    const { data: afterSnapshot } = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+    const afterResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+    if (afterResult.error) throw afterResult.error
+    const afterSnapshot = afterResult.data
     const rankAfter = {}
     ;(afterSnapshot||[]).forEach((p,i) => { rankAfter[p.id] = i+1 })
 
@@ -129,12 +152,13 @@ export default function AdminPage() {
       await supabase.from('players').update({ last_rank_delta: before - after }).eq('id', u.id)
     }
 
-    await supabase.from('sessions').update({ is_locked: true, committed: true, committed_at: new Date().toISOString() }).eq('id', session.id)
+    const { error: lockError } = await supabase.from('sessions').update({ is_locked:true, committed:true, committed_at:new Date().toISOString() }).eq('id',session.id)
+    if (lockError) throw lockError
     setSessions(prev => prev.map(s => s.id===session.id ? {...s, is_locked:true, committed:true} : s))
-    await log('commit_session', { session_id: session.id, stage: session.stages?.name, type: session.type, breakdown: breakdown_log })
+    await log(recalculate ? 'recalculate_session' : 'commit_session', { session_id: session.id, stage: session.stages?.name, type: session.type, breakdown: breakdown_log, newcomer_bonuses:'pending database migration' })
 
     loadAll()
-    setMsg(`✓ Бали зараховано! Сесія заблокована.`)
+    setMsg(recalculate ? '✓ Бали перераховано без повторного додавання.' : '✓ Бали зараховано! Сесія заблокована. Бонуси новачків очікують міграції БД.')
   }
 
   // ── PLAYER EDIT ──
@@ -208,6 +232,7 @@ export default function AdminPage() {
     { key:'deadlines', label:'ДЕДЛАЙНИ' },
     { key:'users',     label:'ГРАВЦІ' },
     { key:'teams',     label:'КОМАНДИ' },
+    { key:'commit',    label:'БАЛИ' },
     { key:'log',       label:'ЛОГ' },
   ]
 
@@ -253,14 +278,14 @@ export default function AdminPage() {
         <>
           <div className="section-label">Зарахування балів</div>
           <p style={{color:'var(--muted)',fontSize:12,marginBottom:16,lineHeight:1.6}}>
-            Натисни «ЗАРАХУВАТИ» після завершення сесії. Бали додаються до базових і сесія блокується.
+            Натисни «ЗАРАХУВАТИ» після завершення сесії. Повторний перерахунок замінює збережені бали цієї сесії та не дублює їх у загальному рахунку.
           </p>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {sessions.filter(s => !s.committed).map(s => (
               <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'10px 14px',flexWrap:'wrap'}}>
                 <span style={{fontFamily:'Orbitron,sans-serif',fontSize:12,flex:1}}>{s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}</span>
                 {s.is_locked && <span className="badge badge-locked">🔒</span>}
-                <button className="btn btn-red" style={{fontSize:9,padding:'6px 14px'}} onClick={()=>commitSession(s)}>⚑ ЗАРАХУВАТИ</button>
+                <button className="btn btn-red" style={{fontSize:9,padding:'6px 14px'}} onClick={()=>commitSession(s).catch(e=>setMsg(`⚠ ${e.message}`))}>⚑ ЗАРАХУВАТИ</button>
                 {!s.is_locked && (
                   <button className="btn btn-ghost" style={{fontSize:9,padding:'6px 14px'}} onClick={()=>toggleSessionLock(s)}>🔒 ЗАБЛОКУВАТИ</button>
                 )}
@@ -270,9 +295,10 @@ export default function AdminPage() {
               <>
                 <div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:9,letterSpacing:2,marginTop:12,marginBottom:6}}>ЗАРАХОВАНІ</div>
                 {sessions.filter(s=>s.committed).map(s=>(
-                  <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'8px 14px',opacity:.6}}>
+                  <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'8px 14px'}}>
                     <span style={{fontFamily:'Orbitron,sans-serif',fontSize:11,flex:1}}>{s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}</span>
                     <span className="badge badge-committed">✓ ЗАРАХОВАНО</span>
+                    <button className="btn btn-ghost" style={{fontSize:9,padding:'6px 12px'}} onClick={()=>commitSession(s, true).catch(e=>setMsg(`⚠ ${e.message}`))}>↻ ПЕРЕРАХУВАТИ</button>
                   </div>
                 ))}
               </>

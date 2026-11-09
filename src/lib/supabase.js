@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+export { calcRaceScore, calcQualScore, calcSprintScore } from './scoring.js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -144,73 +145,6 @@ export const TEAM_META = {
   'Ред Булл':              { color:'#1E3A8A', code:'RB',  glyph:'🔷' },  // Кітасу, Миколапка
   'Порше':                 { color:'#D4AF37', code:'PSC', glyph:'🟨', secondaryColor:'#B12B28' }, // Педрі, Хексі — золотий + червоний з герба Porsche
 }
-export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv) {
-  const breakdown = []
-  let total = 0
-
-  for (let i = 0; i < 10; i++) {
-    const predicted = preds[i]
-    if (!predicted) continue
-    const actualPos = results.indexOf(predicted)
-    if (actualPos === -1) continue
-    const diff = Math.abs(i - actualPos)
-    const top5 = i < 5
-    let pts = diff === 0 ? (top5 ? 5 : 6)
-            : diff === 1 ? (top5 ? 2 : 3)
-            : diff === 2 ? (top5 ? 1 : 2)
-            : diff === 3 ? (top5 ? 0 : 1)
-            : 0
-    if (pts > 0) {
-      total += pts
-      breakdown.push({ label: `P${i+1} ${predicted} → факт P${actualPos+1}`, pts })
-    }
-  }
-
-  if (fl && fl === resultFl) { total += 2; breakdown.push({ label: '⚡ Швидке коло', pts: 2 }) }
-  if (ov && ov === resultOv) { total += 4; breakdown.push({ label: '🚀 Прорив', pts: 4 }) }
-
-  const predTop3 = preds.slice(0,3).filter(Boolean)
-  const realTop3 = results.slice(0,3).filter(Boolean)
-  if (predTop3.length===3 && realTop3.length===3 && predTop3.every(p=>realTop3.includes(p))) {
-    total += 2; breakdown.push({ label: '🏆 Склад Топ-3', pts: 2 })
-  }
-  const predTop5 = preds.slice(0,5).filter(Boolean)
-  const realTop5 = results.slice(0,5).filter(Boolean)
-  if (predTop5.length===5 && realTop5.length===5 && predTop5.every(p=>realTop5.includes(p))) {
-    total += 2; breakdown.push({ label: '🏆 Склад Топ-5', pts: 2 })
-  }
-
-  return { total, breakdown }
-}
-
-// ── Рахунок для кваліфікації ─────────────────────────
-export function calcQualScore(pilot, predPos, results) {
-  if (!pilot || !predPos) return { total: 0, breakdown: [] }
-  const actualPos = results.indexOf(pilot)
-  if (actualPos === -1) return { total: 0, breakdown: [] }
-  const diff = Math.abs(predPos - 1 - actualPos)
-  const pts = diff === 0 ? 6 : diff === 1 ? 3 : diff === 2 ? 1 : 0
-  return pts > 0
-    ? { total: pts, breakdown: [{ label: `${pilot}: прог P${predPos} → факт P${actualPos+1}`, pts }] }
-    : { total: 0, breakdown: [] }
-}
-
-// ── Рахунок для спринту ──────────────────────────────
-export function calcSprintScore(preds, results) {
-  const breakdown = []
-  let total = 0
-  for (let i = 0; i < 5; i++) {
-    const predicted = preds[i]
-    if (!predicted) continue
-    const actualPos = results.indexOf(predicted)
-    if (actualPos === -1) continue
-    const diff = Math.abs(i - actualPos)
-    const pts = diff === 0 ? 3 : diff === 1 ? 2 : diff === 2 ? 1 : 0
-    if (pts > 0) { total += pts; breakdown.push({ label: `P${i+1} ${predicted} → факт P${actualPos+1}`, pts }) }
-  }
-  return { total, breakdown }
-}
-
 // ── Парсер bulk-імпорту ──────────────────────────────
 export function parseBulkText(raw, playerList) {
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)

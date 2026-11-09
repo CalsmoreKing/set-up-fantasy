@@ -1,220 +1,304 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
+import { hasForecastSubmission, hasQualifyingPrediction, recalculateForecast, recalculateQualAssignment } from '../lib/scoring'
+import CountryFlag from './CountryFlag'
 
 export default function StatsModal({ open, onClose, players }) {
-  const [selectedId, setSelectedId] = useState('')
-  const [stats, setStats] = useState(null)
+  const [leftId, setLeftId] = useState('')
+  const [rightId, setRightId] = useState('')
+  const [leftStats, setLeftStats] = useState(null)
+  const [rightStats, setRightStats] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  useEffect(() => { if (open && !selectedId && players.length) setSelectedId(players[0].id) }, [open])
-  useEffect(() => { if (open && selectedId) loadStats(selectedId) }, [open, selectedId])
+  useEffect(() => {
+    if (!open || !players.length) return
+    setLeftId(current => players.some(player => player.id === current) ? current : players[0].id)
+    setRightId(current => players.some(player => player.id === current) ? current : (players[1]?.id || players[0].id))
+  }, [open, players])
 
-  async function loadStats(playerId) {
+  useEffect(() => {
+    if (!open || !leftId || !rightId) return
+    let active = true
     setLoading(true)
-    const player = players.find(p => p.id === playerId)
-
-    const [{ data: forecasts }, { data: quals }] = await Promise.all([
-      supabase.from('forecasts')
-        .select('score, score_breakdown, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, stages(name,flag,sort_order))')
-        .eq('player_id', playerId)
-        .not('score_breakdown', 'is', null),
-      supabase.from('qual_assignments')
-        .select('score, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(stage_id, stages(name,flag,sort_order))')
-        .eq('player_id', playerId)
-        .gt('score', -1),
-    ])
-
-    // Aggregate by session type
-    const byType = { race: [], sprint: [] }
-    ;(forecasts||[]).forEach(f => {
-      const type = f.sessions?.type
-      if (byType[type]) byType[type].push({ score: f.score||0, stage: f.sessions?.stages, breakdown: f.score_breakdown||[] })
+    setError('')
+    Promise.all([
+      loadPlayerStats(leftId, players.find(player => player.id === leftId)),
+      loadPlayerStats(rightId, players.find(player => player.id === rightId)),
+    ]).then(([left, right]) => {
+      if (!active) return
+      setLeftStats(left)
+      setRightStats(right)
+    }).catch(loadError => {
+      if (!active) return
+      setError(loadError.message || 'Не вдалося завантажити статистику гравців.')
+    }).finally(() => {
+      if (active) setLoading(false)
     })
+    return () => { active = false }
+  }, [open, leftId, rightId, players])
 
-    // Best & worst session (by score)
-    const allSessions = [
-      ...byType.race.map(s => ({...s, type:'race'})),
-      ...byType.sprint.map(s => ({...s, type:'sprint'})),
-      ...(quals||[]).map(q => ({ score: q.score||0, stage: q.sessions?.stages, type:'qual' })),
-    ].filter(s => s.stage).sort((a,b) => (a.stage?.sort_order||0) - (b.stage?.sort_order||0))
+  const comparisonStages = useMemo(() => {
+    const stages = new Map()
+    for (const row of [...(leftStats?.allSessions || []), ...(rightStats?.allSessions || [])]) {
+      if (row.stage?.id && !stages.has(row.stage.id)) stages.set(row.stage.id, row.stage)
+    }
+    return [...stages.values()]
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+      .slice(-8)
+  }, [leftStats, rightStats])
 
-    const best = [...allSessions].sort((a,b) => b.score - a.score)[0]
-    const worst = [...allSessions].sort((a,b) => a.score - b.score)[0]
-
-    // Pilot pick frequency (from race predictions, top-10)
-    const pilotFreq = {}
-    ;(forecasts||[]).forEach(f => {
-      if (f.sessions?.type !== 'race') return
-      Object.values(f.predictions||{}).forEach(pilot => {
-        if (pilot) pilotFreq[pilot] = (pilotFreq[pilot]||0) + 1
-      })
-    })
-    const favoritePilot = Object.entries(pilotFreq).sort((a,b)=>b[1]-a[1])[0]
-
-    // FL/OV hit rate
-    let flHits = 0, flTotal = 0, ovHits = 0, ovTotal = 0
-    ;(forecasts||[]).forEach(f => {
-      const bd = f.score_breakdown || []
-      if (f.fl_pick) { flTotal++; if (bd.some(b => b.label?.includes('Швидке коло'))) flHits++ }
-      if (f.ov_pick) { ovTotal++; if (bd.some(b => b.label?.includes('Прорив'))) ovHits++ }
-    })
-
-    // Podium/Top5 bonus hits
-    const podiumHits = (forecasts||[]).filter(f => (f.score_breakdown||[]).some(b => b.label?.includes('Топ-3'))).length
-    const top5Hits   = (forecasts||[]).filter(f => (f.score_breakdown||[]).some(b => b.label?.includes('Топ-5'))).length
-
-    // Average scores
-    const avgRace   = byType.race.length ? (byType.race.reduce((s,x)=>s+x.score,0) / byType.race.length) : 0
-    const avgSprint = byType.sprint.length ? (byType.sprint.reduce((s,x)=>s+x.score,0) / byType.sprint.length) : 0
-    const avgQual   = (quals||[]).length ? ((quals||[]).reduce((s,x)=>s+(x.score||0),0) / (quals||[]).length) : 0
-
-    // Trend: last 5 sessions score sequence for sparkline
-    const trend = allSessions.slice(-8).map(s => s.score)
-
-    setStats({
-      player, allSessions, best, worst, favoritePilot,
-      flHits, flTotal, ovHits, ovTotal, podiumHits, top5Hits,
-      avgRace, avgSprint, avgQual, trend,
-      totalSessions: allSessions.length,
-    })
-    setLoading(false)
-  }
+  const allStageRows = useMemo(() => {
+    const byId = new Map()
+    for (const row of leftStats?.allSessions || []) byId.set(row.stage.id, { stage: row.stage, left: row.score, right: null })
+    for (const row of rightStats?.allSessions || []) {
+      const entry = byId.get(row.stage.id) || { stage: row.stage, left: null, right: null }
+      entry.right = row.score
+      byId.set(row.stage.id, entry)
+    }
+    return [...byId.values()].sort((a, b) => (a.stage?.sort_order || 0) - (b.stage?.sort_order || 0))
+  }, [leftStats, rightStats])
 
   if (!open) return null
-
   return createPortal(
-    <div
-      style={{position:'fixed',inset:0,zIndex:6000,display:'flex',alignItems:'center',justifyContent:'center',padding:16,background:'rgba(0,0,0,.75)'}}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div style={{
-        background:'var(--card2)', border:'1px solid rgba(225,6,0,.3)', borderRadius:6,
-        padding:22, width:'min(560px,100%)', maxHeight:'85dvh', overflowY:'auto',
-      }}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-          <span style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:'var(--red)',letterSpacing:2,fontWeight:700}}>
-            📊 СТАТИСТИКА ГРАВЦЯ
-          </span>
-          <button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:11}} onClick={onClose}>✕ ЗАКРИТИ</button>
-        </div>
-
-        <select className="stage-select" style={{width:'100%',marginBottom:16,minHeight:38}}
-          value={selectedId} onChange={e=>setSelectedId(e.target.value)}>
-          {players.map(p => <option key={p.id} value={p.id}>{p.name} — {p.team}</option>)}
-        </select>
-
-        {loading && <div style={{color:'var(--muted)',fontSize:12,textAlign:'center',padding:20}}>Завантаження...</div>}
-
-        {!loading && stats && (
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            {/* Header with team color */}
-            <div style={{
-              display:'flex',alignItems:'center',gap:10,padding:'10px 14px',
-              background:`linear-gradient(90deg, ${TEAM_META[stats.player.team]?.color||'#888'}18, transparent)`,
-              borderLeft:`3px solid ${TEAM_META[stats.player.team]?.color||'#888'}`,borderRadius:3,
-            }}>
-              <span style={{fontFamily:'Orbitron,sans-serif',fontSize:14,fontWeight:900}}>{stats.player.name}</span>
-              <span style={{fontSize:11,color:'var(--muted)'}}>{stats.player.team}</span>
-              <span style={{marginLeft:'auto',fontFamily:'Orbitron,sans-serif',fontSize:16,fontWeight:900,color:'var(--gold)'}}>
-                {stats.player.base_pts} pts
-              </span>
-            </div>
-
-            {/* Average scores grid */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
-              <StatBox label="СЕР. ГОНКА" value={stats.avgRace.toFixed(1)} />
-              <StatBox label="СЕР. СПРИНТ" value={stats.avgSprint.toFixed(1)} />
-              <StatBox label="СЕР. КВАЛА" value={stats.avgQual.toFixed(1)} />
-            </div>
-
-            {/* Trend sparkline */}
-            {stats.trend.length > 1 && (
-              <div>
-                <div style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)',letterSpacing:1,marginBottom:6}}>
-                  ТРЕНД (останні {stats.trend.length} сесій)
-                </div>
-                <Sparkline data={stats.trend} />
-              </div>
-            )}
-
-            {/* Best/Worst */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              {stats.best && (
-                <div style={{padding:'8px 12px',background:'rgba(74,222,128,.06)',border:'1px solid rgba(74,222,128,.2)',borderRadius:3}}>
-                  <div style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'var(--green)',letterSpacing:1}}>КРАЩА СЕСІЯ</div>
-                  <div style={{fontSize:12,marginTop:3}}>{stats.best.stage?.flag} {stats.best.stage?.name} — <b style={{color:'var(--green)'}}>+{stats.best.score}</b></div>
-                </div>
-              )}
-              {stats.worst && (
-                <div style={{padding:'8px 12px',background:'rgba(248,113,113,.06)',border:'1px solid rgba(248,113,113,.2)',borderRadius:3}}>
-                  <div style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'#f87171',letterSpacing:1}}>ГІРША СЕСІЯ</div>
-                  <div style={{fontSize:12,marginTop:3}}>{stats.worst.stage?.flag} {stats.worst.stage?.name} — <b style={{color:'#f87171'}}>+{stats.worst.score}</b></div>
-                </div>
-              )}
-            </div>
-
-            {/* Special picks */}
-            <div>
-              <div style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)',letterSpacing:1,marginBottom:6}}>СПЕЦІАЛЬНІ ПРОГНОЗИ</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                <MiniStat icon="⚡" label="Швидке коло" value={`${stats.flHits}/${stats.flTotal}`} />
-                <MiniStat icon="🚀" label="Прорив" value={`${stats.ovHits}/${stats.ovTotal}`} />
-                <MiniStat icon="🏆" label="Топ-3 бонус" value={stats.podiumHits} />
-                <MiniStat icon="🎯" label="Топ-5 бонус" value={stats.top5Hits} />
-              </div>
-            </div>
-
-            {/* Favorite pilot */}
-            {stats.favoritePilot && (
-              <div style={{padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:3,fontSize:12}}>
-                <span style={{color:'var(--muted)'}}>Улюблений пілот: </span>
-                <b style={{color:'var(--gold)'}}>{stats.favoritePilot[0]}</b>
-                <span style={{color:'var(--muted)'}}> — обраний {stats.favoritePilot[1]} разів</span>
-              </div>
-            )}
-
-            <div style={{fontSize:10,color:'var(--muted)',textAlign:'center'}}>
-              Загалом зараховано сесій: {stats.totalSessions}
-            </div>
+    <div className="modal-backdrop stats-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="stats-modal" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+        <header className="modal-heading">
+          <div>
+            <div className="modal-eyebrow">HEAD-TO-HEAD</div>
+            <h2 id="stats-title" className="stats-title">📊 Порівняння гравців</h2>
           </div>
-        )}
-      </div>
+          <button className="btn btn-ghost" onClick={onClose}>✕ <span>Закрити</span></button>
+        </header>
+
+        <div className="stats-selectors">
+          <PlayerSelector label="ЛІВИЙ ГРАВЕЦЬ" value={leftId} players={players} onChange={setLeftId} />
+          <PlayerSelector label="ПРАВИЙ ГРАВЕЦЬ" value={rightId} players={players} onChange={setRightId} />
+        </div>
+        {loading && <div className="modal-status">Завантажуємо статистику обох гравців...</div>}
+        {!loading && error && <div className="modal-error" role="alert">{error}</div>}
+        {!loading && !error && leftStats && rightStats && <div className="comparison-content">
+          {(leftStats.staleSessions.length > 0 || rightStats.staleSessions.length > 0) && <div className="stats-recalc-note" role="status">
+            ⚠ {leftStats.staleSessions.length + rightStats.staleSessions.length} розбіжностей у сесіях
+          </div>}
+          {comparisonStages.length > 0 && <TrendComparison
+            stages={comparisonStages}
+            leftStats={leftStats}
+            rightStats={rightStats}
+          />}
+
+          <div className="comparison-cards">
+            <PlayerStatsCard stats={leftStats} side="ЛІВИЙ" />
+            <PlayerStatsCard stats={rightStats} side="ПРАВИЙ" />
+          </div>
+
+          {allStageRows.length > 0 && <details className="all-stage-details">
+            <summary>Показати бали за всіма етапами <span>({allStageRows.length})</span></summary>
+            <div className="all-stage-header"><span>ЕТАП</span><span>{leftStats.player.name}</span><span>{rightStats.player.name}</span></div>
+            {allStageRows.map(row => <div className="all-stage-row" key={row.stage.id}>
+              <span className="all-stage-name"><CountryFlag flag={row.stage.flag} />{row.stage.name}</span>
+              <b>{formatScore(row.left)}</b><b>{formatScore(row.right)}</b>
+            </div>)}
+          </details>}
+        </div>}
+      </section>
     </div>,
-    document.body
+    document.body,
   )
+}
+
+async function loadPlayerStats(playerId, player) {
+  const [forecastsResult, qualsResult] = await Promise.all([
+    supabase.from('forecasts')
+      .select('score, score_breakdown, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,name,flag,sort_order))')
+      .eq('player_id', playerId),
+    supabase.from('qual_assignments')
+      .select('score, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(stage_id, committed, results, stages(id,name,flag,sort_order))')
+      .eq('player_id', playerId)
+      .gt('score', -1),
+  ])
+  if (forecastsResult.error) throw forecastsResult.error
+  if (qualsResult.error) throw qualsResult.error
+
+  const savedForecasts = (forecastsResult.data || []).filter(row => row.sessions?.committed && hasForecastSubmission(row))
+  const savedQuals = (qualsResult.data || []).filter(row => row.sessions?.committed && hasQualifyingPrediction(row))
+  const committedForecasts = savedForecasts.map(row => {
+    const current = recalculateForecast(row.sessions, row)
+    return { ...row, score: current.score, savedScore: Number(row.score) || 0, currentBreakdown: current.breakdown, wasRecalculated: current.recalculated }
+  })
+  const committedQuals = savedQuals.map(row => {
+    const current = recalculateQualAssignment(row.sessions, row)
+    return { ...row, score: current.score, savedScore: Number(row.score) || 0, currentBreakdown: current.breakdown, wasRecalculated: current.recalculated }
+  })
+  const byType = { race: [], sprint: [] }
+  committedForecasts.forEach(row => {
+    const type = row.sessions?.type
+    if (byType[type]) byType[type].push(Number(row.score) || 0)
+  })
+
+  const stageMap = new Map()
+  const addStageScore = (stage, score, savedScore = score) => {
+    if (!stage?.id) return
+    const row = stageMap.get(stage.id) || { stage, score: 0, savedScore: 0 }
+    row.score += Number(score) || 0
+    row.savedScore += Number(savedScore) || 0
+    stageMap.set(stage.id, row)
+  }
+  committedForecasts.forEach(row => addStageScore(row.sessions?.stages, row.score, row.savedScore))
+  committedQuals.forEach(row => addStageScore(row.sessions?.stages, row.score, row.savedScore))
+  const allSessions = [...stageMap.values()].sort((a, b) => (a.stage?.sort_order || 0) - (b.stage?.sort_order || 0))
+  const staleSessions = [...committedForecasts, ...committedQuals]
+    .filter(row => row.wasRecalculated && row.savedScore !== row.score)
+  const best = [...allSessions].sort((a, b) => b.score - a.score)[0]
+  const worst = [...allSessions].sort((a, b) => a.score - b.score)[0]
+
+  const pilotFreq = {}
+  committedForecasts.forEach(row => {
+    if (row.sessions?.type !== 'race') return
+    Object.values(row.predictions || {}).forEach(pilot => {
+      if (pilot) pilotFreq[pilot] = (pilotFreq[pilot] || 0) + 1
+    })
+  })
+  const favoritePilot = Object.entries(pilotFreq).sort((a, b) => b[1] - a[1])[0]
+
+  let flHits = 0, flTotal = 0, ovHits = 0, ovTotal = 0
+  committedForecasts.forEach(row => {
+    const breakdown = row.currentBreakdown || []
+    if (row.fl_pick) { flTotal++; if (breakdown.some(item => item.label?.includes('Швидке коло'))) flHits++ }
+    if (row.ov_pick) { ovTotal++; if (breakdown.some(item => item.label?.includes('Прорив'))) ovHits++ }
+  })
+  const podiumHits = committedForecasts.filter(row => (row.currentBreakdown || []).some(item => item.label?.includes('Топ-3'))).length
+  const top5Hits = committedForecasts.filter(row => (row.currentBreakdown || []).some(item => item.label?.includes('Топ-5'))).length
+  const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+
+  return {
+    player,
+    allSessions,
+    staleSessions,
+    best,
+    worst,
+    favoritePilot,
+    avgRace: average(byType.race),
+    avgSprint: average(byType.sprint),
+    avgQual: average(committedQuals.map(row => Number(row.score) || 0)),
+    flHits, flTotal, ovHits, ovTotal, podiumHits, top5Hits,
+    totalSessions: committedForecasts.length + committedQuals.length,
+  }
+}
+
+function PlayerSelector({ label, value, players, onChange }) {
+  return <label className="player-selector">
+    <span>{label}</span>
+    <select className="stage-select" value={value} onChange={event => onChange(event.target.value)}>
+      {players.map(player => <option key={player.id} value={player.id}>{player.name} — {player.team}</option>)}
+    </select>
+  </label>
+}
+
+function TrendComparison({ stages, leftStats, rightStats }) {
+  const leftColor = TEAM_META[leftStats.player.team]?.color || '#e10600'
+  const rightColor = TEAM_META[rightStats.player.team]?.color || '#49b6ff'
+  const leftScores = new Map(leftStats.allSessions.map(row => [row.stage.id, row.score]))
+  const rightScores = new Map(rightStats.allSessions.map(row => [row.stage.id, row.score]))
+  const maxScore = Math.max(1, ...stages.flatMap(stage => [leftScores.get(stage.id) || 0, rightScores.get(stage.id) || 0]))
+  const chartMinWidth = Math.max(100, stages.length * 86)
+
+  return <section className="trend-panel" aria-label="Порівняння очок за останні етапи">
+    <div className="trend-heading">
+      <div>
+        <h3>Очки за останні {stages.length} ГП</h3>
+      </div>
+      <div className="trend-legend">
+        <span><i style={{ background: leftColor }} />{leftStats.player.name}</span>
+        <span><i style={{ background: rightColor }} />{rightStats.player.name}</span>
+      </div>
+    </div>
+    <div className="trend-scroll">
+      <div className="trend-grid" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(72px, 1fr))`, minWidth: chartMinWidth }}>
+        {stages.map(stage => {
+          const leftScore = leftScores.get(stage.id)
+          const rightScore = rightScores.get(stage.id)
+          return <div className="trend-column" key={stage.id}>
+            <div className="trend-values">
+              <b style={{ color: leftColor }}>{formatScore(leftScore)}</b>
+              <b style={{ color: rightColor }}>{formatScore(rightScore)}</b>
+            </div>
+            <div className="trend-bars">
+              <span className="trend-bar" style={{ height: `${barHeight(leftScore, maxScore)}%`, background: leftColor }} title={`${leftStats.player.name}: ${formatScore(leftScore)} балів`} />
+              <span className="trend-bar" style={{ height: `${barHeight(rightScore, maxScore)}%`, background: rightColor }} title={`${rightStats.player.name}: ${formatScore(rightScore)} балів`} />
+            </div>
+            <div className="trend-stage"><CountryFlag flag={stage.flag} /><span title={stage.name}>{stage.name}</span></div>
+          </div>
+        })}
+      </div>
+    </div>
+  </section>
+}
+
+function barHeight(score, maxScore) {
+  return score == null ? 2 : Math.max(4, (Math.max(0, score) / maxScore) * 100)
+}
+
+function PlayerStatsCard({ stats, side }) {
+  const teamColor = TEAM_META[stats.player.team]?.color || '#888'
+  return <article className="player-stats-card" style={{ '--player-color': teamColor }}>
+    <div className="player-card-heading">
+      <div className="player-side-label">{side} ГРАВЕЦЬ</div>
+      <div className="player-identity">
+        <div>
+          <h3>{stats.player.name}</h3>
+          <span>{stats.player.team}</span>
+        </div>
+        <strong>{stats.player.base_pts ?? '—'} <small>pts</small></strong>
+      </div>
+    </div>
+    <div className="average-grid">
+      <StatBox label="СЕР. ГОНКА" value={stats.avgRace.toFixed(1)} />
+      <StatBox label="СЕР. СПРИНТ" value={stats.avgSprint.toFixed(1)} />
+      <StatBox label="СЕР. КВАЛА" value={stats.avgQual.toFixed(1)} />
+    </div>
+    <div className="best-worst-grid">
+      <StageHighlight label="КРАЩИЙ ГП" row={stats.best} type="best" />
+      <StageHighlight label="ГІРШИЙ ГП" row={stats.worst} type="worst" />
+    </div>
+    <div className="mini-stats-grid">
+      <MiniStat icon="⚡" label="Швидке коло" value={`${stats.flHits}/${stats.flTotal}`} />
+      <MiniStat icon="🚀" label="Прорив" value={`${stats.ovHits}/${stats.ovTotal}`} />
+      <MiniStat icon="🏆" label="Топ-3 бонус" value={stats.podiumHits} />
+      <MiniStat icon="🎯" label="Топ-5 бонус" value={stats.top5Hits} />
+    </div>
+    {stats.favoritePilot && <div className="favorite-pilot">
+      <span>Улюблений пілот</span>
+      <b>{stats.favoritePilot[0]}</b>
+      <small>обраний {stats.favoritePilot[1]} разів</small>
+    </div>}
+    <div className="total-sessions">Зарахованих прогнозів і кваліфікацій: {stats.totalSessions}</div>
+  </article>
+}
+
+function StageHighlight({ label, row, type }) {
+  return <div className={`stage-highlight stage-highlight-${type}`}>
+    <span>{label}</span>
+    {row ? <div><CountryFlag flag={row.stage?.flag} /><b>{row.stage?.name}</b><strong>{row.score} pts</strong></div> : <em>Поки немає даних</em>}
+  </div>
 }
 
 function StatBox({ label, value }) {
-  return (
-    <div style={{textAlign:'center',padding:'10px 6px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:3}}>
-      <div style={{fontFamily:'Orbitron,sans-serif',fontSize:18,fontWeight:900,color:'var(--gold)'}}>{value}</div>
-      <div style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'var(--muted)',letterSpacing:1,marginTop:2}}>{label}</div>
-    </div>
-  )
+  return <div className="stat-box">
+    <strong>{value}</strong>
+    <span>{label}</span>
+  </div>
 }
 
 function MiniStat({ icon, label, value }) {
-  return (
-    <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:3}}>
-      <span style={{fontSize:14}}>{icon}</span>
-      <span style={{fontSize:11,color:'var(--muted)',flex:1}}>{label}</span>
-      <span style={{fontFamily:'Orbitron,sans-serif',fontSize:12,fontWeight:700,color:'var(--text)'}}>{value}</span>
-    </div>
-  )
+  return <div className="mini-stat">
+    <span className="mini-stat-icon">{icon}</span>
+    <span className="mini-stat-label">{label}</span>
+    <strong>{value}</strong>
+  </div>
 }
 
-function Sparkline({ data }) {
-  const max = Math.max(...data, 1)
-  return (
-    <div style={{display:'flex',alignItems:'flex-end',gap:3,height:40}}>
-      {data.map((v, i) => (
-        <div key={i} style={{
-          flex:1, height:`${Math.max(4,(v/max)*100)}%`,
-          background: v === max ? 'var(--gold)' : 'rgba(225,6,0,.5)',
-          borderRadius:'2px 2px 0 0', transition:'height .3s',
-        }} title={`+${v}`} />
-      ))}
-    </div>
-  )
+function formatScore(score) {
+  return score == null ? '—' : `${score}`
 }

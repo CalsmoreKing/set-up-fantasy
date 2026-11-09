@@ -2,16 +2,16 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META, getSlotCountForPlayer, getStandardSlotCount, hasBonusSlot } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
-
-const PILOT_OPTIONS = ['', ...PILOTS]
+import { priorQualAssignments } from '../lib/roster'
 
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
   stageKey, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
-  forecastHidden, liveScore, liveRank, formData
+  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
+  const pilotOptions = ['', ...driverOptions]
   const slotCount = getSlotCountForPlayer(player.name, stageKey, isDouble)
   const standardCount = getStandardSlotCount(isDouble)
   const isBonusStage = hasBonusSlot(player.name, stageKey)
@@ -38,8 +38,8 @@ export default function PlayerCard({
     setOv(forecast?.ov_pick || '')
   }, [forecast])
   useEffect(() => {
-    setQPilots([qualAssign?.pilot_1||'', qualAssign?.pilot_2||''])
-    setQPos([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||''])
+    setQPilots([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
+    setQPos([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
   }, [qualAssign])
 
   // Body height animation
@@ -105,13 +105,13 @@ export default function PlayerCard({
       }
     })
     qPilots.forEach(p => { if (p) used.add(p) })
-    return PILOTS.filter(p => !used.has(p))
+    return driverOptions.filter(p => !used.has(p))
   }
 
   async function rollPilot(idx) {
     const taken = new Set(
       Object.values(allQualAssign || {})
-        .filter(a => a.player_id !== player.id)
+        .filter(a => a.player_id !== player.id && a.session_id === session?.id)
         .map(a => idx===0 ? a.pilot_1 : idx===1 ? a.pilot_2 : a.pilot_3)
         .filter(Boolean)
     )
@@ -223,7 +223,7 @@ export default function PlayerCard({
                     disabled={!canEdit}
                     onChange={e => setP(i, e.target.value)}
                   >
-                    {PILOT_OPTIONS.map(p => <option key={p} value={p}>{p||'—'}</option>)}
+                    {pilotOptions.map(p => <option key={p} value={p}>{p||'—'}</option>)}
                   </select>
                   <span className="pts-badge">{getPts(i, preds[i], results, 'race')}</span>
                 </div>
@@ -233,14 +233,14 @@ export default function PlayerCard({
               <div className="special-group">
                 <span className="spec-label">⚡FL</span>
                 <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
-                  {PILOT_OPTIONS.map(p=><option key={p} value={p}>{p||'—'}</option>)}
+                  {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
                 <span className="pts-badge">{fl&&fl===flResult?'2':''}</span>
               </div>
               <div className="special-group">
                 <span className="spec-label">🚀OV</span>
                 <select className="pilot-select" value={ov} disabled={!canEdit} onChange={e=>{setOv(e.target.value);schedSave(preds,fl,e.target.value)}}>
-                  {PILOT_OPTIONS.map(p=><option key={p} value={p}>{p||'—'}</option>)}
+                  {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
                 <span className="pts-badge">{ov&&ov===ovResult?'4':''}</span>
               </div>
@@ -297,7 +297,7 @@ export default function PlayerCard({
                           }}
                         >
                           <option value="">вручну...</option>
-                          {PILOTS.map(p => <option key={p} value={p}>{p}</option>)}
+                          {driverOptions.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </>
                     ) : (
@@ -317,7 +317,7 @@ export default function PlayerCard({
               <div className="input-row" key={i}>
                 <span className="pos-label">{i+1}</span>
                 <select className="pilot-select" value={preds[i]} disabled={!canEdit} onChange={e=>setP(i,e.target.value)}>
-                  {PILOT_OPTIONS.map(p=><option key={p} value={p}>{p||'—'}</option>)}
+                  {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
                 <span className="pts-badge">{getSprintPts(i, preds[i], results)}</span>
               </div>
@@ -338,6 +338,9 @@ export default function PlayerCard({
           breakdown={breakdown}
           score={score}
           qPilots={qPilots}
+          driverOptions={driverOptions}
+          stageKey={stageKey}
+          session={session}
         />,
         document.body
       )}
@@ -371,18 +374,21 @@ function getSprintPts(i, pilot, results) {
   return pts > 0 ? pts : ''
 }
 
-function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, score, qPilots }) {
+function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, score, qPilots, driverOptions = PILOTS, stageKey, session }) {
   const [history, setHistory] = useState(null)
 
   useEffect(() => {
     if (!visible || ttType !== 'qual') return
     setHistory(null)
-    supabase
-      .from('qual_assignments')
-      .select('pilot_1, pilot_2')
-      .eq('player_id', player.id)
-      .then(({ data }) => setHistory(data || []))
-  }, [visible, ttType, player.id])
+    async function loadHistory() {
+      const [{ data }, { data: stage }] = await Promise.all([
+        supabase.from('qual_assignments').select('session_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))').eq('player_id', player.id),
+        supabase.from('stages').select('sort_order').eq('key',stageKey).maybeSingle(),
+      ])
+      setHistory(priorQualAssignments(data, session?.id, stage?.sort_order))
+    }
+    loadHistory()
+  }, [visible, ttType, player.id, stageKey, session?.id])
 
   if (!visible) return null
 
@@ -391,9 +397,9 @@ function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, sco
 
   if (ttType === 'qual') {
     const usedBase = USED_PILOTS[player.name] || []
-    const fromDB = (history || []).flatMap(a => [a.pilot_1, a.pilot_2].filter(Boolean))
+    const fromDB = (history || []).flatMap(a => [a.pilot_1, a.pilot_2, a.pilot_3].filter(Boolean))
     const allUsed = [...new Set([...usedBase, ...fromDB])]
-    const available = PILOTS.filter(p => !allUsed.includes(p))
+    const available = driverOptions.filter(p => !allUsed.includes(p))
     const loading = history === null
 
     return (

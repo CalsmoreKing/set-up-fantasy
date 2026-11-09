@@ -3,6 +3,7 @@ import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
 import PodiumCalendar from '../components/PodiumCalendar'
+import ScoreAuditModal from '../components/ScoreAuditModal'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -23,6 +24,7 @@ export default function StandingsPage() {
   const [sortCol,         setSortCol]         = useState('total')
   const [statsOpen,       setStatsOpen]       = useState(false)
   const [podiumOpen,      setPodiumOpen]      = useState(false)
+  const [auditOpen,       setAuditOpen]       = useState(false)
   const [sortDir,         setSortDir]         = useState('desc')
 
   // Load players + stages + committed sessions
@@ -68,24 +70,24 @@ export default function StandingsPage() {
               if (!scores[qa.player_id]) scores[qa.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
               // Primary pilot (slot 1) — the standard quali score, 0-6 range
               const primary = calcQualScore(qa.pilot_1, qa.pred_pos_1, resultsList)
-              scores[qa.player_id].qual = primary.total
+              scores[qa.player_id].qual += primary.total
               // Bonus pilots (slot 2, 3) — catch-up mechanic for new players
               let bonus = 0
               if (qa.pilot_2) bonus += calcQualScore(qa.pilot_2, qa.pred_pos_2, resultsList).total
               if (qa.pilot_3) bonus += calcQualScore(qa.pilot_3, qa.pred_pos_3, resultsList).total
-              scores[qa.player_id].qualBonus = bonus
+              scores[qa.player_id].qualBonus += bonus
             })
           } else {
             const { data: fcs } = await supabase.from('forecasts')
               .select('player_id, score').eq('session_id', sess.id)
             ;(fcs||[]).forEach(fc => {
               if (!scores[fc.player_id]) scores[fc.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
-              scores[fc.player_id][sess.type] = fc.score || 0
+              scores[fc.player_id][sess.type] += fc.score || 0
             })
           }
         }
         Object.keys(scores).forEach(pid => {
-          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
+          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0) + (scores[pid].newcomerBonus||0)
         })
         setStageScores(scores)
       })
@@ -154,6 +156,9 @@ export default function StandingsPage() {
         </button>
         <button className="btn btn-gold" onClick={()=>setPodiumOpen(true)}>
           🏆 КАЛЕНДАР ПОДІУМІВ
+        </button>
+        <button className="btn btn-gold" onClick={()=>setAuditOpen(true)}>
+          🔎 АУДИТ БАЛІВ
         </button>
       </div>
 
@@ -280,6 +285,7 @@ export default function StandingsPage() {
 
       <StatsModal open={statsOpen} onClose={()=>setStatsOpen(false)} players={players} />
       <PodiumCalendar open={podiumOpen} onClose={()=>setPodiumOpen(false)} />
+      <ScoreAuditModal open={auditOpen} onClose={()=>setAuditOpen(false)} players={players} />
     </main>
   )
 }
