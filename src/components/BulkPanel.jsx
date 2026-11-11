@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { parseBulkText, resolvePlayerName, resolvePilot } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function BulkPanel({ open, onClose, standalone }) {
+  const { user, player: actorPlayer } = useAuth()
   const [importType, setImportType] = useState('race')
   const [text, setText]       = useState('')
   const [parsed, setParsed]   = useState(null)
@@ -26,7 +28,7 @@ export default function BulkPanel({ open, onClose, standalone }) {
   }
   loadSessions()
 
-  const filteredSessions = sessions.filter(s => s.type === importType)
+  const filteredSessions = sessions.filter(s => s.type === importType && Number(s.stages?.sort_order)>=10)
 
   async function parseFn() {
     setStatus(''); setParsed(null); setWarnings([])
@@ -81,10 +83,13 @@ export default function BulkPanel({ open, onClose, standalone }) {
   async function applyFn() {
     if (!sessionId) { setStatus('error'); return }
     setBusy(true)
+    const selectedSession = sessions.find(session => session.id === sessionId)
+    if (Number(selectedSession?.stages?.sort_order)<10) { setStatus('error'); setBusy(false); return }
     try {
       if (importType === 'qual') {
         for (const r of parsed) {
           if (!r.pos && !r.pilot) continue
+          const { data: previous } = await supabase.from('qual_assignments').select('*').eq('session_id',sessionId).eq('player_id',r.player.id).maybeSingle()
           // If pilot is provided — also save it as assignment
           if (r.pilot) {
             await supabase.from('qual_assignments').upsert({
@@ -99,16 +104,17 @@ export default function BulkPanel({ open, onClose, standalone }) {
             }, { onConflict: 'session_id,player_id' })
           }
           await supabase.from('audit_log').insert({
-            action:'bulk_qual_forecast', actor:'admin',
-            details:{ player: r.player.name, pilot: r.pilot, pos: r.pos }
+            action:'bulk_qual_forecast', actor:actorPlayer?.name || user?.email || 'Адміністратор',
+            details:{ player:r.player.name, session_id:sessionId, stage_name:selectedSession?.stages?.name, type:importType, pilot:r.pilot, pos:r.pos, previous:previous ? {pilot_1:previous.pilot_1,pred_pos_1:previous.pred_pos_1} : null, next:{pilot_1:r.pilot || previous?.pilot_1 || '',pred_pos_1:r.pos || null}, actor_name:actorPlayer?.name || null,actor_email:user?.email || null,actor_user_id:user?.id || null }
           })
         }
       } else {
         // race or sprint
         for (const r of parsed) {
-          const maxPreds = importType === 'sprint' ? 5 : 10
+          const maxPreds = importType === 'sprint' && Number(selectedSession?.stages?.sort_order) >= 10 ? 5 : 10
           const preds = {}
           r.preds.slice(0, maxPreds).forEach((p, i) => { if (p) preds[i+1] = p })
+          const { data: previous } = await supabase.from('forecasts').select('*').eq('session_id',sessionId).eq('player_id',r.player.id).maybeSingle()
           await supabase.from('forecasts').upsert({
             session_id: sessionId, player_id: r.player.id,
             predictions: preds,
@@ -116,8 +122,8 @@ export default function BulkPanel({ open, onClose, standalone }) {
             ov_pick: r.ov || '',
           }, { onConflict: 'session_id,player_id' })
           await supabase.from('audit_log').insert({
-            action:'bulk_import', actor:'admin',
-            details:{ player: r.player.name, session: sessionId }
+            action:'bulk_import', actor:actorPlayer?.name || user?.email || 'Адміністратор',
+            details:{ player:r.player.name, session_id:sessionId, stage_name:selectedSession?.stages?.name, type:importType, previous:previous ? {predictions:previous.predictions,fl_pick:previous.fl_pick,ov_pick:previous.ov_pick} : null, next:{predictions:preds,fl_pick:r.fl||'',ov_pick:r.ov||''}, actor_name:actorPlayer?.name || null,actor_email:user?.email || null,actor_user_id:user?.id || null }
           })
         }
       }
@@ -129,12 +135,6 @@ export default function BulkPanel({ open, onClose, standalone }) {
     }
   }
 
-  // Placeholder hints per type
-  const placeholders = {
-    qual: `Хонда ANT - 2\nНептун NOR - 4\nКітасу LEC - 7\nМиколапка BOR - 16\nКалсмор GAS - 11\n\nАБО якщо пілоти вже призначені:\nХонда 2\nНептун 4\nКітасу 7`,
-    sprint: `Ярослав\n1-ANT 2-RUS 3-HAM 4-PIA 5-NOR\n\nМія\n1-NOR 2-ANT 3-LEC 4-RUS 5-HAM`,
-    race: `Ярослав\n1-ANT 2-RUS 3-HAM 4-PIA 5-NOR 6-LEC 7-VER 8-HAD 9-GAS 10-LAW ШК-ANT Прорив-HAD\n\nМія\n1-NOR 2-PIA 3-ANT ...`
-  }
 
   return (
     <div
@@ -160,43 +160,12 @@ export default function BulkPanel({ open, onClose, standalone }) {
         ))}
       </div>
 
-      {/* Format hint */}
-      <div style={{fontSize:11,color:'var(--muted)',marginBottom:10,padding:'8px 10px',background:'var(--card)',borderRadius:4,lineHeight:1.6}}>
-        {importType==='qual' && <>
-          <b style={{color:'var(--text)'}}>Кваліфікація:</b> кожен рядок = один гравець.<br/>
-          Формат: <code style={{color:'var(--gold)'}}>Ім'я КодПілота - Позиція</code><br/>
-          Якщо пілот вже призначений: <code style={{color:'var(--gold)'}}>Ім'я Позиція</code>
-        </>}
-        {importType==='sprint' && <>
-          <b style={{color:'var(--text)'}}>Спринт:</b> рядок з іменем, потім прогноз Топ-5.<br/>
-          Формат: <code style={{color:'var(--gold)'}}>1-ANT 2-RUS 3-HAM 4-PIA 5-NOR</code>
-        </>}
-        {importType==='race' && <>
-          <b style={{color:'var(--text)'}}>Гонка:</b> рядок з іменем, потім Топ-10 + ШК + Прорив.<br/>
-          Формат: <code style={{color:'var(--gold)'}}>1-ANT 2-RUS ... ШК-ANT Прорив-HAD</code>
-        </>}
-      </div>
-
-      {/* Session selector */}
-      <div style={{marginBottom:10}}>
-        <label style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)',letterSpacing:2,display:'block',marginBottom:5}}>СЕСІЯ</label>
-        <select className="stage-select" value={sessionId} onChange={e=>setSessionId(e.target.value)} style={{width:'100%',minHeight:38}}>
-          <option value="">— Оберіть —</option>
-          {filteredSessions.map(s => (
-            <option key={s.id} value={s.id}>
-              {s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Textarea */}
       <textarea
         className="bulk-textarea"
         style={{minHeight:160}}
         value={text}
         onChange={e=>{setText(e.target.value);setStatus('');setParsed(null)}}
-        placeholder={placeholders[importType]}
+        placeholder=""
       />
 
       {/* Warnings */}

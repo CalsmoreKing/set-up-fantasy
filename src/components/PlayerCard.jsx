@@ -1,20 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { PILOTS, calcRaceScore, calcQualScore, calcSprintScore, USED_PILOTS, TEAM_META, getSlotCountForPlayer, getStandardSlotCount, hasBonusSlot } from '../lib/supabase'
+import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
-import { priorQualAssignments } from '../lib/roster'
+import { normalizeStageDriver, priorQualAssignments } from '../lib/roster'
+import { isOvertakeWinner } from '../lib/scoring'
 
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
-  stageKey, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
-  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS
+  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
+  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const pilotOptions = ['', ...driverOptions]
-  const slotCount = getSlotCountForPlayer(player.name, stageKey, isDouble)
-  const standardCount = getStandardSlotCount(isDouble)
-  const isBonusStage = hasBonusSlot(player.name, stageKey)
+  const slotCount = Math.max(0, Math.min(3, Number(qualSlotCount) || 0))
   const [open, setOpen]   = useState(false)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -68,29 +67,35 @@ export default function PlayerCard({
   // Scoring
   let score = 0, breakdown = []
   if (sessionType === 'race') {
-    const r = calcRaceScore(preds, fl, ov, results, flResult, ovResult)
+    const r = calcRaceScore(
+      preds.map(pilot => normalizeStageDriver(pilot, pilotSubstitutions)),
+      normalizeStageDriver(fl, pilotSubstitutions), normalizeStageDriver(ov, pilotSubstitutions), results,
+      normalizeStageDriver(flResult, pilotSubstitutions), String(ovResult || '').split(/[,;|]/).map(p => normalizeStageDriver(p.trim(), pilotSubstitutions)).filter(Boolean).join(', '), stageOrder
+    )
     score = r.total; breakdown = r.breakdown
   } else if (sessionType === 'qual') {
-    let tot = 0, bd = []
-    qPilots.forEach((pilot, i) => {
-      const pos = parseInt(qPos[i]) || 0
-      const r = calcQualScore(pilot, pos, results)
-      tot += r.total; bd.push(...r.breakdown)
-    })
-    score = tot; breakdown = bd
+    const assignment = {
+      pilot_1:normalizeStageDriver(qPilots[0], pilotSubstitutions), pred_pos_1:parseInt(qPos[0]) || null,
+      pilot_2:normalizeStageDriver(qPilots[1], pilotSubstitutions), pred_pos_2:parseInt(qPos[1]) || null,
+      pilot_3:normalizeStageDriver(qPilots[2], pilotSubstitutions), pred_pos_3:parseInt(qPos[2]) || null,
+    }
+    const result = calcQualAssignmentScore(assignment, results, stageOrder)
+    score = result.total; breakdown = result.breakdown
   } else if (sessionType === 'sprint') {
-    const r = calcSprintScore(preds.slice(0,5), results)
+    const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
+    const r = calcSprintScore(preds.slice(0,sprintSlots).map(pilot => normalizeStageDriver(pilot, pilotSubstitutions)), results, stageOrder, normalizeStageDriver(fl, pilotSubstitutions), normalizeStageDriver(flResult, pilotSubstitutions))
     score = r.total; breakdown = r.breakdown
   }
 
   // Fill count
   // Fill indicator — shows only when PREDICTION is entered, not just pilot assigned
+  const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
   const fillCount = sessionType === 'qual'
     ? qPos.filter(p => p !== '' && p !== null && p !== undefined).length
     : sessionType === 'sprint'
-    ? preds.slice(0,5).filter(Boolean).length
+    ? preds.slice(0,sprintSlots).filter(Boolean).length
     : preds.filter(Boolean).length
-  const fillTotal = sessionType === 'qual' ? slotCount : sessionType === 'sprint' ? 5 : 10
+  const fillTotal = sessionType === 'qual' ? slotCount : sessionType === 'sprint' ? sprintSlots : 10
   const isFull = fillCount === fillTotal && fillTotal > 0
 
   // Qual available pilots
@@ -225,7 +230,7 @@ export default function PlayerCard({
                   >
                     {pilotOptions.map(p => <option key={p} value={p}>{p||'—'}</option>)}
                   </select>
-                  <span className="pts-badge">{getPts(i, preds[i], results, 'race')}</span>
+                  <span className="pts-badge">{getPts(i, preds[i], results, 'race', stageOrder)}</span>
                 </div>
               ))}
             </div>
@@ -235,15 +240,15 @@ export default function PlayerCard({
                 <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
-                <span className="pts-badge">{fl&&fl===flResult?'2':''}</span>
+                <span className="pts-badge">{fl&&fl===flResult?(Number(stageOrder)<10?'1':'2'):''}</span>
               </div>
-              <div className="special-group">
+              {Number(stageOrder) >= 10 && <div className="special-group">
                 <span className="spec-label">🚀OV</span>
                 <select className="pilot-select" value={ov} disabled={!canEdit} onChange={e=>{setOv(e.target.value);schedSave(preds,fl,e.target.value)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
-                <span className="pts-badge">{ov&&ov===ovResult?'4':''}</span>
-              </div>
+                <span className="pts-badge">{isOvertakeWinner(ov,ovResult)?'4':''}</span>
+              </div>}
             </div>
           </>
         )}
@@ -256,11 +261,6 @@ export default function PlayerCard({
                 {qPilots[idx] ? (
                   <>
                     <span className={`pilot-tag${slotCount>1?' double':''}`}>{qPilots[idx]}</span>
-                    {isBonusStage && idx >= standardCount && (
-                      <span style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'var(--gold)',border:'1px solid var(--gold)',borderRadius:2,padding:'1px 5px',marginLeft:4}}>
-                        БОНУС
-                      </span>
-                    )}
                     <select
                       className="pos-input"
                       value={qPos[idx]}
@@ -276,7 +276,7 @@ export default function PlayerCard({
                     <span className="pts-badge">{getQualPts(qPilots[idx], qPos[idx], results)}</span>
                     {canEditQualPilot && (
                       <>
-                        <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>rollPilot(idx)} title="Перекинути іншого пілота">🎲</button>
+                        <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>rollPilot(idx)} aria-label="Перекинути пілота">🎲</button>
                         <button className="roulette-btn" style={{padding:'3px 7px',fontSize:10}} onClick={()=>{const n=[...qPilots];n[idx]='';setQPilots(n);const np=[...qPos];np[idx]='';setQPos(np);onSaveQual(n, np.map(v=>parseInt(v)||null))}}>✕</button>
                       </>
                     )}
@@ -312,17 +312,28 @@ export default function PlayerCard({
 
         {/* SPRINT */}
         {sessionType === 'sprint' && (
-          <div className="forecast-inputs" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
-            {[0,1,2,3,4].map(i => (
-              <div className="input-row" key={i}>
-                <span className="pos-label">{i+1}</span>
-                <select className="pilot-select" value={preds[i]} disabled={!canEdit} onChange={e=>setP(i,e.target.value)}>
+          <>
+            <div className="forecast-inputs" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+              {Array.from({length:sprintSlots}, (_,i) => i).map(i => (
+                <div className="input-row" key={i}>
+                  <span className="pos-label">{i+1}</span>
+                  <select className="pilot-select" value={preds[i]} disabled={!canEdit} onChange={e=>setP(i,e.target.value)}>
+                    {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
+                  </select>
+                  <span className="pts-badge">{getSprintPts(i, preds[i], results, stageOrder)}</span>
+                </div>
+              ))}
+            </div>
+            {Number(stageOrder) < 10 && <div className="specials-bar">
+              <div className="special-group">
+                <span className="spec-label">⚡FL</span>
+                <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
-                <span className="pts-badge">{getSprintPts(i, preds[i], results)}</span>
+                <span className="pts-badge">{fl&&fl===flResult?'1':''}</span>
               </div>
-            ))}
-          </div>
+            </div>}
+          </>
         )}
         </>)}
       </div>
@@ -348,13 +359,14 @@ export default function PlayerCard({
   )
 }
 
-function getPts(i, pilot, results, type) {
+function getPts(i, pilot, results, type, stageOrder) {
   if (!pilot || !results.length) return ''
   const actual = results.indexOf(pilot)
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
-  const top5 = i < 5
-  const pts = diff===0?(top5?5:6):diff===1?(top5?2:3):diff===2?(top5?1:2):diff===3?(top5?0:1):0
+  const pts = Number(stageOrder) < 10
+    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
+    : (i < 5 ? (diff===0?5:diff===1?2:diff===2?1:0) : (diff===0?6:diff===1?3:diff===2?2:diff===3?1:0))
   return pts > 0 ? pts : ''
 }
 function getQualPts(pilot, predPos, results) {
@@ -365,12 +377,14 @@ function getQualPts(pilot, predPos, results) {
   const pts = diff===0?6:diff===1?3:diff===2?1:0
   return pts > 0 ? pts : ''
 }
-function getSprintPts(i, pilot, results) {
+function getSprintPts(i, pilot, results, stageOrder) {
   if (!pilot || !results.length) return ''
   const actual = results.indexOf(pilot)
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
-  const pts = diff===0?3:diff===1?2:diff===2?1:0
+  const pts = Number(stageOrder) < 10
+    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
+    : (diff===0?3:diff===1?2:diff===2?1:0)
   return pts > 0 ? pts : ''
 }
 

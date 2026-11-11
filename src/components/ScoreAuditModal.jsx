@@ -28,22 +28,25 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
       ])
       const firstError = stagesResult.error || sessionsResult.error || playersResult.error
       if (firstError) throw firstError
-      const sessions = sessionsResult.data || []
+      const stagesData = stagesResult.data || []
+      const activeStageIds = new Set(stagesData.map(stage => stage.id))
+      const sessions = (sessionsResult.data || []).filter(session => activeStageIds.has(session.stage_id))
       const committedSessions = sessions.filter(session => session.committed)
       const committedIds = committedSessions.map(session => session.id)
       const qualIds = committedSessions.filter(session => session.type === 'qual').map(session => session.id)
       const [forecastsResult, qualifyingResult] = await Promise.all([
         committedIds.length
-          ? supabase.from('forecasts').select('id,session_id,player_id,score,score_breakdown,predictions,fl_pick,ov_pick').in('session_id', committedIds)
+          ? supabase.from('forecasts').select('id,session_id,player_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id', committedIds)
           : Promise.resolve({ data: [], error: null }),
         qualIds.length
-          ? supabase.from('qual_assignments').select('id,session_id,player_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', qualIds)
+          ? supabase.from('qual_assignments').select('id,session_id,player_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', qualIds)
           : Promise.resolve({ data: [], error: null }),
       ])
       if (forecastsResult.error) throw forecastsResult.error
       if (qualifyingResult.error) throw qualifyingResult.error
 
-      const sessionById = new Map(sessions.map(session => [session.id, session]))
+      const stageOrderById = new Map(stagesData.map(stage => [stage.id, stage.sort_order]))
+      const sessionById = new Map(sessions.map(session => [session.id, { ...session, stage_sort_order:stageOrderById.get(session.stage_id) }]))
       const rowsBySession = new Map()
       const addRow = (sessionId, row) => {
         const rows = rowsBySession.get(sessionId) || []
@@ -52,12 +55,15 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
       }
       for (const row of forecastsResult.data || []) {
         const session = sessionById.get(row.session_id)
-        const recalculated = recalculateForecast(session, row)
+        const recalculated = recalculateForecast(session, row, session.stage_sort_order)
         addRow(row.session_id, {
           playerId: row.player_id,
           savedScore: Number(row.score) || 0,
           currentScore: recalculated.score,
           recalculated: recalculated.recalculated,
+          verifiable: recalculated.verifiable,
+          stale: recalculated.stale,
+          ruleVersion: recalculated.ruleVersion,
           currentBreakdown: recalculated.breakdown,
           savedBreakdown: row.score_breakdown || [],
           forecast: row,
@@ -65,19 +71,22 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
       }
       for (const row of qualifyingResult.data || []) {
         const session = sessionById.get(row.session_id)
-        const recalculated = recalculateQualAssignment(session, row)
+        const recalculated = recalculateQualAssignment(session, row, session.stage_sort_order)
         addRow(row.session_id, {
           playerId: row.player_id,
           savedScore: Number(row.score) || 0,
           currentScore: recalculated.score,
           recalculated: recalculated.recalculated,
+          verifiable: recalculated.verifiable,
+          stale: recalculated.stale,
+          ruleVersion: recalculated.ruleVersion,
           currentBreakdown: recalculated.breakdown,
           savedBreakdown: [],
           qualifying: row,
         })
       }
 
-      const audits = (stagesResult.data || []).map(stage => {
+      const audits = stagesData.map(stage => {
         const stageSessions = sessions.filter(session => session.stage_id === stage.id)
           .sort((a, b) => (SESSION_ORDER[a.type] ?? 9) - (SESSION_ORDER[b.type] ?? 9))
         const totals = new Map()
@@ -101,7 +110,7 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
         return { stage, sessions: sessionAudits, totals: stageTotals }
       })
 
-      setStages(stagesResult.data || [])
+      setStages(stagesData)
       setPlayers(playersResult.data || initialPlayers)
       setStageAudits(audits)
       const currentStage = audits.filter(audit => audit.sessions.some(item => item.session.committed)).at(-1)
@@ -114,7 +123,8 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
   }
 
   const selectedAudit = useMemo(() => stageAudits.find(audit => audit.stage.id === stageId) || null, [stageAudits, stageId])
-  const mismatchCount = selectedAudit?.sessions.reduce((count, item) => count + item.rows.filter(row => row.recalculated && row.currentScore !== row.savedScore).length, 0) || 0
+  const mismatchCount = selectedAudit?.sessions.reduce((count, item) => count + item.rows.filter(row => row.verifiable && row.recalculated && row.currentScore !== row.savedScore).length, 0) || 0
+  const unverifiableCount = selectedAudit?.sessions.reduce((count, item) => count + item.rows.filter(row => !row.verifiable).length, 0) || 0
   const committedCount = selectedAudit?.sessions.filter(item => item.session.committed).length || 0
 
   if (!open) return null
@@ -143,14 +153,12 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
             <strong>{committedCount}/{selectedAudit.sessions.length} <small>сесій зараховано</small></strong>
           </div>
 
-          {mismatchCount > 0 ? <div className="audit-alert audit-alert-warning">
-            ⚠ {mismatchCount} розбіжностей
-          </div> : committedCount > 0 ? <div className="audit-alert audit-alert-ok">Збережені бали всіх доступних сесій збігаються з перерахунком за поточними результатами.</div> : null}
+          {Number(selectedAudit.stage.sort_order) < 10 ? <div className="audit-alert audit-alert-warning">Архівні бали показані як збережені й не перераховуються.</div> : mismatchCount > 0 ? <div className="audit-alert audit-alert-warning">⚠ {mismatchCount} розбіжностей між збереженим нарахуванням та перерахунком зі знімка прогнозу.</div> : unverifiableCount > 0 ? <div className="audit-alert audit-alert-warning">Не вдалося перевірити {unverifiableCount} записів: бракує знімка прогнозу або фактичних результатів.</div> : committedCount > 0 ? <div className="audit-alert audit-alert-ok">Перевірені знімки прогнозів збігаються зі збереженим нарахуванням.</div> : null}
 
           {selectedAudit.totals.length > 0 && <section className="audit-section">
             <h3>ПІДСУМОК ЕТАПУ</h3>
             <div className="audit-table-wrap"><table className="audit-table">
-              <thead><tr><th>Гравець</th><th>Збережено</th><th>Зараз за результатами</th><th>Δ</th></tr></thead>
+              <thead><tr><th>Гравець</th><th>Збережено</th><th>Перерахунок за прогнозом при нарахуванні</th><th>Δ</th></tr></thead>
               <tbody>{selectedAudit.totals.map(row => <tr key={row.player.id}>
                 <td><span style={{ color: 'var(--text)' }}>{row.player.name}</span><small>{row.player.base_pts} сезонних балів</small></td>
                 <td>{row.saved}</td><td>{row.current}</td>
@@ -172,15 +180,16 @@ export default function ScoreAuditModal({ open, onClose, players: initialPlayers
 }
 
 function AuditSession({ session, rows, results, players }) {
-  const mismatchCount = rows.filter(row => row.recalculated && row.currentScore !== row.savedScore).length
+  const mismatchCount = rows.filter(row => row.verifiable && row.recalculated && row.currentScore !== row.savedScore).length
+  const unverifiableCount = rows.filter(row => !row.verifiable).length
   const complete = session.committed && results.length > 0
   return <details className="audit-session" open={mismatchCount > 0}>
     <summary>
-      <span className={`audit-session-dot ${complete ? (mismatchCount ? 'has-warning' : 'is-ok') : 'is-pending'}`} />
+      <span className={`audit-session-dot ${complete ? (mismatchCount || unverifiableCount ? 'has-warning' : 'is-ok') : 'is-pending'}`} />
       <strong>{SESSION_LABEL[session.type] || session.type}</strong>
       {!session.committed && <span className="audit-session-state">Не зараховано</span>}
       {session.committed && !results.length && <span className="audit-session-state">Немає фактичних результатів</span>}
-      <span className="audit-session-meta">{rows.length} записів{mismatchCount ? ` · ${mismatchCount} різниць` : ''}</span>
+      <span className="audit-session-meta">{rows.length} записів{mismatchCount ? ` · ${mismatchCount} розбіжностей` : unverifiableCount ? ` · ${unverifiableCount} без знімка` : ''}</span>
     </summary>
     {session.committed && <div className="audit-session-body">
       {results.length > 0 && <details className="audit-results-details">
@@ -194,9 +203,12 @@ function AuditSession({ session, rows, results, players }) {
             <summary>Показати прогноз і розклад</summary>
             <PredictionDetails row={row} session={session} results={results} />
           </details></td>
-          <td>{row.savedScore}</td><td>{row.recalculated ? row.currentScore : '—'}</td>
+          <td>{row.savedScore}</td><td>{row.recalculated && row.verifiable ? row.currentScore : '—'}</td>
           <td className={row.recalculated && row.currentScore !== row.savedScore ? 'audit-delta-change' : 'audit-delta-zero'}>
-            {row.recalculated ? signed(row.currentScore - row.savedScore) : '—'}
+            <strong>{row.recalculated && row.verifiable ? signed(row.currentScore - row.savedScore) : '—'}</strong>
+            {!row.verifiable && <small style={{display:'block',maxWidth:280,marginTop:5,whiteSpace:'normal',lineHeight:1.45,color:'var(--muted)',fontWeight:400}}>{row.ruleVersion==='legacy-no-snapshot'?'Немає знімка прогнозу на момент нарахування.':row.ruleVersion==='no-results'?'Немає фактичних результатів для перерахунку.':'Запис не можна перевірити.'}</small>}
+            {row.stale && <small style={{display:'block',maxWidth:280,marginTop:5,whiteSpace:'normal',lineHeight:1.45,color:'var(--muted)',fontWeight:400}}>Поточний прогноз відредаговано після нарахування. Перевірка використовує збережений знімок.</small>}
+
           </td>
         </tr>)}</tbody>
       </table></div> : <div className="audit-empty">Немає збережених прогнозів чи призначень.</div>}
@@ -205,9 +217,10 @@ function AuditSession({ session, rows, results, players }) {
 }
 
 function PredictionDetails({ row, session, results }) {
-  const predictions = row.forecast?.predictions
+  const predictions = row.forecast?.scored_input?.predictions || row.forecast?.predictions
+  const scoredQualifying = row.qualifying?.scored_input || row.qualifying
   const pickRows = row.qualifying
-    ? [[row.qualifying.pilot_1, row.qualifying.pred_pos_1], [row.qualifying.pilot_2, row.qualifying.pred_pos_2], [row.qualifying.pilot_3, row.qualifying.pred_pos_3]]
+    ? [[scoredQualifying.pilot_1, scoredQualifying.pred_pos_1], [scoredQualifying.pilot_2, scoredQualifying.pred_pos_2], [scoredQualifying.pilot_3, scoredQualifying.pred_pos_3]]
         .filter(([pilot]) => pilot)
         .map(([pilot, position]) => ({ slot: `P${position || '—'}`, pilot, actual: actualPosition(pilot, results) }))
     : Object.entries(predictions || {})
@@ -222,7 +235,7 @@ function PredictionDetails({ row, session, results }) {
       </span>)}
     </div>}
     <div className="audit-breakdowns">
-      <div><b>Збережений розклад</b>{storedBreakdown.length
+      <div><b>Розклад при нарахуванні</b>{storedBreakdown.length
         ? storedBreakdown.map((item, index) => <span key={`${item.label}-${index}`}>{item.label} <strong>+{item.pts}</strong></span>)
         : <span className="audit-muted">Детальний розклад не зберігався.</span>}</div>
       <div><b>Поточний розклад</b>{row.recalculated && row.currentBreakdown.length

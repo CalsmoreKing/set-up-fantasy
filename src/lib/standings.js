@@ -48,7 +48,7 @@ export function buildStageTotals(players, sessions, forecasts, qualAssignments, 
 }
 
 /** Compute stage newcomer awards; awards are only ready after every stage session is committed. */
-export function calculateNewcomerBonuses(players, sessions, forecasts, qualAssignments) {
+export function calculateNewcomerBonuses(players, sessions, forecasts, qualAssignments, eligiblePlayerIds = []) {
   const committedSessions = (sessions || []).filter(s => SESSION_TYPES.includes(s.type))
   if (!committedSessions.length || committedSessions.some(s => !s.committed)) return { ready: false, minimum: null, bonuses: [] }
   const committedIds = new Set(committedSessions.map(s => s.id))
@@ -56,6 +56,7 @@ export function calculateNewcomerBonuses(players, sessions, forecasts, qualAssig
       || (qualAssignments || []).some(row => committedIds.has(row.session_id) && row.score == null)) {
     return { ready: false, minimum: null, bonuses: [] }
   }
+  const eligible = new Set(eligiblePlayerIds || [])
   const sessionById = new Map(committedSessions.map(s => [s.id, s]))
   const totals = new Map((players || []).map(p => [p.id, 0]))
   const submitted = new Set()
@@ -71,10 +72,10 @@ export function calculateNewcomerBonuses(players, sessions, forecasts, qualAssig
     totals.set(row.player_id, (totals.get(row.player_id) || 0) + (Number(row.score) || 0))
     if ([[row.pilot_1,row.pred_pos_1],[row.pilot_2,row.pred_pos_2],[row.pilot_3,row.pred_pos_3]].some(([pilot,pos]) => pilot && Number(pos) > 0)) submitted.add(row.player_id)
   }
-  const actuals = [...submitted].map(id => totals.get(id) || 0)
+  const actuals = [...submitted].filter(id => !eligible.has(id)).map(id => totals.get(id) || 0)
   const minimum = actuals.length ? Math.min(...actuals) : null
   const bonuses = minimum == null ? [] : (players || [])
-    .filter(player => !submitted.has(player.id) && (totals.get(player.id) || 0) <= 0)
+    .filter(player => eligible.has(player.id) && !submitted.has(player.id))
     .map(player => ({ player_id: player.id, points: minimum }))
   return { ready: true, minimum, bonuses }
 }

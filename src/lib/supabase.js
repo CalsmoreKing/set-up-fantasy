@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
-export { calcRaceScore, calcQualScore, calcSprintScore } from './scoring.js'
+import { PILOTS_2026_ORDER, RESERVE_PILOTS_2026 } from './roster.js'
+export { USED_PILOTS, PILOTS_2026_ORDER, ACTIVE_PILOTS_2026, RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, buildStagePilotPool, qualifyingSlotsForStage, NEWCOMER_FIRST_STAGE_ORDER, newcomerPlayersForStage } from './roster.js'
+export { calcRaceScore, calcQualScore, calcQualAssignmentScore, calcSprintScore } from './scoring.js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -17,14 +19,8 @@ if (!SUPABASE_URL || !SUPABASE_ANON) {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
-// ── Пілоти (порядок = поточна позиція в сезоні) ──────
-export const PILOTS = [
-  'Antonelli','Russell','Hamilton','Piastri','Norris',
-  'Leclerc','Verstappen','Hadjar','Gasly','Lawson',
-  'Bearman','Colapinto','Lindblad','Sainz','Albon',
-  'Ocon','Bortoleto','Alonso','Hülkenberg','Bottas',
-  'Pérez','Stroll'
-]
+// Roulette and race-result defaults contain starters only. Reserves are offered only in substitutions.
+export const PILOTS = [...PILOTS_2026_ORDER]
 
 export const PILOT_ABBR = {
   ANT:'Antonelli', RUS:'Russell',  HAM:'Hamilton',  PIA:'Piastri',
@@ -32,7 +28,7 @@ export const PILOT_ABBR = {
   GAS:'Gasly',     LAW:'Lawson',   BEA:'Bearman',   COL:'Colapinto',
   LIN:'Lindblad',  SAI:'Sainz',    ALB:'Albon',     OCO:'Ocon',
   BOR:'Bortoleto', ALO:'Alonso',   HUL:'Hülkenberg',BOT:'Bottas',
-  PER:'Pérez',     STR:'Stroll',
+  PER:'Pérez',     STR:'Stroll', TSU:'Tsunoda', HIR:'Hirakawa', CAM:'Câmara',
 }
 
 // Скорочення для швидкого введення в bulk
@@ -43,57 +39,6 @@ export const BULK_OV_KEYS   = ['прорив','ov','overtake']
 // Подвійні кваліфікації — 3 останні етапи (математично правильно: 12×18 + 3×36 = 324≈327)
 // Андрій, Кітасу, Миколапка мають 19 вільних — їм дістанеться +1 в одному з подвійних
 export const DOUBLE_STAGES = new Set(['brazil','qatar','uae'])
-
-// ── БОНУСНІ слоти для новачків, що доганяють інших ──
-// Формат: { playerName: Set(stageKey, ...) }
-// Гравець в цьому списку на цьому етапі отримує ОДИН додатковий пілот
-// ПОНАД стандартну кількість (яку визначає DOUBLE_STAGES як завжди).
-// Бонусний пілот генерується з ОКРЕМОГО кошика — не конкурує з основним
-// розподілом пілотів решти гравців, лише унікальний в межах своєї команди.
-export const BONUS_SLOT_STAGES = {
-  'Педрі': new Set(['malaysia','singapore','usa']),
-  'Хексі': new Set(['malaysia','singapore','usa']),
-}
-
-// Скільки СТАНДАРТНИХ слотів (з загального кошика) отримує гравець
-export function getStandardSlotCount(isDoubleStage) {
-  return isDoubleStage ? 2 : 1
-}
-
-// Чи отримує гравець додатковий БОНУСНИЙ слот на цьому етапі
-export function hasBonusSlot(playerName, stageKey) {
-  return !!BONUS_SLOT_STAGES[playerName]?.has(stageKey)
-}
-
-// Загальна кількість слотів (для UI — скільки віконець показувати)
-export function getSlotCountForPlayer(playerName, stageKey, isDoubleStage) {
-  const standard = getStandardSlotCount(isDoubleStage)
-  return standard + (hasBonusSlot(playerName, stageKey) ? 1 : 0)
-}
-
-// ── Вже використані пілоти кваліфікації ─────────────
-export const USED_PILOTS = {
-  'Ярослав':   ['Colapinto','Russell','Antonelli','Ocon'],
-  'Мія':       ['Bearman','Norris','Hadjar','Stroll'],
-  'Нептун':    ['Norris','Lawson','Hülkenberg','Bortoleto'],
-  'Хонда':     ['Antonelli','Verstappen','Bortoleto','Bearman'],
-  'Іванна':    ['Hadjar','Bortoleto','Lawson','Verstappen'],
-  'Марго':     ['Bottas','Colapinto','Hamilton','Alonso'],
-  'Чак':       ['Hamilton','Gasly','Sainz','Bottas'],
-  'Калсмор':   ['Gasly','Leclerc','Colapinto','Hamilton'],
-  'Іван':      ['Albon','Hadjar','Lindblad','Lawson'],
-  'Ігор':      ['Lawson','Bearman','Norris','Antonelli'],
-  'Ярік':      ['Sainz','Hülkenberg','Albon','Leclerc'],
-  'Анастасія': ['Alonso','Antonelli','Ocon','Gasly'],
-  'Андрій':    ['Ocon','Piastri','Russell'],
-  'Валентин':  ['Lindblad','Stroll','Gasly','Albon'],
-  'Андріі':    ['Russell','Ocon','Piastri','Norris'],  // раніше "Софія"
-  'Стас':      ['Stroll','Alonso','Verstappen','Hülkenberg'],
-  'Кітасу':    ['Leclerc','Pérez','Piastri'],
-  'Миколапка': ['Bortoleto','Stroll','Sainz'],
-  'Педрі':     [], // новий гравець — пілоти ще не випадали
-  'Хексі':     [], // новий гравець — пілоти ще не випадали
-}
 
 // ── Аліаси гравців ───────────────────────────────────
 // Ключ = канонічне ім'я, значення = всі варіанти написання
@@ -128,7 +73,7 @@ export function resolvePilot(token) {
   if (!token) return null
   const t = token.trim().toUpperCase()
   if (PILOT_ABBR[t]) return PILOT_ABBR[t]
-  const full = PILOTS.find(p => p.toUpperCase() === t)
+  const full = [...PILOTS, ...RESERVE_PILOTS_2026].find(p => p.toUpperCase() === t)
   return full || null
 }
 

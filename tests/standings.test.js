@@ -35,7 +35,7 @@ test('competition ranks share ties and skip the next place', () => {
   assert.deepEqual(podiumPlayers(players, totals).map(row => row.id), ['a', 'b', 'c'])
 })
 
-test('newcomer bonus uses the lowest whole-event score only after the stage is complete', () => {
+test('newcomer bonus uses the lowest whole-event score only for explicitly eligible newcomers after the stage is complete', () => {
   const players = [{id:'experienced'}, {id:'rookie'}, {id:'no_prediction'}]
   const sessions = [
     {id:'q',type:'qual',committed:true},
@@ -46,9 +46,9 @@ test('newcomer bonus uses the lowest whole-event score only after the stage is c
     {session_id:'r',player_id:'rookie',score:0,predictions:{}},
   ]
   const quals = [{session_id:'q',player_id:'experienced',score:2,pilot_1:'Norris',pred_pos_1:1}]
-  assert.deepEqual(calculateNewcomerBonuses(players, sessions, forecasts, quals), {
-    ready:true, minimum:7, bonuses:[{player_id:'rookie',points:7},{player_id:'no_prediction',points:7}],
+  assert.deepEqual(calculateNewcomerBonuses(players, sessions, forecasts, quals, ['rookie']), {
+    ready:true, minimum:7, bonuses:[{player_id:'rookie',points:7}],
   })
-  assert.equal(calculateNewcomerBonuses(players, [{...sessions[0],committed:false},sessions[1]], forecasts, quals).ready, false)
-  assert.equal(calculateNewcomerBonuses(players, sessions, [{...forecasts[0],score:null}], quals).ready, false)
+  assert.equal(calculateNewcomerBonuses(players, [{...sessions[0],committed:false},sessions[1]], forecasts, quals, ['rookie']).ready, false)
+  assert.equal(calculateNewcomerBonuses(players, sessions, [{...forecasts[0],score:null}], quals, ['rookie']).ready, false)
 })

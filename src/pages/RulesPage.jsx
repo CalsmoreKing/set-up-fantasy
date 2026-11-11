@@ -16,9 +16,21 @@ export default function RulesPage() {
         </p>
       </div>
 
+      <div className="rules-section">
+        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--gold)',letterSpacing:2,marginBottom:10}}>АРХІВНИЙ ЕТАП: АВСТРАЛІЯ—БАРСЕЛОНА</div>
+        <p style={{fontSize:13,lineHeight:1.8,color:'var(--muted)'}}>
+          Для гонки й спринту прогнозуються 10 позицій. За точне місце нараховуються бали за позицією: P1 — 10, P2 — 9, …, P10 — 1.
+          Якщо пілот фінішував на одну позицію вище або нижче — 1 бал; похибка на дві чи більше позицій — 0.
+          <br/><br/>
+          Бонуси: правильно вгаданий переможець — +1; правильно вгаданий склад Топ-3 — +4 незалежно від порядку;
+          правильно вгаданий пілот зі швидким колом — +1.
+          Для кваліфікації в цьому періоді прогнозується лише поул-сітер: правильна відповідь — 1 бал.
+        </p>
+      </div>
+
       {/* ГОНКА */}
       <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>🏁 ГОНКА — ПРОГНОЗ ТОП-10</div>
+        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>🏁 ГОНКА — ПРАВИЛА ПІСЛЯ БАРСЕЛОНИ</div>
         <table className="rules-table">
           <thead>
             <tr>

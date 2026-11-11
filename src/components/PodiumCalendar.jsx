@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
 import CountryFlag from './CountryFlag'
 import { isCompletedGrandPrix, rankEventPodium } from '../lib/podium'
-import { recalculateForecast, recalculateQualAssignment } from '../lib/scoring'
+import { canonicalStoredScore } from '../lib/scoring'
 
 const PODIUM_PLACES = [1, 2, 3]
 
@@ -26,37 +26,42 @@ export default function PodiumCalendar({ open, onClose }) {
       const firstError = stagesResult.error || sessionsResult.error || playersResult.error
       if (firstError) throw firstError
 
-      const sessions = sessionsResult.data || []
+      const stages = stagesResult.data || []
+      const activeStages = stages.filter(stage => Number(stage.sort_order) >= 10)
+      const activeStageIds = new Set(activeStages.map(stage => stage.id))
+      const sessions = (sessionsResult.data || []).filter(session => activeStageIds.has(session.stage_id))
       const committed = sessions.filter(session => session.committed)
       const scoredSessionIds = committed.map(session => session.id)
       const qualSessionIds = committed.filter(session => session.type === 'qual').map(session => session.id)
       const [forecastsResult, qualResult] = await Promise.all([
         scoredSessionIds.length
-          ? supabase.from('forecasts').select('player_id,session_id,score,predictions,fl_pick,ov_pick,score_breakdown').in('session_id', scoredSessionIds)
+          ? supabase.from('forecasts').select('player_id,session_id,score,scored_input,predictions,fl_pick,ov_pick,score_breakdown').in('session_id', scoredSessionIds)
           : Promise.resolve({ data: [], error: null }),
         qualSessionIds.length
-          ? supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', qualSessionIds)
+          ? supabase.from('qual_assignments').select('player_id,session_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', qualSessionIds)
           : Promise.resolve({ data: [], error: null }),
       ])
       if (forecastsResult.error) throw forecastsResult.error
       if (qualResult.error) throw qualResult.error
 
       const players = playersResult.data || []
-      const sessionById = new Map(sessions.map(session => [session.id, session]))
+      const stageOrderById = new Map(stages.map(stage => [stage.id, stage.sort_order]))
+      const sessionById = new Map(sessions.map(session => [session.id, { ...session, stage_sort_order:stageOrderById.get(session.stage_id) }]))
       const currentForecasts = (forecastsResult.data || []).map(row => ({
         ...row,
-        score: recalculateForecast(sessionById.get(row.session_id), row).score,
+        score: canonicalStoredScore(row),
       }))
       const currentQualifying = (qualResult.data || []).map(row => ({
         ...row,
-        score: recalculateQualAssignment(sessionById.get(row.session_id), row).score,
+        score: canonicalStoredScore(row),
       }))
-      setData((stagesResult.data || []).map(stage => {
+      setData(stages.map(stage => {
         const stageSessions = sessions.filter(session => session.stage_id === stage.id)
         const completed = isCompletedGrandPrix(stageSessions)
         return {
           stage,
-          podium: completed
+          archived: Number(stage.sort_order) < 10,
+          podium: Number(stage.sort_order) < 10 ? null : completed
             ? rankEventPodium(players, stageSessions, currentForecasts, currentQualifying)
             : null,
         }
@@ -83,16 +88,17 @@ export default function PodiumCalendar({ open, onClose }) {
         {loading && <div className="modal-status">Завантаження...</div>}
         {!loading && error && <div className="modal-error" role="alert">Не вдалося завантажити календар подіумів: {error}</div>}
         {!loading && !error && <div className="podium-grid">
-          {data.map(({ stage, podium }) => <article key={stage.id} className={`podium-card ${podium ? 'is-complete' : 'is-pending'}`}>
+          {data.map(({ stage, podium, archived }) => <article key={stage.id} className={`podium-card ${archived ? 'is-archive' : podium ? 'is-complete' : 'is-pending'}`}>
             <header className="podium-card-heading">
               <CountryFlag flag={stage.flag} className="podium-card-flag" />
               <div className="podium-card-title">
                 <span className="podium-round">ROUND {String(stage.sort_order).padStart(2, '0')}</span>
                 <h3>{stage.name}</h3>
               </div>
+              {archived && <span className="podium-lock" aria-label="Архівний етап">🔒</span>}
               <span className="podium-card-glow" aria-hidden="true" />
             </header>
-            {podium !== null && <div className="podium-places">
+            {archived ? <div className="podium-archive-note">АРХІВНИЙ ЕТАП · ПОДІУМ ЗАБЛОКОВАНО</div> : podium !== null && <div className="podium-places">
               {PODIUM_PLACES.map(place => {
                 const group = podium?.find(row => row.place === place)
                 return <div key={place} className={`podium-place podium-place-${place} ${group ? '' : 'is-empty'}`}>

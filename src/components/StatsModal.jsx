@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
-import { hasForecastSubmission, hasQualifyingPrediction, recalculateForecast, recalculateQualAssignment } from '../lib/scoring'
+import { canonicalStoredScore, hasForecastSubmission, hasQualifyingPrediction } from '../lib/scoring'
 import CountryFlag from './CountryFlag'
 
 export default function StatsModal({ open, onClose, players }) {
@@ -111,25 +111,23 @@ export default function StatsModal({ open, onClose, players }) {
 async function loadPlayerStats(playerId, player) {
   const [forecastsResult, qualsResult] = await Promise.all([
     supabase.from('forecasts')
-      .select('score, score_breakdown, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,name,flag,sort_order))')
+      .select('score, score_breakdown, scored_input, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,name,flag,sort_order))')
       .eq('player_id', playerId),
     supabase.from('qual_assignments')
-      .select('score, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(stage_id, committed, results, stages(id,name,flag,sort_order))')
+      .select('score, scored_input, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(stage_id, committed, results, stages(id,name,flag,sort_order))')
       .eq('player_id', playerId)
       .gt('score', -1),
   ])
   if (forecastsResult.error) throw forecastsResult.error
   if (qualsResult.error) throw qualsResult.error
 
-  const savedForecasts = (forecastsResult.data || []).filter(row => row.sessions?.committed && hasForecastSubmission(row))
-  const savedQuals = (qualsResult.data || []).filter(row => row.sessions?.committed && hasQualifyingPrediction(row))
+  const savedForecasts = (forecastsResult.data || []).filter(row => row.sessions?.committed && Number(row.sessions?.stages?.sort_order)>=10 && hasForecastSubmission(row))
+  const savedQuals = (qualsResult.data || []).filter(row => row.sessions?.committed && Number(row.sessions?.stages?.sort_order)>=10 && hasQualifyingPrediction(row))
   const committedForecasts = savedForecasts.map(row => {
-    const current = recalculateForecast(row.sessions, row)
-    return { ...row, score: current.score, savedScore: Number(row.score) || 0, currentBreakdown: current.breakdown, wasRecalculated: current.recalculated }
+    return { ...row, score:canonicalStoredScore(row), savedScore:canonicalStoredScore(row), currentBreakdown:row.score_breakdown || [], wasRecalculated:false }
   })
   const committedQuals = savedQuals.map(row => {
-    const current = recalculateQualAssignment(row.sessions, row)
-    return { ...row, score: current.score, savedScore: Number(row.score) || 0, currentBreakdown: current.breakdown, wasRecalculated: current.recalculated }
+    return { ...row, score:canonicalStoredScore(row), savedScore:canonicalStoredScore(row), currentBreakdown:row.score_breakdown || [], wasRecalculated:false }
   })
   const byType = { race: [], sprint: [] }
   committedForecasts.forEach(row => {

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { rankPlayers } from '../lib/standings'
+import { archiveBaselineForPlayer } from '../lib/archive'
+import { canonicalStoredScore } from '../lib/scoring'
 
 export default function ProfilePage() {
   const { player } = useAuth()
@@ -10,6 +12,10 @@ export default function ProfilePage() {
   const [roster, setRoster] = useState([])
   const [seasonRank, setSeasonRank] = useState(null)
   const [seasonTotal, setSeasonTotal] = useState(0)
+  const [scoreSplit, setScoreSplit] = useState({ archive:0, active:0, newcomer:0, manual:0 })
+  const [schemaReady, setSchemaReady] = useState(true)
+  const [bannerBusy, setBannerBusy] = useState(false)
+  const [profileMsg, setProfileMsg] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -18,27 +24,38 @@ export default function ProfilePage() {
 
   async function load() {
     setLoading(true)
-    const [stagesRes, sessionsRes, playersRes] = await Promise.all([
+    const [stagesRes, sessionsRes, playersRes, profileRes] = await Promise.all([
       supabase.from('stages').select('id,key,name,flag,sort_order').order('sort_order'),
-      supabase.from('sessions').select('id,stage_id,type,committed').eq('type','race').eq('committed',true),
+      supabase.from('sessions').select('id,stage_id,type,committed,results,fl_pilot,ov_pilot,stages(id,name,flag,sort_order)').eq('committed',true),
       supabase.from('players').select('id,name,team,base_pts'),
+      supabase.from('player_profiles').select('*').eq('player_id',player.id).maybeSingle(),
     ])
-    setProfile({ player_id: player.id, banner_url: null, bio: '' })
+    const profileRow = profileRes.data || { player_id:player.id, banner_url:null }
+    setProfile(profileRow)
+    setSchemaReady(!profileRes.error)
     const sessions = sessionsRes.data || []
     const sessionIds = sessions.map(s => s.id)
-    let forecasts = []
+    let forecasts = [], qualifying = [], bonuses = []
     if (sessionIds.length) {
-      const result = await supabase.from('forecasts').select('player_id,session_id,score').in('session_id', sessionIds)
-      forecasts = result.data || []
+      const [f,q,b] = await Promise.all([
+        supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('player_id,session_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('stage_newcomer_bonuses').select('player_id,stage_id,points').eq('player_id',player.id),
+      ])
+      forecasts = f.data || []
+      qualifying = q.data || []
+      bonuses = b.data || []
     }
     const stages = stagesRes.data || []
     const allPlayers = playersRes.data || []
     setRoster(allPlayers)
     const mySeasonRank = [...allPlayers].sort((a,b) => (Number(b.base_pts)||0) - (Number(a.base_pts)||0)).findIndex(p => p.id === player.id) + 1
     setSeasonRank(mySeasonRank || null)
+    const activeStageIds = new Set(stages.filter(stage => Number(stage.sort_order) >= 10).map(stage => stage.id))
+    const raceSessions = sessions.filter(session => session.type === 'race' && activeStageIds.has(session.stage_id))
     const rows = []
     for (const stage of stages) {
-      const session = sessions.find(s => s.stage_id === stage.id)
+      const session = raceSessions.find(s => s.stage_id === stage.id)
       if (!session) continue
       const stageScores = Object.fromEntries(forecasts.filter(f => f.session_id === session.id).map(f => [f.player_id, { score: Number(f.score)||0 }]))
       const ranked = rankPlayers(allPlayers, stageScores, 'score')
@@ -47,7 +64,35 @@ export default function ProfilePage() {
     }
     setPosterRows(rows)
     setSeasonTotal(rows.reduce((sum, row) => sum + row.score, 0))
+    const currentStageIds = new Set(stages.filter(stage => Number(stage.sort_order) >= 10).map(stage => stage.id))
+    const activeSessionIds = new Set(sessions.filter(session => currentStageIds.has(session.stage_id)).map(session => session.id))
+    const activePoints = forecasts.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
+      + qualifying.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
+    const newcomerPoints = bonuses.reduce((sum,row)=>sum+(Number(row.points)||0),0)
+    const { data:adjustments } = await supabase.from('score_manual_adjustments').select('delta').eq('player_id',player.id)
+    const manualPoints = (adjustments||[]).reduce((sum,row)=>sum+(Number(row.delta)||0),0)
+    const total = Number(player.base_pts) || 0
+    const archive = archiveBaselineForPlayer(player.name)
+    setScoreSplit({ active:activePoints, newcomer:newcomerPoints, manual:manualPoints, archive, unallocated:archive==null?null:total-archive-activePoints-newcomerPoints-manualPoints })
     setLoading(false)
+  }
+
+  async function uploadBanner(file) {
+    if (!file) return
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setProfileMsg('Оберіть JPG, PNG або WebP до 5 МБ.'); return
+    }
+    setBannerBusy(true); setProfileMsg('')
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `${player.id}/banner-${Date.now()}.${ext}`
+    const { error:uploadError } = await supabase.storage.from('player-banners').upload(path,file,{upsert:true,contentType:file.type})
+    if (uploadError) { setProfileMsg(`Не вдалося завантажити банер: ${uploadError.message}`); setBannerBusy(false); return }
+    const { data } = supabase.storage.from('player-banners').getPublicUrl(path)
+    const nextProfile = { player_id:player.id, banner_url:data.publicUrl, updated_at:new Date().toISOString() }
+    const { error:saveError } = await supabase.from('player_profiles').upsert(nextProfile)
+    if (saveError) setProfileMsg(`Файл завантажено, але профіль не збережено: ${saveError.message}`)
+    else { setProfile(nextProfile); setProfileMsg('Банер оновлено') }
+    setBannerBusy(false)
   }
 
   const teammate = roster.find(candidate => candidate.team === player?.team && candidate.id !== player?.id)
@@ -64,16 +109,14 @@ export default function ProfilePage() {
           <div style={{color:teamColor,fontSize:12,marginTop:4}}>{player?.team}</div>
         </div>
       </div>
-      <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 16px',flexWrap:'wrap'}}>
-        <button className="btn btn-ghost" disabled title="Буде доступно після затвердження міграції профілів" style={{cursor:'not-allowed',fontSize:10,padding:'7px 12px',opacity:.55}}>
-          БАНЕРИ ПОКИ ВИМКНЕНІ
-        </button>
-        <span style={{fontSize:10,color:'var(--muted)'}}>Завантаження банерів буде ввімкнено після безпечного розгортання схеми профілів.</span>
+      <div style={{display:'grid',gap:10,padding:'12px 16px'}}>
+        <label style={{fontSize:11,color:'var(--muted)'}}>Банер профілю (JPG/PNG/WebP, до 5 МБ) <input type="file" accept="image/jpeg,image/png,image/webp" disabled={bannerBusy || !schemaReady} onChange={e=>uploadBanner(e.target.files?.[0])} style={{display:'block',marginTop:6}} /></label>
+        {profileMsg && <span style={{fontSize:11,color:profileMsg.startsWith('Не вдалося')?'#ff8585':'var(--muted)'}}>{profileMsg}</span>}
       </div>
     </section>
 
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'end',gap:12,marginBottom:12,flexWrap:'wrap'}}>
-      <div><div className="section-label" style={{marginBottom:5}}>СЕЗОННИЙ ПОСТЕР</div><div style={{fontSize:11,color:'var(--muted)'}}>Очки та місця лише за гонками (без кваліфікації й спринтів).</div></div>
+      <div><div className="section-label" style={{marginBottom:5}}>СЕЗОННИЙ ПОСТЕР</div></div>
       <button className="btn btn-ghost" onClick={()=>window.print()} style={{fontSize:10}}>⎙ ДРУК / ЗБЕРЕГТИ PDF</button>
     </div>
     <div id="season-poster" style={{border:`1px solid ${teamColor}66`,borderTop:`4px solid ${teamColor}`,borderRadius:5,padding:18,background:profile?.banner_url ? `linear-gradient(145deg,rgba(8,8,8,.9),rgba(8,8,8,.94)),url(${profile.banner_url}) center/cover` : 'linear-gradient(145deg,var(--card),#0b0b0b)',marginBottom:24}}>
@@ -88,6 +131,11 @@ export default function ProfilePage() {
       <ProfileMetric label="МІСЦЕ В СЕЗОНІ" value={seasonRank ? `#${seasonRank}` : '—'} />
       <ProfileMetric label="КОМАНДА / НАПАРНИК" value={`${TEAM_META[player?.team]?.code || ''} · ${teammate?.name || '—'}`} />
       <ProfileMetric label="ЗАГАЛЬНІ ОЧКИ" value={player?.base_pts ?? 0} />
+      <ProfileMetric label="АРХІВ" value={scoreSplit.archive ?? '—'} />
+      <ProfileMetric label="АКТИВНИЙ СЕЗОН" value={scoreSplit.active} />
+      <ProfileMetric label="БОНУС НОВАЧКА" value={scoreSplit.newcomer} />
+      <ProfileMetric label="РУЧНІ КОРИГУВАННЯ*" value={scoreSplit.manual} />
+      <ProfileMetric label="ЗАЛИШОК / НЕВІДОМЕ" value={scoreSplit.unallocated ?? '—'} />
       <ProfileMetric label="ГОНКОВІ ОЧКИ" value={seasonTotal} />
       <ProfileMetric label="ЕТАПІВ З РЕЗУЛЬТАТОМ" value={posterRows.length} />
     </div>

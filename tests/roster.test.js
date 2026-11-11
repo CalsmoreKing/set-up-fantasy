@@ -1,6 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyStagePilotSubstitutions, priorQualAssignments } from '../src/lib/roster.js'
+import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, USED_PILOTS, qualifyingSlotsForStage } from '../src/lib/roster.js'
+
+test('legacy pilot seeds follow the current profile and deduplicate resolved qualifying corrections', () => {
+  assert.deepEqual(USED_PILOTS['Даня'], ['Stroll','Sainz'])
+  assert.equal(USED_PILOTS['Миколапка'], undefined)
+  assert.deepEqual(USED_PILOTS['Андріі'], ['Ocon','Piastri','Norris'])
+})
 
 test('stage-scoped reserve changes replace or deactivate a driver without mutating the base roster', () => {
   const base = ['Driver A','Driver B','Reserve']
@@ -23,4 +29,37 @@ test('qualifying history ignores current and future allocations', () => {
   assert.deepEqual(history.map(row=>row.session_id), ['old'])
   assert.equal(history[0].pilot_1, 'Driver A')
   assert.equal(history[0].pilot_2, '')
+})
+
+
+test('roulette pool is exactly 22 starters and excludes all reserves', () => {
+  assert.equal(PILOTS_2026_ORDER.length, 22)
+  assert.equal(PILOTS_2026_ORDER[0], 'Antonelli')
+  assert.ok(PILOTS_2026_ORDER.includes('Stroll'))
+  assert.ok(PILOTS_2026_ORDER.includes('Pérez'))
+  assert.deepEqual(RESERVE_PILOTS_2026, ['Tsunoda','Hirakawa','Câmara'])
+  for (const reserve of RESERVE_PILOTS_2026) assert.ok(!PILOTS_2026_ORDER.includes(reserve))
+})
+
+test('stage pool replaces one active Haas seat with a reserve and remains exactly 22', () => {
+  const pool = buildStagePilotPool([{team_name:'Haas',outgoing_driver:'Ocon',incoming_driver:'Câmara',is_active:true}])
+  assert.equal(pool.length,22)
+  assert.ok(!pool.includes('Ocon'))
+  assert.ok(pool.includes('Câmara'))
+  assert.equal(buildStagePilotPool([]).length,22)
+})
+
+test('catch-up qualifying slots are allocated across Vegas, Qatar, and UAE, capped at three', () => {
+  assert.equal(qualifyingSlotsForStage(5,23),1)
+  assert.equal(qualifyingSlotsForStage(6,23),2)
+  assert.equal(qualifyingSlotsForStage(7,23),2)
+  assert.equal(qualifyingSlotsForStage(7,24),3)
+  assert.equal(qualifyingSlotsForStage(9,23),3)
+  assert.equal(qualifyingSlotsForStage(3,25),3)
+})
+
+test('event replacement normalizes saved picks and real result names only for that event', () => {
+  const changes = [{ outgoing_driver:'Ocon', incoming_driver:'Hirakawa', is_active:true }]
+  assert.equal(normalizeStageDriver('Ocon', changes), 'Hirakawa')
+  assert.deepEqual(normalizeStageResults({1:'Norris',2:'Ocon'}, changes), {1:'Norris',2:'Hirakawa'})
 })

@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
 import PodiumCalendar from '../components/PodiumCalendar'
 import ScoreAuditModal from '../components/ScoreAuditModal'
+import { canonicalStoredScore } from '../lib/scoring'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -40,57 +41,50 @@ export default function StandingsPage() {
       setStages(stagesData)
       setStagesWithCommit(committedIds)
       // Default: last stage with any committed session
-      const withCommit = stagesData.filter(st => committedIds.has(st.id))
+      const withCommit = stagesData.filter(st => Number(st.sort_order) >= 10 && committedIds.has(st.id))
       if (withCommit.length) setStageTab(withCommit[withCommit.length-1].key)
       setLoading(false)
     })
   }, [])
 
-  // Load scores for selected stage
+  // Show current-rule stages from live results; preserve archived stored scores before Austria.
   useEffect(() => {
     if (!stageTab || !stages.length) return
     const stage = stages.find(s => s.key === stageTab)
     if (!stage) return
 
-    supabase.from('sessions').select('id, type, committed, results')
+    supabase.from('sessions').select('id,type,committed,fl_pilot,ov_pilot')
       .eq('stage_id', stage.id)
-      .then(async ({ data: sessList }) => {
+      .then(async ({ data: sessList, error: sessionsError }) => {
+        if (sessionsError) throw sessionsError
         const scores = {}
-        const { calcQualScore } = await import('../lib/supabase')
-        for (const sess of (sessList||[])) {
-          if (!sess.committed) continue
-          if (sess.type === 'qual') {
-            const { data: qas } = await supabase.from('qual_assignments')
-              .select('player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3')
-              .eq('session_id', sess.id)
-            const resultsList = sess.results
-              ? Object.entries(sess.results).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
-              : []
-            ;(qas||[]).forEach(qa => {
-              if (!scores[qa.player_id]) scores[qa.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
-              // Primary pilot (slot 1) — the standard quali score, 0-6 range
-              const primary = calcQualScore(qa.pilot_1, qa.pred_pos_1, resultsList)
-              scores[qa.player_id].qual += primary.total
-              // Bonus pilots (slot 2, 3) — catch-up mechanic for new players
-              let bonus = 0
-              if (qa.pilot_2) bonus += calcQualScore(qa.pilot_2, qa.pred_pos_2, resultsList).total
-              if (qa.pilot_3) bonus += calcQualScore(qa.pilot_3, qa.pred_pos_3, resultsList).total
-              scores[qa.player_id].qualBonus += bonus
+        for (const session of (sessList || [])) {
+          if (!session.committed) continue
+          if (session.type === 'qual') {
+            const { data: assignments, error } = await supabase.from('qual_assignments')
+              .select('player_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .eq('session_id', session.id)
+            if (error) throw error
+            ;(assignments || []).forEach(assignment => {
+              if (!scores[assignment.player_id]) scores[assignment.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
+              scores[assignment.player_id].qual += canonicalStoredScore(assignment)
             })
           } else {
-            const { data: fcs } = await supabase.from('forecasts')
-              .select('player_id, score').eq('session_id', sess.id)
-            ;(fcs||[]).forEach(fc => {
-              if (!scores[fc.player_id]) scores[fc.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
-              scores[fc.player_id][sess.type] += fc.score || 0
+            const { data: forecasts, error } = await supabase.from('forecasts')
+              .select('player_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').eq('session_id', session.id)
+            if (error) throw error
+            ;(forecasts || []).forEach(forecast => {
+              if (!scores[forecast.player_id]) scores[forecast.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
+              const score = canonicalStoredScore(forecast)
+              scores[forecast.player_id][session.type] = score
             })
           }
         }
         Object.keys(scores).forEach(pid => {
-          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0) + (scores[pid].newcomerBonus||0)
+          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
         })
         setStageScores(scores)
-      })
+      }).catch(error => console.error('Failed to load stage score details:', error))
   }, [stageTab, stages])
 
   const sorted = [...players].sort((a,b) => b.base_pts - a.base_pts)
@@ -102,7 +96,7 @@ export default function StandingsPage() {
     teamTotals[p.team].weekendPts += (p.last_session_delta || 0)
     teamTotals[p.team].members.push(p.name)
   })
-  const teamSorted = Object.values(teamTotals).sort((a,b)=>b.pts-a.pts)
+  const teamSorted = Object.values(teamTotals).sort((a,b)=>b.pts-a.pts || a.team.localeCompare(b.team,'uk'))
 
   // Compute team rank change: current pts vs pts-before-last-weekend (pts - weekendPts)
   const teamPrevSorted = [...Object.values(teamTotals)]
@@ -233,13 +227,13 @@ export default function StandingsPage() {
       <div style={{marginBottom:14,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
         <select className="stage-select" value={stageTab} onChange={e=>setStageTab(e.target.value)}>
           <option value="">— Оберіть етап —</option>
-          {stages.filter(s => stagesWithCommit.has(s.id)).map(s=>(
+          {stages.filter(s => Number(s.sort_order) >= 10 && stagesWithCommit.has(s.id)).map(s=>(
             <option key={s.key} value={s.key}>{s.flag} {s.name}</option>
           ))}
         </select>
         {selectedStage && (
           <span style={{fontFamily:'Orbitron,sans-serif',fontSize:10,color:'var(--muted)'}}>
-            {selectedStage.flag} {selectedStage.name} — натисни заголовок для сортування
+            {selectedStage.flag} {selectedStage.name}
           </span>
         )}
       </div>
@@ -250,7 +244,7 @@ export default function StandingsPage() {
             <thead>
               <tr>
                 <th>Гравець</th>
-                <SortHdr col="qual"   label="КВАЛІФІКАЦІЯ" />
+                <SortHdr col="qual"   label="КВАЛІФІКАЦІЯ · СУМА" />
                 {selectedStage?.has_sprint && <SortHdr col="sprint" label="СПРИНТ" />}
                 <SortHdr col="race"  label="ГОНКА" />
                 <SortHdr col="total" label="СУМА" />
@@ -264,11 +258,6 @@ export default function StandingsPage() {
                     <td><span className="player-name-plain">{p.name}</span></td>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
-                      {sc.qualBonus > 0 && (
-                        <span style={{color:'var(--gold)',fontSize:10,marginLeft:5}} title="Бонусні бали за додаткових пілотів (новачок)">
-                          +{sc.qualBonus}
-                        </span>
-                      )}
                     </td>
                     {selectedStage?.has_sprint && (
                       <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.sprint?'var(--text)':'var(--muted)'}}>{sc.sprint ?? '—'}</td>
