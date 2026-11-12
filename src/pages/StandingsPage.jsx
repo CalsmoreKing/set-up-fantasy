@@ -3,6 +3,8 @@ import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
 import PodiumCalendar from '../components/PodiumCalendar'
+import { canonicalStoredScore } from '../lib/scoring'
+import { ARCHIVE_PREVIEW, archiveScoresForStage } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -34,61 +36,67 @@ export default function StandingsPage() {
     ]).then(([p, s, cs]) => {
       const stagesData = s.data || []
       const committedIds = new Set((cs.data||[]).map(x => x.stage_id))
+      ARCHIVE_PREVIEW.sessions.forEach(session => committedIds.add(session.stage_id))
       setPlayers(p.data||[])
       setStages(stagesData)
       setStagesWithCommit(committedIds)
-      // Default: last stage with any committed session
-      const withCommit = stagesData.filter(st => committedIds.has(st.id))
+      // Default to the latest live round; archives remain available in the selector.
+      const withCommit = stagesData.filter(st => Number(st.sort_order) >= 10 && committedIds.has(st.id))
       if (withCommit.length) setStageTab(withCommit[withCommit.length-1].key)
       setLoading(false)
     })
   }, [])
 
-  // Load scores for selected stage
+  // Show current-rule stages from live results; preserve archived stored scores before Austria.
   useEffect(() => {
     if (!stageTab || !stages.length) return
     const stage = stages.find(s => s.key === stageTab)
     if (!stage) return
 
-    supabase.from('sessions').select('id, type, committed, results')
+    supabase.from('sessions').select('id,type,committed,fl_pilot,ov_pilot')
       .eq('stage_id', stage.id)
-      .then(async ({ data: sessList }) => {
+      .then(async ({ data: sessList, error: sessionsError }) => {
+        if (sessionsError) throw sessionsError
+        if (Number(stage.sort_order) < 10 && !(sessList || []).length) {
+          setStageScores(archiveScoresForStage(stage.key))
+          return
+        }
         const scores = {}
-        const { calcQualScore } = await import('../lib/supabase')
-        for (const sess of (sessList||[])) {
-          if (!sess.committed) continue
-          if (sess.type === 'qual') {
-            const { data: qas } = await supabase.from('qual_assignments')
-              .select('player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3')
-              .eq('session_id', sess.id)
-            const resultsList = sess.results
-              ? Object.entries(sess.results).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
-              : []
-            ;(qas||[]).forEach(qa => {
-              if (!scores[qa.player_id]) scores[qa.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
-              // Primary pilot (slot 1) — the standard quali score, 0-6 range
-              const primary = calcQualScore(qa.pilot_1, qa.pred_pos_1, resultsList)
-              scores[qa.player_id].qual = primary.total
-              // Bonus pilots (slot 2, 3) — catch-up mechanic for new players
-              let bonus = 0
-              if (qa.pilot_2) bonus += calcQualScore(qa.pilot_2, qa.pred_pos_2, resultsList).total
-              if (qa.pilot_3) bonus += calcQualScore(qa.pilot_3, qa.pred_pos_3, resultsList).total
-              scores[qa.player_id].qualBonus = bonus
+        let bonusRows = []
+        const bonusResult = await supabase.from('stage_newcomer_bonuses').select('player_id,points').eq('stage_id',stage.id)
+        if (!bonusResult.error) bonusRows = bonusResult.data || []
+        else if (bonusResult.error.code !== 'PGRST205' && bonusResult.error.code !== '42P01') throw bonusResult.error
+        for (const session of (sessList || [])) {
+          if (!session.committed) continue
+          if (session.type === 'qual') {
+            const { data: assignments, error } = await supabase.from('qual_assignments')
+              .select('player_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .eq('session_id', session.id)
+            if (error) throw error
+            ;(assignments || []).forEach(assignment => {
+              if (!scores[assignment.player_id]) scores[assignment.player_id] = { qual:0, qualBonus:0, sprint:0, race:0, newcomerBonus:0 }
+              scores[assignment.player_id].qual += canonicalStoredScore(assignment)
             })
           } else {
-            const { data: fcs } = await supabase.from('forecasts')
-              .select('player_id, score').eq('session_id', sess.id)
-            ;(fcs||[]).forEach(fc => {
-              if (!scores[fc.player_id]) scores[fc.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
-              scores[fc.player_id][sess.type] = fc.score || 0
+            const { data: forecasts, error } = await supabase.from('forecasts')
+              .select('player_id,score,score_breakdown,predictions,fl_pick,ov_pick').eq('session_id', session.id)
+            if (error) throw error
+            ;(forecasts || []).forEach(forecast => {
+              if (!scores[forecast.player_id]) scores[forecast.player_id] = { qual:0, qualBonus:0, sprint:0, race:0, newcomerBonus:0 }
+              const score = canonicalStoredScore(forecast)
+              scores[forecast.player_id][session.type] = score
             })
           }
         }
+        for (const bonus of bonusRows) {
+          if (!scores[bonus.player_id]) scores[bonus.player_id] = {qual:0,qualBonus:0,sprint:0,race:0,newcomerBonus:0}
+          scores[bonus.player_id].newcomerBonus += Number(bonus.points)||0
+        }
         Object.keys(scores).forEach(pid => {
-          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
+          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0) + (scores[pid].newcomerBonus||0)
         })
         setStageScores(scores)
-      })
+      }).catch(error => console.error('Failed to load stage score details:', error))
   }, [stageTab, stages])
 
   const sorted = [...players].sort((a,b) => b.base_pts - a.base_pts)
@@ -100,7 +108,7 @@ export default function StandingsPage() {
     teamTotals[p.team].weekendPts += (p.last_session_delta || 0)
     teamTotals[p.team].members.push(p.name)
   })
-  const teamSorted = Object.values(teamTotals).sort((a,b)=>b.pts-a.pts)
+  const teamSorted = Object.values(teamTotals).sort((a,b)=>b.pts-a.pts || a.team.localeCompare(b.team,'uk'))
 
   // Compute team rank change: current pts vs pts-before-last-weekend (pts - weekendPts)
   const teamPrevSorted = [...Object.values(teamTotals)]
@@ -116,6 +124,7 @@ export default function StandingsPage() {
   })
 
   const selectedStage = stages.find(s => s.key === stageTab)
+  const selectedStageHasSprint = Boolean(selectedStage?.has_sprint || ARCHIVE_PREVIEW.sessions.some(session => session.stage_key === selectedStage?.key && session.type === 'sprint'))
 
   function toggleSort(col) {
     if (sortCol === col) setSortDir(d => d==='desc'?'asc':'desc')
@@ -234,7 +243,7 @@ export default function StandingsPage() {
         </select>
         {selectedStage && (
           <span style={{fontFamily:'Orbitron,sans-serif',fontSize:10,color:'var(--muted)'}}>
-            {selectedStage.flag} {selectedStage.name} — натисни заголовок для сортування
+            {selectedStage.flag} {selectedStage.name}
           </span>
         )}
       </div>
@@ -246,8 +255,9 @@ export default function StandingsPage() {
               <tr>
                 <th>Гравець</th>
                 <SortHdr col="qual"   label="КВАЛІФІКАЦІЯ" />
-                {selectedStage?.has_sprint && <SortHdr col="sprint" label="СПРИНТ" />}
+                {selectedStageHasSprint && <SortHdr col="sprint" label="СПРИНТ" />}
                 <SortHdr col="race"  label="ГОНКА" />
+                <th>БОНУС НОВАЧКА</th>
                 <SortHdr col="total" label="СУМА" />
               </tr>
             </thead>
@@ -259,16 +269,12 @@ export default function StandingsPage() {
                     <td><span className="player-name-plain">{p.name}</span></td>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
-                      {sc.qualBonus > 0 && (
-                        <span style={{color:'var(--gold)',fontSize:10,marginLeft:5}} title="Бонусні бали за додаткових пілотів (новачок)">
-                          +{sc.qualBonus}
-                        </span>
-                      )}
                     </td>
-                    {selectedStage?.has_sprint && (
+                    {selectedStageHasSprint && (
                       <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.sprint?'var(--text)':'var(--muted)'}}>{sc.sprint ?? '—'}</td>
                     )}
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.race?'var(--text)':'var(--muted)'}}>{sc.race ?? '—'}</td>
+                    <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.newcomerBonus?'var(--gold)':'var(--muted)'}}>{sc.newcomerBonus || '—'}</td>
                     <td><span className="score-total">{sc.total ?? '—'}</span></td>
                   </tr>
                 )

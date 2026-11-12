@@ -1,19 +1,24 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualScore, calcSprintScore, TEAM_META } from '../lib/supabase'
+import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
+import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments } from '../lib/roster'
+import { archiveSessionsForStage, archiveForecastsForSession, archiveQualifyingForSession, ARCHIVE_PREVIEW } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
 export default function MainPage() {
-  const { player: me, isAdmin } = useAuth()
+  const { player: me, isAdmin, user } = useAuth()
   const [stages,    setStages]    = useState([])
   const [players,   setPlayers]   = useState([])
   const [formData,  setFormData]  = useState({})
   const [sessions,  setSessions]  = useState({})
   const [forecasts, setForecasts] = useState({})
   const [qualAssign,setQualAssign]= useState({})
+  const [qualHistory, setQualHistory] = useState([])
+  const [stagePilotChanges, setStagePilotChanges] = useState([])
+  const stagePilotOptions = buildStagePilotPool(stagePilotChanges)
   const [stageKey,  setStageKey]  = useState('')
   const [sessionType, setSessionType] = useState('race')
   const [loading,   setLoading]   = useState(true)
@@ -29,7 +34,8 @@ export default function MainPage() {
       const playersData = p.data || []
       setStages(stagesData)
       setPlayers(playersData)
-      const firstOpen = stagesData.find(st => !st.is_locked)
+      const active = stagesData.filter(st => Number(st.sort_order) >= 10 && !st.is_archived)
+      const firstOpen = active.find(st => !st.is_locked) || active[0]
       if (firstOpen) {
         setStageKey(firstOpen.key)
       }
@@ -42,6 +48,27 @@ export default function MainPage() {
     if (!stageKey || !stages.length) return
     const stage = stages.find(s => s.key === stageKey)
     if (!stage) return
+    if (Number(stage.sort_order) < 10) {
+      setStagePilotChanges([])
+      supabase.from('sessions').select('*').eq('stage_id',stage.id).then(({data,error})=>{
+        if (error) { setCommitMsg(`Не вдалося завантажити сесії ${stage.name}: ${error.message}`); return }
+        if (data?.length) {
+          const map = Object.fromEntries(data.map(session=>[session.type,session]))
+          setSessions(map)
+          setSessionType(['race','sprint','qual'].find(type=>map[type]&&!map[type].committed)||'race')
+        } else {
+          const archiveMap = Object.fromEntries(archiveSessionsForStage(stage.key,stage.id).map(session=>[session.type,session]))
+          setSessions(archiveMap)
+          setSessionType(['race','sprint','qual'].find(type=>archiveMap[type])||'race')
+        }
+      })
+      return
+    }
+    supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true)
+      .order('created_at').then(({ data, error }) => {
+        if (error) { setStagePilotChanges([]); return }
+        setStagePilotChanges(data || [])
+      })
     supabase.from('sessions')
       .select('*')
       .eq('stage_id', stage.id)
@@ -64,6 +91,11 @@ export default function MainPage() {
   useEffect(() => {
     const session = sessions[sessionType]
     if (!session) return
+    if (session.archive_preview) {
+      setForecasts(Object.fromEntries(archiveForecastsForSession(session.id).map(row => [row.player_id, row])))
+      setQualAssign(Object.fromEntries(archiveQualifyingForSession(session.id).map(row => [row.player_id, row])))
+      return
+    }
     Promise.all([
       supabase.from('forecasts').select('*').eq('session_id', session.id),
       supabase.from('qual_assignments').select('*').eq('session_id', session.id),
@@ -75,8 +107,36 @@ export default function MainPage() {
     })
   }, [sessions, sessionType])
 
+  useEffect(() => {
+    const session = sessions[sessionType]
+    if (!session) return
+    if (session.archive_preview) { setQualHistory([]); return }
+    const stageOrder = stages.find(stage => stage.key === stageKey)?.sort_order
+    supabase.from('qual_assignments').select('id,session_id,player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))')
+      .then(({data}) => setQualHistory(priorQualAssignments(data, session.id, stageOrder)))
+  }, [sessions, sessionType, stages, stageKey])
+
+  const allQualAssignments = Object.fromEntries([
+    ...qualHistory.map((row,index) => [`history_${index}`, row]),
+    ...Object.entries(qualAssign),
+  ])
+  const qualSlotsByPlayer = Object.fromEntries(players.map(player => {
+    const used = new Set(USED_PILOTS[player.name] || [])
+    qualHistory.filter(row => row.player_id === player.id).forEach(row => {
+      for (const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if (pilot) used.add(pilot)
+    })
+    const available = stagePilotOptions.filter(pilot => !used.has(pilot)).length
+    return [player.id, qualifyingSlotsForStage(available, stages.find(stage => stage.key === stageKey)?.sort_order)]
+  }))
+
+  const navigationStages = stages.filter(stage => Number(stage.sort_order) < 10 || !stage.is_archived)
   const currentStage   = stages.find(s => s.key === stageKey)
   const currentSession = sessions[sessionType]
+  const currentStageIndex = navigationStages.findIndex(stage => stage.key === stageKey)
+  function moveStage(step) {
+    const nextStage = navigationStages[currentStageIndex + step]
+    if (nextStage) setStageKey(nextStage.key)
+  }
 
   // Deadline logic — session locks automatically when deadline_utc passes
   const [now, setNow] = useState(new Date())
@@ -121,25 +181,32 @@ export default function MainPage() {
   const countdown = getCountdown()
   const isDouble       = DOUBLE_STAGES.has(stageKey)
 
-  const resultsList = currentSession?.results
-    ? Object.entries(currentSession.results).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
-    : []
+  const normalizedResults = normalizeStageResults(currentSession?.results || {}, stagePilotChanges)
+  const resultsList = Object.entries(normalizedResults).sort(([a],[b]) => Number(a)-Number(b)).map(([,pilot]) => pilot)
+  const normalizedFlResult = normalizeStageDriver(currentSession?.fl_pilot || '', stagePilotChanges)
+  const normalizedOvResult = String(currentSession?.ov_pilot || '').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(), stagePilotChanges)).filter(Boolean).join(', ')
+  const effectiveSession = currentSession ? { ...currentSession, results:normalizedResults, fl_pilot:normalizedFlResult, ov_pilot:normalizedOvResult } : currentSession
 
   async function saveResults(results, fl, ov) {
-    if (!currentSession) return
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Це локальна копія без запису в базу. Спершу відновіть архівні сесії в Supabase.'); return }
     const update = { results }
     if (fl !== undefined) update.fl_pilot = fl
     if (ov !== undefined) update.ov_pilot = ov
-    const { data } = await supabase.from('sessions')
+    const { data, error } = await supabase.from('sessions')
       .update(update).eq('id', currentSession.id).select().single()
-    if (data) setSessions(prev => ({ ...prev, [sessionType]: data }))
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти результати: ${error.message}`); return }
+    if (data) {
+      setSessions(prev => ({ ...prev, [sessionType]: data }))
+      await supabase.from('audit_log').insert({ action:'save_results', actor:me?.name || user?.email || 'Адміністратор', details:{ stage:stageKey, stage_name:currentStage?.name, type:sessionType, session_id:currentSession.id, previous:{results:currentSession.results,fl_pilot:currentSession.fl_pilot,ov_pilot:currentSession.ov_pilot}, next:{results,fl_pilot:fl,ov_pilot:ov}, actor_name:me?.name || null, actor_email:user?.email || null, actor_user_id:user?.id || null } })
+      if (ov !== undefined) setCommitMsg('✓ Прорив збережено')
+    }
   }
 
   async function saveForecast(playerId, preds, fl, ov) {
-    if (!currentSession) return
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     const predsObj = {}
     preds.forEach((p, i) => { if (p) predsObj[i+1] = p })
-    const { data } = await supabase.from('forecasts').upsert({
+    const { data, error } = await supabase.from('forecasts').upsert({
       session_id: currentSession.id,
       player_id:  playerId,
       predictions: predsObj,
@@ -147,77 +214,93 @@ export default function MainPage() {
       ov_pick: ov || '',
       updated_at: new Date().toISOString(),
     }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти прогноз: ${error.message}`); return }
     if (data) setForecasts(prev => ({ ...prev, [playerId]: data }))
   }
 
   async function saveQualAssign(playerId, pilots, positions) {
-    if (!currentSession) return
-    const { data } = await supabase.from('qual_assignments').upsert({
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    const { data, error } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id, player_id: playerId,
       pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
       pred_pos_1: positions[0]||null, pred_pos_2: positions[1]||null, pred_pos_3: positions[2]||null,
     }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти пілота кваліфікації: ${error.message}`); return }
     if (data) setQualAssign(prev => ({ ...prev, [playerId]: data }))
   }
 
   // ── COMMIT INLINE ──
   async function handleCommit() {
-    if (!currentSession) return
+    if (!currentSession || currentSession.archive_preview) return
     if (!window.confirm(`Зарахувати бали за ${currentStage?.name} — ${sessionType.toUpperCase()}?\nЦе заблокує сесію назавжди.`)) return
     setCommitting(true)
     try {
-      const results   = Object.entries(currentSession.results||{}).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
-      const flResult  = currentSession.fl_pilot || ''
-      const ovResult  = currentSession.ov_pilot || ''
-      const { data: forecasts_ } = await supabase.from('forecasts').select('*, players(id,name,base_pts)').eq('session_id', currentSession.id)
-      const { data: qualData }   = await supabase.from('qual_assignments').select('*, players(id,name,base_pts)').eq('session_id', currentSession.id)
+      const normalized = normalizeStageResults(currentSession.results || {}, stagePilotChanges)
+      const results   = Object.entries(normalized).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
+      const flResult  = normalizeStageDriver(currentSession.fl_pilot || '', stagePilotChanges)
+      const ovResult  = String(currentSession.ov_pilot || '').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(), stagePilotChanges)).filter(Boolean).join(', ')
+      const forecastsResult = await supabase.from('forecasts').select('*, players(id,name,base_pts)').eq('session_id', currentSession.id)
+      const qualResult = await supabase.from('qual_assignments').select('*, players(id,name,base_pts)').eq('session_id', currentSession.id)
+      if (forecastsResult.error) throw forecastsResult.error
+      if (qualResult.error) throw qualResult.error
+      const forecasts_ = forecastsResult.data
+      const qualData = qualResult.data
 
-      const { data: beforeSnap } = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+      const beforeResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+      if (beforeResult.error) throw beforeResult.error
+      const beforeSnap = beforeResult.data
       const rankBefore = {}
       ;(beforeSnap||[]).forEach((p,i) => { rankBefore[p.id] = i+1 })
 
       const updates = []
+      const forecastScores = []
+      const qualScores = []
       const bdLog   = []
 
       if (sessionType === 'race') {
         for (const f of (forecasts_||[])) {
-          const preds = Array.from({length:10}, (_,i) => f.predictions?.[i+1]||'')
-          const { total, breakdown } = calcRaceScore(preds, f.fl_pick, f.ov_pick, results, flResult, ovResult)
-          updates.push({ id: f.players?.id, base_pts: (f.players?.base_pts||0)+total, delta: total })
+          const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
+          const { total, breakdown } = calcRaceScore(preds, normalizeStageDriver(f.fl_pick, stagePilotChanges), normalizeStageDriver(f.ov_pick, stagePilotChanges), results, flResult, ovResult, currentStage?.sort_order)
+          updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
+          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
           bdLog.push({ player: f.players?.name, score: total })
-          await supabase.from('forecasts').update({ score: total, score_breakdown: breakdown }).eq('id', f.id)
         }
       } else if (sessionType === 'qual') {
         for (const qa of (qualData||[])) {
-          let total = 0, breakdown = []
-          for (const [pilot, pos] of [[qa.pilot_1, qa.pred_pos_1],[qa.pilot_2, qa.pred_pos_2],[qa.pilot_3, qa.pred_pos_3]]) {
-            if (!pilot || !pos) continue
-            const r = calcQualScore(pilot, pos, results)
-            total += r.total; breakdown.push(...r.breakdown)
+          const normalized = {
+            ...qa,
+            pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
+            pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
+            pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
           }
-          updates.push({ id: qa.players?.id, base_pts: (qa.players?.base_pts||0)+total, delta: total })
-          bdLog.push({ player: qa.players?.name, score: total })
-          await supabase.from('qual_assignments').update({ score: total }).eq('id', qa.id)
+          const { total, breakdown } = calcQualAssignmentScore(normalized, results, currentStage?.sort_order)
+          updates.push({ id: qa.players?.id, delta: total-(Number(qa.score)||0) })
+          qualScores.push({ id:qa.id, score:total })
+          bdLog.push({ player: qa.players?.name, score: total, breakdown })
         }
       } else if (sessionType === 'sprint') {
         for (const f of (forecasts_||[])) {
-          const preds = Array.from({length:5}, (_,i) => f.predictions?.[i+1]||'')
-          const { total, breakdown } = calcSprintScore(preds, results)
-          updates.push({ id: f.players?.id, base_pts: (f.players?.base_pts||0)+total, delta: total })
+          const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+          const preds = Array.from({length:sprintSlots}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
+          const { total, breakdown } = calcSprintScore(preds, results, currentStage?.sort_order, normalizeStageDriver(f.fl_pick,stagePilotChanges), normalizedFlResult)
+          updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
+          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
           bdLog.push({ player: f.players?.name, score: total })
-          await supabase.from('forecasts').update({ score: total, score_breakdown: breakdown }).eq('id', f.id)
         }
       }
 
-      // Reset previous weekend deltas for everyone first, so stale values from
-      // a prior session don't linger on players who didn't forecast this time
-      await supabase.from('players').update({ last_session_delta: 0 }).neq('id', '00000000-0000-0000-0000-000000000000')
+      // One database transaction replaces scored rows, updates score deltas, and locks the session.
+      const { error: applyError } = await supabase.rpc('apply_session_scores', {
+        p_session_id: currentSession.id,
+        p_forecast_scores: forecastScores,
+        p_qual_scores: qualScores,
+        p_is_recalculation: Boolean(currentSession.committed),
+      })
+      if (applyError) throw applyError
 
-      for (const u of updates) {
-        if (u.id) await supabase.from('players').update({ base_pts: u.base_pts, last_session_delta: u.delta }).eq('id', u.id)
-      }
-
-      const { data: afterSnap } = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+      const afterResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
+      if (afterResult.error) throw afterResult.error
+      const afterSnap = afterResult.data
       const rankAfter = {}
       ;(afterSnap||[]).forEach((p,i) => { rankAfter[p.id] = i+1 })
       for (const u of updates) {
@@ -225,8 +308,9 @@ export default function MainPage() {
         await supabase.from('players').update({ last_rank_delta: before - after }).eq('id', u.id)
       }
 
-      await supabase.from('sessions').update({ is_locked:true, committed:true, committed_at:new Date().toISOString() }).eq('id', currentSession.id)
-      await supabase.from('audit_log').insert({ action:'commit_session', actor:'admin', details:{ stage:currentStage?.name, type:sessionType, scores:bdLog } })
+      const { error: lockError } = await supabase.from('sessions').update({ is_locked:true, committed:true, committed_at:new Date().toISOString() }).eq('id',currentSession.id)
+      if (lockError) throw lockError
+      await supabase.from('audit_log').insert({ action:'commit_session', actor:me?.name || user?.email || 'Адміністратор', details:{ stage:currentStage?.name, type:sessionType, scores:bdLog, actor_name:me?.name || null, actor_email:user?.email || null, actor_user_id:user?.id || null } })
 
       setSessions(prev => ({ ...prev, [sessionType]: { ...prev[sessionType], is_locked:true, committed:true } }))
       setCommitMsg(`✓ Зараховано! ${bdLog.map(b=>`${b.player}:+${b.score}`).join(' · ')}`)
@@ -244,7 +328,7 @@ export default function MainPage() {
     teamGroups[p.team].push(p)
   })
 
-  const availableSessions = [...(currentStage?.has_sprint ? ['sprint'] : []), 'qual', 'race']
+  const availableSessions = ['sprint','qual','race'].filter(type => Boolean(sessions[type]) || (type === 'sprint' && currentStage?.has_sprint))
 
   if (loading) return <main><div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2}}>ЗАВАНТАЖЕННЯ...</div></main>
 
@@ -252,11 +336,15 @@ export default function MainPage() {
     <main>
       {/* Stage + Session bar */}
       <div className="stage-bar">
+        <div className="stage-stepper" aria-label="Перемикання етапів">
+          <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
+          <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
+        </div>
         <select className="stage-select" value={stageKey} onChange={e=>setStageKey(e.target.value)}>
           <option value="">— Оберіть етап —</option>
-          {stages.map(s => (
+          {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
-              {s.flag} {s.name} {s.is_locked ? '🔒' : ''}
+              {s.flag} {s.name}
             </option>
           ))}
         </select>
@@ -267,7 +355,6 @@ export default function MainPage() {
             </button>
           ))}
         </div>
-        {isDouble && sessionType==='qual' && <span className="badge badge-double">×2 ПІЛОТИ</span>}
         {isLocked && !currentSession?.committed && <span className="badge badge-locked">🔒 ЗАБЛОКОВАНО</span>}
         {currentSession?.committed && <span className="badge badge-committed">✓ ЗАРАХОВАНО</span>}
         {countdown && (
@@ -287,6 +374,14 @@ export default function MainPage() {
         )}
       </div>
 
+      {currentSession?.archive_preview && (
+        <div className="archive-preview-banner" role="status">
+          <strong>ДАНІ ЩЕ НЕ ВІДНОВЛЕНО · {currentStage?.name}</strong>
+          <span>Це лише локальна копія прогнозів і результатів. Сесії ще не завантажені в Supabase, тому збереження та зарахування вимкнені до відновлення.</span>
+          {ARCHIVE_PREVIEW.results_need_final_review && <span className="archive-preview-warning">Результати ще потребують фінальної звірки перед імпортом.</span>}
+        </div>
+      )}
+
       {!stageKey && (
         <div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2,padding:'30px 0',textAlign:'center'}}>
           ОБЕРІТЬ ЕТАП
@@ -298,28 +393,28 @@ export default function MainPage() {
           {/* Results */}
           {sessionType === 'race' && (
             <DragResults
-              session={currentSession} isAdmin={isAdmin}
-              slotsCount={10} showSpecials podiumCount={5} title="Результати гонки (Топ-10)"
+              session={effectiveSession} isAdmin={isAdmin}
+              slotsCount={10} showSpecials podiumCount={5} title="Результати гонки (Топ-10)" driverOptions={stagePilotOptions}
               onUpdate={(results, fl, ov) => saveResults(results, fl, ov)}
             />
           )}
           {sessionType === 'qual' && (
             <DragResults
-              session={currentSession} isAdmin={isAdmin}
-              slotsCount={22} showSpecials={false} podiumCount={3} title="Результати кваліфікації"
+              session={effectiveSession} isAdmin={isAdmin}
+              slotsCount={22} showSpecials={false} podiumCount={3} title="Результати кваліфікації" driverOptions={stagePilotOptions}
               onUpdate={(results) => saveResults(results)}
             />
           )}
           {sessionType === 'sprint' && (
             <DragResults
-              session={currentSession} isAdmin={isAdmin}
-              slotsCount={5} showSpecials={false} podiumCount={3} isSprint title="Результати спринту (Топ-5)"
-              onUpdate={(results) => saveResults(results)}
+              session={effectiveSession} isAdmin={isAdmin}
+              slotsCount={Number(currentStage?.sort_order) < 10 ? 10 : 5} showSpecials={Number(currentStage?.sort_order) < 10} podiumCount={3} isSprint title={`Результати спринту (Топ-${Number(currentStage?.sort_order) < 10 ? 10 : 5})`} driverOptions={stagePilotOptions}
+              onUpdate={(results, fl, ov) => saveResults(results, fl, ov)}
             />
           )}
 
           {/* Commit button — only admin, only unlocked, only not yet committed */}
-          {isAdmin && !isLocked && currentSession && !currentSession.committed && (
+          {isAdmin && !currentSession?.archive_preview && !isLocked && currentSession && !currentSession.committed && (
             <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20,padding:'12px 16px',background:'rgba(225,6,0,.06)',border:'1px solid rgba(225,6,0,.2)',borderRadius:6}}>
               <button
                 className="btn btn-red"
@@ -329,9 +424,6 @@ export default function MainPage() {
               >
                 {committing ? '...' : '⚑ ЗАРАХУВАТИ БАЛИ'}
               </button>
-              <span style={{fontSize:12,color:'var(--muted)',lineHeight:1.5}}>
-                Бали поточної сесії будуть додані до таблиці. Сесія заблокується.
-              </span>
             </div>
           )}
 
@@ -348,7 +440,7 @@ export default function MainPage() {
               {sessionType==='qual'?'ПРОГНОЗИ — КВАЛІФІКАЦІЯ':sessionType==='sprint'?'ПРОГНОЗИ — СПРИНТ':'ПРОГНОЗИ — ГОНКА'}
             </div>
             {isAdmin && sessionType==='qual' && (
-              <button className="roulette-btn all" onClick={() => rollAllQual(players, qualAssign, stageKey, currentSession?.id, setQualAssign, isDouble)}>
+              <button className="roulette-btn all" onClick={() => rollAllQual(players, qualAssign, stageKey, currentSession?.id, setQualAssign, stagePilotOptions, currentStage?.sort_order, qualSlotsByPlayer)}>
                 🎲 РАНДОМАЙЗЕР ВСІМ
               </button>
             )}
@@ -366,19 +458,22 @@ export default function MainPage() {
               const fc = forecasts[p.id]
               const qa = qualAssign[p.id]
               if (sessionType === 'race' && fc) {
-                const preds = Array.from({length:10}, (_,i) => fc.predictions?.[i+1]||'')
-                const { total } = calcRaceScore(preds, fc.fl_pick, fc.ov_pick, resultsList,
-                  currentSession?.fl_pilot, currentSession?.ov_pilot)
+                const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(fc.predictions?.[i+1]||'', stagePilotChanges))
+                const { total } = calcRaceScore(preds, normalizeStageDriver(fc.fl_pick, stagePilotChanges), normalizeStageDriver(fc.ov_pick, stagePilotChanges), resultsList,
+                  normalizedFlResult, normalizedOvResult, currentStage?.sort_order)
                 liveScores[p.id] = total
               } else if (sessionType === 'qual' && qa) {
-                let tot = 0
-                for (const [pilot, pos] of [[qa.pilot_1,qa.pred_pos_1],[qa.pilot_2,qa.pred_pos_2],[qa.pilot_3,qa.pred_pos_3]]) {
-                  if (pilot && pos) { const r = calcQualScore(pilot, pos, resultsList); tot += r.total }
+                const normalizedAssignment = {
+                  ...qa,
+                  pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
+                  pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
+                  pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
                 }
-                liveScores[p.id] = tot
+                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, resultsList, currentStage?.sort_order).total
               } else if (sessionType === 'sprint' && fc) {
-                const preds = Array.from({length:5}, (_,i) => fc.predictions?.[i+1]||'')
-                const { total } = calcSprintScore(preds, resultsList)
+                const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+                const preds = Array.from({length:sprintSlots}, (_,i) => fc.predictions?.[i+1]||'')
+                const { total } = calcSprintScore(preds, resultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
                 liveScores[p.id] = total
               } else {
                 liveScores[p.id] = 0
@@ -419,14 +514,18 @@ export default function MainPage() {
                         forecast={canSeeForecast ? forecasts[p.id] : null}
                         qualAssign={canSeeForecast ? qualAssign[p.id] : null}
                         results={resultsList}
-                        flResult={currentSession?.fl_pilot}
-                        ovResult={currentSession?.ov_pilot}
+                        flResult={normalizedFlResult}
+                        ovResult={normalizedOvResult}
                         isMe={me?.id === p.id}
                         isAdmin={isAdmin}
                         isLocked={isLocked}
                         isDouble={isDouble}
+                        qualSlotCount={qualSlotsByPlayer[p.id] ?? (isDouble ? 2 : 1)}
                         stageKey={stageKey}
-                        allQualAssign={qualAssign}
+                        stageOrder={currentStage?.sort_order}
+                        allQualAssign={allQualAssignments}
+                        driverOptions={stagePilotOptions}
+                        pilotSubstitutions={stagePilotChanges}
                         forecastHidden={!canSeeForecast}
                         onSaveForecast={(preds, fl, ov) => saveForecast(p.id, preds, fl, ov)}
                         onSaveQual={(pilots, positions) => saveQualAssign(p.id, pilots, positions)}
@@ -447,144 +546,46 @@ export default function MainPage() {
   )
 }
 
-async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, isDouble) {
+async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, pilotPool = PILOTS, stageOrder, slotCounts = {}) {
   if (!sessionId) { alert('Спочатку оберіть сесію'); return }
-  const { USED_PILOTS, PILOTS, getStandardSlotCount, hasBonusSlot } = await import('../lib/supabase')
-
-  const standardCount = getStandardSlotCount(isDouble) // 1 or 2, same for everyone
-
-  // Load ALL qual assignments across ALL stages to know full pilot history
+  const { USED_PILOTS } = await import('../lib/supabase')
   const { data: allAssignData } = await supabase
     .from('qual_assignments')
-    .select('player_id, pilot_1, pilot_2, pilot_3')
-
-  const playerUsed = {}
-  players.forEach(p => {
-    playerUsed[p.id] = new Set(USED_PILOTS[p.name] || [])
+    .select('session_id, player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, sessions(stages(sort_order))')
+  const priorAssignments = priorQualAssignments(allAssignData, sessionId, stageOrder)
+  const usedByPlayer = Object.fromEntries(players.map(player => [player.id, new Set(USED_PILOTS[player.name] || [])]))
+  priorAssignments.forEach(row => {
+    const used = usedByPlayer[row.player_id]
+    if (used) for (const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if (pilot) used.add(pilot)
   })
-  allAssignData?.forEach(a => {
-    if (a.pilot_1 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_1)
-    if (a.pilot_2 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_2)
-    if (a.pilot_3 && playerUsed[a.player_id]) playerUsed[a.player_id].add(a.pilot_3)
-  })
-
-  const teammateOf = {}
-  players.forEach(p => {
-    const sibling = players.find(pp => pp.team === p.team && pp.id !== p.id)
-    if (sibling) teammateOf[p.id] = sibling.id
-  })
-
-  // ── STANDARD POOL: shared across everyone, team-protected ──
-  function assignStandardSlot() {
-    const available = {}
-    players.forEach(p => {
-      available[p.id] = PILOTS.filter(pilot => !playerUsed[p.id].has(pilot))
-    })
-    const assignment = {}
+  const assigned = Object.fromEntries(players.map(player => [player.id, []]))
+  const maxSlots = Math.min(3, Math.max(0, ...players.map(player => Number(slotCounts[player.id]) || 0)))
+  for (let slotIndex=0; slotIndex<maxSlots; slotIndex++) {
+    const candidates = [...players].filter(player => (Number(slotCounts[player.id]) || 0) > slotIndex)
+      .sort(() => Math.random() - .5)
     const usedThisSlot = new Set()
-    const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
-
-    for (const player of shuffledPlayers) {
-      if (assignment[player.id] !== undefined) continue
-      const teammateId = teammateOf[player.id]
-      const teammate = teammateId ? players.find(pp => pp.id === teammateId) : null
-
-      const pool1 = available[player.id].filter(p => !usedThisSlot.has(p))
-      const finalPool1 = pool1.length > 0 ? pool1 : available[player.id]
-      const pilot1 = finalPool1.length ? finalPool1[Math.floor(Math.random()*finalPool1.length)] : ''
-      if (pilot1) { assignment[player.id] = pilot1; usedThisSlot.add(pilot1); playerUsed[player.id].add(pilot1) }
-      else assignment[player.id] = ''
-
-      if (teammate && assignment[teammate.id] === undefined) {
-        const pool2 = available[teammate.id].filter(p => !usedThisSlot.has(p) && p !== pilot1)
-        const fallback2 = available[teammate.id].filter(p => p !== pilot1)
-        const finalPool2 = pool2.length > 0 ? pool2 : (fallback2.length > 0 ? fallback2 : available[teammate.id].filter(p=>p!==pilot1))
-        const pilot2 = finalPool2.length ? finalPool2[Math.floor(Math.random()*finalPool2.length)] : ''
-        if (pilot2) { assignment[teammate.id] = pilot2; usedThisSlot.add(pilot2); playerUsed[teammate.id].add(pilot2) }
-        else assignment[teammate.id] = ''
-      }
-    }
-    return assignment
-  }
-
-  const standardSlots = []
-  for (let i = 0; i < standardCount; i++) standardSlots.push(assignStandardSlot())
-
-  // ── BONUS POOL: fully independent — its own copy of playerUsed history,
-  // never touches or is touched by the standard pool assignments above.
-  // Only guarantees: unique within player's own history, and never same
-  // pilot as own teammate's bonus pilot this round. ──
-  const bonusPlayers = players.filter(p => hasBonusSlot(p.name, stageKey))
-  const bonusAssignment = {}
-  if (bonusPlayers.length) {
-    const bonusUsed = {}
-    bonusPlayers.forEach(p => { bonusUsed[p.id] = new Set(USED_PILOTS[p.name] || []) })
-    allAssignData?.forEach(a => {
-      if (bonusUsed[a.player_id]) {
-        if (a.pilot_1) bonusUsed[a.player_id].add(a.pilot_1)
-        if (a.pilot_2) bonusUsed[a.player_id].add(a.pilot_2)
-        if (a.pilot_3) bonusUsed[a.player_id].add(a.pilot_3)
-      }
-    })
-    // Also exclude what was just assigned in the standard pool this round
-    standardSlots.forEach(slot => {
-      bonusPlayers.forEach(p => { if (slot[p.id] && bonusUsed[p.id]) bonusUsed[p.id].add(slot[p.id]) })
-    })
-
-    const usedThisBonusRound = new Set()
-    const shuffledBonus = [...bonusPlayers].sort(() => Math.random() - 0.5)
-    for (const player of shuffledBonus) {
-      if (bonusAssignment[player.id] !== undefined) continue
-      const teammateId = teammateOf[player.id]
-      const teammate = teammateId ? bonusPlayers.find(pp => pp.id === teammateId) : null
-
-      const pool1 = PILOTS.filter(p => !bonusUsed[player.id].has(p) && !usedThisBonusRound.has(p))
-      const fallback1 = PILOTS.filter(p => !bonusUsed[player.id].has(p))
-      const finalPool1 = pool1.length > 0 ? pool1 : (fallback1.length > 0 ? fallback1 : PILOTS)
-      const pilot1 = finalPool1.length ? finalPool1[Math.floor(Math.random()*finalPool1.length)] : ''
-      if (pilot1) { bonusAssignment[player.id] = pilot1; usedThisBonusRound.add(pilot1); bonusUsed[player.id].add(pilot1) }
-      else bonusAssignment[player.id] = ''
-
-      if (teammate && bonusAssignment[teammate.id] === undefined) {
-        const pool2 = PILOTS.filter(p => !bonusUsed[teammate.id].has(p) && !usedThisBonusRound.has(p) && p !== pilot1)
-        const fallback2 = PILOTS.filter(p => !bonusUsed[teammate.id].has(p) && p !== pilot1)
-        const finalPool2 = pool2.length > 0 ? pool2 : (fallback2.length > 0 ? fallback2 : PILOTS.filter(p=>p!==pilot1))
-        const pilot2 = finalPool2.length ? finalPool2[Math.floor(Math.random()*finalPool2.length)] : ''
-        if (pilot2) { bonusAssignment[teammate.id] = pilot2; usedThisBonusRound.add(pilot2); bonusUsed[teammate.id].add(pilot2) }
-        else bonusAssignment[teammate.id] = ''
-      }
+    for (const player of candidates) {
+      const already = usedByPlayer[player.id]
+      const available = pilotPool.filter(pilot => !already.has(pilot) && !usedThisSlot.has(pilot))
+      const fallback = pilotPool.filter(pilot => !already.has(pilot))
+      const pool = available.length ? available : fallback
+      const pilot = pool.length ? pool[Math.floor(Math.random()*pool.length)] : ''
+      assigned[player.id][slotIndex] = pilot
+      if (pilot) { already.add(pilot); usedThisSlot.add(pilot) }
     }
   }
-
-  // ── Combine: standard slots fill pilot_1/pilot_2, bonus fills the next free slot ──
-  const updates = players.map(p => {
-    const myBonus = bonusAssignment[p.id] || ''
-    const pilots = []
-    for (let i = 0; i < standardCount; i++) pilots.push(standardSlots[i]?.[p.id] || '')
-    if (myBonus) pilots.push(myBonus)
+  const updates = players.map(player => {
+    const pilots = assigned[player.id] || []
+    const planned = Math.max(0,Math.min(3,Number(slotCounts[player.id])||0))
+    const merged = [0,1,2].map(index=>index<planned?(pilots[index]||''):'')
     return {
-      session_id: sessionId,
-      player_id: p.id,
-      pilot_1: pilots[0] || '',
-      pilot_2: pilots[1] || '',
-      pilot_3: pilots[2] || '',
-      pred_pos_1: null, pred_pos_2: null, pred_pos_3: null,
+      session_id:sessionId, player_id:player.id,
+      pilot_1:merged[0], pilot_2:merged[1], pilot_3:merged[2],
+      pred_pos_1:null, pred_pos_2:null, pred_pos_3:null,
     }
   })
-
-  const { data } = await supabase
-    .from('qual_assignments')
-    .upsert(updates, { onConflict: 'session_id,player_id' })
-    .select()
-
-  if (data) {
-    const qm = {}
-    data.forEach(r => { qm[r.player_id] = r })
-    setQualAssign(qm)
-  }
-
-  await supabase.from('audit_log').insert({
-    action: 'roll_all_qual', actor: 'admin',
-    details: { session_id: sessionId, stage: stageKey }
-  })
+  const { data, error } = await supabase.from('qual_assignments').upsert(updates,{onConflict:'session_id,player_id'}).select()
+  if (error) { alert(error.message); return }
+  if (data) setQualAssign(Object.fromEntries(data.map(row=>[row.player_id,row])))
+  await supabase.from('audit_log').insert({ action:'bulk_qual_forecast', details:{ stage:stageKey, session_id:sessionId, players:players.length } })
 }

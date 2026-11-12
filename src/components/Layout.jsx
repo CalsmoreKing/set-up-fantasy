@@ -12,6 +12,7 @@ export default function Layout() {
   const isMain   = loc.pathname === '/'
   const isTable  = loc.pathname === '/table'
   const isRules  = loc.pathname === '/rules'
+  const isProfile = loc.pathname === '/profile'
   const isAdminP = loc.pathname === '/admin'
 
   return (
@@ -33,7 +34,8 @@ export default function Layout() {
         <nav className="header-nav">
           <button className={`nav-btn${isMain?' active':''}`}  onClick={()=>nav('/')}>ПРОГНОЗИ</button>
           <button className={`nav-btn${isTable?' active':''}`} onClick={()=>nav('/table')}>ТАБЛИЦЯ</button>
-          <button className={`nav-btn${isRules?' active':''}`} onClick={()=>nav('/rules')}>ПРАВИЛА</button>
+          <button className={`nav-btn${isRules?' active':''}`}   onClick={()=>nav('/rules')}>ПРАВИЛА</button>
+          <button className={`nav-btn${isProfile?' active':''}`} onClick={()=>nav('/profile')}>ПРОФІЛЬ</button>
           {isAdmin && <button className={`nav-btn${isAdminP?' active':''}`} onClick={()=>nav('/admin')}>АДМІН</button>}
           {isAdmin && (
             <button className={`nav-btn${bulkOpen?' active':''}`} onClick={()=>setBulkOpen(true)}>
@@ -56,6 +58,9 @@ export default function Layout() {
         </button>
         <button className={`bottom-nav-btn${isRules?' active':''}`} onClick={()=>nav('/rules')}>
           <span className="icon">📖</span>ПРАВИЛА
+        </button>
+        <button className={`bottom-nav-btn${isProfile?' active':''}`} onClick={()=>nav('/profile')}>
+          <span className="icon">👤</span>ПРОФІЛЬ
         </button>
         {isAdmin && (
           <button className="bottom-nav-btn" onClick={()=>setBulkOpen(true)}>

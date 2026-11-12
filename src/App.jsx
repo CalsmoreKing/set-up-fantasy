@@ -6,6 +6,7 @@ import MainPage      from './pages/MainPage'
 import StandingsPage from './pages/StandingsPage'
 import AdminPage     from './pages/AdminPage'
 import RulesPage     from './pages/RulesPage'
+import ProfilePage   from './pages/ProfilePage'
 import Layout        from './components/Layout'
 
 function RequireAuth({ children }) {
@@ -30,6 +31,7 @@ export default function App() {
         <Route index          element={<MainPage />} />
         <Route path="table"   element={<StandingsPage />} />
         <Route path="rules"   element={<RulesPage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="admin"   element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

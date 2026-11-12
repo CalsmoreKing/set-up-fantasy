@@ -1,179 +1,82 @@
-import { useAuth } from '../contexts/AuthContext'
+const cell = { padding:'9px 10px', borderBottom:'1px solid rgba(255,255,255,.06)', fontSize:12, lineHeight:1.55 }
+const gold = { ...cell, color:'var(--gold)', fontFamily:'Orbitron,sans-serif', fontWeight:700 }
+
+function RuleTable({ headers, rows }) {
+  return <div style={{overflowX:'auto'}}><table className="rules-table"><thead><tr>{headers.map(header=><th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row,index)=><tr key={index}>{row.map((value,col)=><td key={col} style={col===row.length-1 && row.length>1 ? gold : cell}>{value}</td>)}</tr>)}</tbody></table></div>
+}
+
+function RulesPeriod({ legacy }) {
+  const era = legacy ? 'АВСТРАЛІЯ—БАРСЕЛОНА' : 'АВСТРІЯ—ОАЕ'
+  return <details className="rules-period" open={!legacy}>
+    <summary><span>{era}</span><small>{legacy ? 'Архівні етапи · окремі історичні правила' : 'Поточні правила сезону'}</small></summary>
+    <div className="rules-period-body">
+      <section className="rules-section">
+        <h3>Загальні правила</h3>
+        <p>Перед сесією подай прогноз до її закриття. Після внесення реального результату система рахує бали за правилами цього періоду. Результат Гран-прі — сума балів кваліфікації, спринту (якщо він є) та гонки. Бали учасників також додаються до командного заліку.</p>
+        <p className="rules-note">Бонус новачка нараховується лише за гонку ГП, який гравець пропустив: він дорівнює найменшому рахунку за гонку серед учасників із поданим прогнозом. Бали кваліфікації та спринту не враховуються. Бонус перераховується разом із ГП, якщо новачок не подав прогноз на гонку.</p>
+        <p className="rules-note">Прогнози, відновлені з архіву, мають бути звірені перед остаточним зарахуванням. Відсутній прогноз не вигадується.</p>
+      </section>
+
+      <section className="rules-section">
+        <h3>Гонка</h3>
+        {legacy ? <>
+          <p>Прогнозуються 10 позицій. За точне місце — P1: 10 балів, P2: 9, …, P10: 1. Похибка на одну позицію — 1 бал; похибка на дві чи більше — 0.</p>
+          <RuleTable headers={['Бонус','Бали']} rows={[
+            ['Правильно вгаданий переможець','+1'],
+            ['Точний склад Топ-3, у будь-якому порядку','+4'],
+            ['Пілот із найшвидшим колом','+1'],
+          ]}/>
+        </> : <>
+          <p>Прогнозуються перші 10 місць. Бали за позицію даються лише коли пілот справді фінішував у Топ-10. Склад Топ-3 і Топ-5 перевіряється незалежно від порядку; обидва бонуси можна отримати одночасно.</p>
+          <RuleTable headers={['Похибка','Прогноз P1–P5','Прогноз P6–P10']} rows={[
+            ['Точне місце','5','6'],['±1 позиція','2','3'],['±2 позиції','1','2'],['±3 позиції','0','1'],['4+ позиції','0','0'],
+          ]}/>
+          <RuleTable headers={['Бонус','Бали']} rows={[
+            ['Швидке коло','+2'],['Прорив — вгаданий пілот із найбільшим прогресом від старту','+4'],
+            ['Склад Топ-3 у будь-якому порядку','+2'],['Склад Топ-5 у будь-якому порядку','+2'],
+          ]}/>
+        </>}
+      </section>
+
+      <section className="rules-section">
+        <h3>Кваліфікація</h3>
+        {legacy ? <>
+          <p>До Канади включно в архіві прогнозувався лише поул-сітер. Правильно вгаданий пілот на поулі дає 1 бал; інші місця не рахуються.</p>
+        </> : <>
+          <p><strong>До Канади:</strong> лише прогноз поул-сітера за 1 бал — це правило стосується архівної частини сезону.</p>
+          <p><strong>Від Канади:</strong> кожному гравцеві випадково призначається пілот, і гравець прогнозує його місце. Один пілот не повторюється для того самого гравця. За кожен призначений пілот рахуються окремо: точне місце — 6, похибка ±1 — 3, ±2 — 1, більша — 0; сума складається.</p>
+          <p>У трьох останніх кваліфікаціях система розподіляє слоти персонально за кількістю невикористаних пілотів: базовий план — 1 слот у Лас-Вегасі, 2 у Катарі та 2 в ОАЕ. Додаткові слоти розподіляються по черзі, не більше 3 на етап. Наприклад: 5 доступних → 1/2/2; 6 → 2/2/2; 7 → 2/3/2; 9 або більше → до 3/3/3. Повторно призначати тому самому гравцеві вже використаного пілота не можна.</p>
+        </>}
+      </section>
+
+      <section className="rules-section">
+        <h3>Спринт</h3>
+        {legacy ? <>
+          <p>Архівний спринт прогнозувався на 10 місць і рахувався за тією самою таблицею точності, що й архівна гонка.</p>
+          <RuleTable headers={['Додатковий бонус','Бали']} rows={[
+            ['Вгаданий переможець спринту','+1'],['Точний склад Топ-3 у будь-якому порядку','+4'],['Пілот із найшвидшим колом','+1'],
+          ]}/>
+        </> : <>
+          <p>Прогнозуються перші 5 місць; бали рахуються лише за пілотів, які фінішували в Топ-5. Спеціальних бонусів за переможця, Топ-3, швидке коло чи прорив у спринті немає.</p>
+          <RuleTable headers={['Похибка','Бали']} rows={[
+            ['Точне місце','3'],['±1 позиція','2'],['±2 позиції','1'],['3+ позиції','0'],
+          ]}/>
+        </>}
+      </section>
+    </div>
+  </details>
+}
 
 export default function RulesPage() {
-  return (
-    <main>
-      <div className="section-label">Правила Set-Up Fantasy</div>
-
-      {/* ЗАГАЛЬНЕ */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>ЯК ЦЕ ПРАЦЮЄ</div>
-        <p style={{fontSize:13,lineHeight:1.8,color:'var(--muted)'}}>
-          Перед кожним заїздом (Кваліфікація, Спринт, Гонка) ти вписуєш свій прогноз —
-          хто фінішує на яких позиціях. Після реального результату система автоматично
-          рахує твої бали. Чим точніший прогноз — тим більше балів.
-          Наприкінці сезону перемагає гравець з найбільшою кількістю балів.
-        </p>
-      </div>
-
-      {/* ГОНКА */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>🏁 ГОНКА — ПРОГНОЗ ТОП-10</div>
-        <table className="rules-table">
-          <thead>
-            <tr>
-              <th>Точність прогнозу</th>
-              <th>Позиції 1–5</th>
-              <th>Позиції 6–10</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>Точне місце</td><td style={{color:'var(--gold)',fontFamily:'Orbitron,sans-serif'}}>5</td><td style={{color:'var(--gold)',fontFamily:'Orbitron,sans-serif'}}>6</td></tr>
-            <tr><td>Похибка ±1 позиція</td><td style={{fontFamily:'Orbitron,sans-serif'}}>2</td><td style={{fontFamily:'Orbitron,sans-serif'}}>3</td></tr>
-            <tr><td>Похибка ±2 позиції</td><td style={{fontFamily:'Orbitron,sans-serif'}}>1</td><td style={{fontFamily:'Orbitron,sans-serif'}}>2</td></tr>
-            <tr><td>Похибка ±3 позиції</td><td style={{color:'var(--muted)'}}>0</td><td style={{fontFamily:'Orbitron,sans-serif'}}>1</td></tr>
-            <tr><td>Похибка 4+ позицій</td><td style={{color:'var(--muted)'}}>0</td><td style={{color:'var(--muted)'}}>0</td></tr>
-          </tbody>
-        </table>
-
-        <div style={{marginTop:16,fontFamily:'Orbitron,sans-serif',fontSize:10,color:'var(--red)',letterSpacing:2,marginBottom:8}}>БОНУСИ</div>
-        <table className="rules-table">
-          <thead>
-            <tr><th>Умова</th><th>Бали</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>⚡ Швидке коло</strong> — вгадав пілота з найкращим часом кола</td>
-              <td style={{fontFamily:'Orbitron,sans-serif',color:'var(--gold)'}}>+2</td>
-            </tr>
-            <tr>
-              <td><strong>🚀 Прорив</strong> — вгадав пілота, який відіграв найбільше позицій відносно стартового місця</td>
-              <td style={{fontFamily:'Orbitron,sans-serif',color:'var(--gold)'}}>+4</td>
-            </tr>
-            <tr>
-              <td><strong>🏆 Склад Топ-3</strong> — всі три обрані пілоти фінішували на подіумі (незалежно від порядку)</td>
-              <td style={{fontFamily:'Orbitron,sans-serif',color:'var(--gold)'}}>+2</td>
-            </tr>
-            <tr>
-              <td><strong>🏆 Склад Топ-5</strong> — всі п'ять обраних пілотів фінішували в першій п'ятірці (незалежно від порядку)</td>
-              <td style={{fontFamily:'Orbitron,sans-serif',color:'var(--gold)'}}>+2</td>
-            </tr>
-          </tbody>
-        </table>
-        <div className="rules-note" style={{marginBottom:10}}>
-          <strong>Бонуси Топ-3 і Топ-5 сумуються.</strong> Якщо вгадав склад обох — отримуєш +4 бонусних балів зверху до балів за позиції.
-        </div>
-        <div className="rules-note" style={{marginBottom:10}}>
-          <strong>Важливо:</strong> бали за прогноз нараховуються <strong style={{color:'var(--text)'}}>лише якщо реальне фінішне місце пілота входить у Топ-10</strong>.
-          Якщо ти поставив пілота на P8, а він фінішував P11 — бали не нараховуються навіть якщо похибка ±1.
-          Тому реальні результати фіксуються лише для Топ-10.
-        </div>
-        <div className="rules-note">
-          <strong>Похибка не поширюється за межі Топ-10.</strong> Прогноз P10 + реальне P10 = +6. Прогноз P9 + реальне P10 = +3 (±1). Але прогноз P10 + реальне P11 = 0 балів.
-        </div>
-      </div>
-
-      {/* КВАЛІФІКАЦІЯ */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>⏱️ КВАЛІФІКАЦІЯ</div>
-        <p style={{fontSize:13,lineHeight:1.8,color:'var(--muted)',marginBottom:12}}>
-          Перед кваліфікацією кожен гравець отримує <strong style={{color:'var(--text)'}}>одного випадкового пілота</strong> через рулетку.
-          Кожен пілот може випасти конкретному гравцю лише <strong style={{color:'var(--text)'}}>один раз за весь сезон</strong>.
-          Твоє завдання — вгадати, яке місце цей пілот посяде в кваліфікації.
-        </p>
-        <table className="rules-table">
-          <thead>
-            <tr><th>Точність прогнозу</th><th>Бали</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Точне місце</td><td style={{color:'var(--gold)',fontFamily:'Orbitron,sans-serif'}}>6</td></tr>
-            <tr><td>Похибка ±1 позиція</td><td style={{fontFamily:'Orbitron,sans-serif'}}>3</td></tr>
-            <tr><td>Похибка ±2 позиції</td><td style={{fontFamily:'Orbitron,sans-serif'}}>1</td></tr>
-            <tr><td>Похибка 3+ позицій</td><td style={{color:'var(--muted)'}}>0</td></tr>
-          </tbody>
-        </table>
-        <div className="rules-note">
-          <strong>Подвійні кваліфікації</strong> — на останніх 3 етапах сезону (Бразилія, Катар, ОАЕ)
-          кожен гравець отримує <strong style={{color:'var(--text)'}}>двох пілотів</strong> замість одного.
-          Бали рахуються за кожного окремо і сумуються.
-          <br/><br/>
-          <strong style={{color:'var(--muted)'}}>Чому саме 3?</strong> У сезоні залишилось 15 кваліфікацій,
-          і кожен гравець має в середньому 18 ще не задіяних пілотів. При 12 одиночних + 3 подвійних
-          кожен отримає рівно 18 різних пілотів — по одному на кожного, якого ще не мав.
-          Андрій, Кітасу і Миколапка (у них по 19 вільних) отримають додаткового пілота в одному з подвійних етапів.
-        </div>
-      </div>
-
-      {/* СПРИНТ */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>💨 СПРИНТ — ПРОГНОЗ ТОП-5</div>
-        <p style={{fontSize:13,lineHeight:1.8,color:'var(--muted)',marginBottom:12}}>
-          Спринт є лише на 7 етапах: <strong style={{color:'var(--text)'}}>Британія, Бельгія, Нідерланди, Сінгапур, США, Бразилія, Катар</strong>.
-          Прогнозуєш перші 5 місць. Реальні результати фіксуються для Топ-5.
-          <br/><br/>
-          <strong style={{color:'var(--text)'}}>Бали нараховуються лише якщо пілот фінішував у Топ-5.</strong>
-          Якщо він прийшов 6-м — 0 балів навіть якщо ти поставив його на P5 (похибка 1).
-        </p>
-        <table className="rules-table">
-          <thead>
-            <tr><th>Точність прогнозу</th><th>Бали</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Точне місце</td><td style={{color:'var(--gold)',fontFamily:'Orbitron,sans-serif'}}>3</td></tr>
-            <tr><td>Похибка ±1 позиція</td><td style={{fontFamily:'Orbitron,sans-serif'}}>2</td></tr>
-            <tr><td>Похибка ±2 позиції</td><td style={{fontFamily:'Orbitron,sans-serif'}}>1</td></tr>
-            <tr><td>Похибка 3+ позицій</td><td style={{color:'var(--muted)'}}>0</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* КОМАНДИ */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>🏎️ КОМАНДНИЙ ЗАЛІК</div>
-        <p style={{fontSize:13,lineHeight:1.8,color:'var(--muted)',marginBottom:12}}>
-          Кожен гравець представляє одну з команд. Бали двох гравців однієї команди сумуються
-          в командному заліку. Перемагає команда з найбільшою сумою балів.
-        </p>
-        <table className="rules-table">
-          <thead><tr><th>Команда</th><th>Гравці</th></tr></thead>
-          <tbody>
-            {[
-              ['Макларен',            '#FF8000', 'Ярослав · Мія'],
-              ['Мерседес',             '#00D2BE', 'Іванна · Марго'],
-              ['Феррарі',              '#E8002D', 'Іван · Ігор'],
-              ['Альпін',               '#0090FF', 'Андрій · Валентин'],
-              ['Ред Булл',             '#3671C6', 'Нептун · Хонда'],
-              ['Ауді',                 '#888888', 'Чак · Калсмор'],
-              ['Астон Мартін',         '#358C75', 'Ярік · Анастасія'],
-              ['Альфа Ромео',          '#C92D4B', 'Софія · Стас'],
-              ['Ред Булл Рейсінг',     '#1E3A8A', 'Кітасу · Миколапка'],
-            ].map(([team, color, players]) => (
-              <tr key={team}>
-                <td><span style={{color,fontWeight:600}}>{team}</span></td>
-                <td style={{color:'var(--muted)'}}>{players}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ЗАГАЛЬНІ ПРИМІТКИ */}
-      <div className="rules-section">
-        <div style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:'var(--red)',letterSpacing:2,marginBottom:10}}>📌 ВАЖЛИВО</div>
-        <div className="rules-note" style={{marginBottom:10}}>
-          <strong>Прогноз не можна змінити після закриття сесії.</strong> Після того як адмін заблокує
-          сесію (зазвичай безпосередньо перед заїздом) — прогноз зафіксований.
-        </div>
-        <div className="rules-note" style={{marginBottom:10}}>
-          <strong>Кожен пілот кваліфікації — унікальний для тебе.</strong> Система пам'ятає всіх
-          пілотів, які вже випадали тобі, і більше їх не призначає.
-        </div>
-        <div className="rules-note">
-          <strong>Бали зараховуються після кожного заїзду.</strong> Адмін вводить реальні результати
-          і натискає «Зарахувати» — бали автоматично додаються до твого рахунку. Переглянути
-          деталі можна у вкладці «Таблиця».
-        </div>
-      </div>
-    </main>
-  )
+  return <main className="rules-page">
+    <div className="section-label">Правила Set-Up Fantasy</div>
+    <p className="rules-intro">Правила змінювалися протягом сезону, тому архівні й поточні етапи мають окремі розділи. Розгорни потрібний період.</p>
+    <RulesPeriod legacy />
+    <RulesPeriod legacy={false} />
+    <section className="rules-section">
+      <h3>Залік команд</h3>
+      <p>Кожен учасник представляє команду. Загальний рахунок команди — сума балів її гравців. Подивитися поточні суми можна на сторінці турнірної таблиці.</p>
+      <div className="rules-note">Прогноз не можна змінити після закриття сесії. Бали зараховуються після введення реальних результатів адміністратором.</div>
+    </section>
+  </main>
 }

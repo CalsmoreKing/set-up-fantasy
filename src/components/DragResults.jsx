@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { PILOTS } from '../lib/supabase'
+import { parseOvertakeWinners } from '../lib/scoring'
 
 export default function DragResults({
   session, isAdmin, onUpdate,
   slotsCount = 22, showSpecials = false,
-  title, podiumCount = 3, isSprint = false
+  title, podiumCount = 3, isSprint = false, driverOptions = PILOTS
 }) {
   const initSlots = () => Array.from({length:slotsCount}, (_,i) => (session?.results||{})[i+1] || '')
   const [localSlots, setLocalSlots] = useState(initSlots)
@@ -14,6 +15,7 @@ export default function DragResults({
   const [dragFrom,  setDragFrom]    = useState(null)
   const [dragOver,  setDragOver]    = useState(null)
   const [selPilot,  setSelPilot]    = useState(null)
+  const [ovOpen, setOvOpen] = useState(false)
 
   useEffect(() => {
     setLocalSlots(Array.from({length:slotsCount}, (_,i) => (session?.results||{})[i+1] || ''))
@@ -25,6 +27,18 @@ export default function DragResults({
     const res = {}
     newSlots.forEach((p,i) => { if (p) res[i+1] = p })
     onUpdate(res, newFl ?? localFl, newOv ?? localOv)
+  }
+
+  function toggleOvertakeWinner(pilot, checked) {
+    const winners = new Set(parseOvertakeWinners(localOv))
+    if (checked) winners.add(pilot)
+    else winners.delete(pilot)
+    setLocalOv([...winners].join(', '))
+  }
+
+  function applyOvertakeWinners() {
+    save(localSlots, localFl, localOv)
+    setOvOpen(false)
   }
 
   function dropOnSlot(toIdx) {
@@ -108,10 +122,10 @@ export default function DragResults({
             )}
           </div>
         )}
-        {showSpecials && (session?.fl_pilot || session?.ov_pilot) && (
+        {showSpecials && (session?.fl_pilot || (!isSprint && session?.ov_pilot)) && (
           <div className="specials-row">
             <div className="special-result"><span className="special-result-label">⚡ ШВИДКЕ КОЛО</span><span>{session.fl_pilot||'—'}</span></div>
-            <div className="special-result"><span className="special-result-label">🚀 ПРОРИВ</span><span>{session.ov_pilot||'—'}</span></div>
+            {!isSprint && <div className="special-result"><span className="special-result-label">🚀 ПРОРИВ</span><span>{parseOvertakeWinners(session.ov_pilot).join(' / ')||'—'}</span></div>}
           </div>
         )}
         <div className="divider" />
@@ -125,7 +139,7 @@ export default function DragResults({
       <div className="section-label">{title} — перетягніть або торкніться</div>
 
       <div className="pilot-pool" onDragOver={e=>e.preventDefault()} onDrop={dropOnPool}>
-        {PILOTS.map(p => (
+        {driverOptions.map(p => (
           <div key={p}
             className={`pilot-chip${used.has(p)?' used':''}${selPilot===p?' chip-selected':''}`}
             draggable={!used.has(p)}
@@ -187,15 +201,23 @@ export default function DragResults({
           <div className="special-result">
             <span className="special-result-label">⚡ ШВИДКЕ КОЛО</span>
             <select className="base-select" value={localFl} onChange={e=>{setLocalFl(e.target.value);save(localSlots,e.target.value,localOv)}}>
-              <option value="">—</option>{PILOTS.map(p=><option key={p} value={p}>{p}</option>)}
+              <option value="">—</option>{driverOptions.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-          <div className="special-result">
+          {!isSprint && <div className="special-result">
             <span className="special-result-label">🚀 ПРОРИВ</span>
-            <select className="base-select" value={localOv} onChange={e=>{setLocalOv(e.target.value);save(localSlots,localFl,e.target.value)}}>
-              <option value="">—</option>{PILOTS.map(p=><option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
+            <div className="overtake-picker">
+              <button type="button" className="base-select overtake-picker-trigger" aria-expanded={ovOpen} onClick={()=>setOvOpen(open=>!open)}>
+                <span>{parseOvertakeWinners(localOv).join(' / ') || 'Обрати пілота'}</span><span aria-hidden="true">{ovOpen?'▲':'▼'}</span>
+              </button>
+              {ovOpen && <div className="overtake-picker-menu">
+                {driverOptions.map(p=><label key={p} className="overtake-picker-option">
+                  <input type="checkbox" checked={parseOvertakeWinners(localOv).includes(p)} onChange={e=>toggleOvertakeWinner(p,e.target.checked)} />{p}
+                </label>)}
+                <button type="button" className="overtake-picker-apply" onClick={applyOvertakeWinners}>Зберегти прорив</button>
+              </div>}
+            </div>
+          </div>}
         </div>
       )}
       <div className="divider" />
