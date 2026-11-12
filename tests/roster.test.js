@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, USED_PILOTS, qualifyingSlotsForStage } from '../src/lib/roster.js'
+import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage } from '../src/lib/roster.js'
 
 test('legacy pilot seeds follow the current profile and deduplicate resolved qualifying corrections', () => {
   assert.deepEqual(USED_PILOTS['Даня'], ['Stroll','Sainz'])
@@ -37,15 +37,20 @@ test('roulette pool is exactly 22 starters and excludes all reserves', () => {
   assert.equal(PILOTS_2026_ORDER[0], 'Antonelli')
   assert.ok(PILOTS_2026_ORDER.includes('Stroll'))
   assert.ok(PILOTS_2026_ORDER.includes('Pérez'))
-  assert.deepEqual(RESERVE_PILOTS_2026, ['Tsunoda','Hirakawa','Câmara'])
+  assert.deepEqual(RESERVE_PILOTS_2026, [...new Set(Object.values(TEAM_RESERVE_PILOTS_2026).flat())])
   for (const reserve of RESERVE_PILOTS_2026) assert.ok(!PILOTS_2026_ORDER.includes(reserve))
+  assert.ok(TEAM_RESERVE_PILOTS_2026.Haas.includes('Hirakawa'))
+  assert.ok(TEAM_RESERVE_PILOTS_2026.Haas.includes('Camara'))
+  assert.deepEqual(TEAM_RESERVE_PILOTS_2026.Audi, ['Slater'])
+  assert.deepEqual(TEAM_RESERVE_PILOTS_2026['Racing Bulls'], ['Tsunoda','Iwasa'])
 })
 
 test('stage pool replaces one active Haas seat with a reserve and remains exactly 22', () => {
-  const pool = buildStagePilotPool([{team_name:'Haas',outgoing_driver:'Ocon',incoming_driver:'Câmara',is_active:true}])
+  const pool = buildStagePilotPool([{team_name:'Haas',outgoing_driver:'Ocon',incoming_driver:'Hirakawa',is_active:true}])
   assert.equal(pool.length,22)
   assert.ok(!pool.includes('Ocon'))
-  assert.ok(pool.includes('Câmara'))
+  assert.ok(pool.includes('Hirakawa'))
+  assert.deepEqual(buildStagePilotPool([{team_name:'Ferrari',outgoing_driver:'Leclerc',incoming_driver:'Hirakawa',is_active:true}]), PILOTS_2026_ORDER)
   assert.equal(buildStagePilotPool([]).length,22)
 })
 
@@ -56,6 +61,10 @@ test('catch-up qualifying slots are allocated across Vegas, Qatar, and UAE, capp
   assert.equal(qualifyingSlotsForStage(7,24),3)
   assert.equal(qualifyingSlotsForStage(9,23),3)
   assert.equal(qualifyingSlotsForStage(3,25),3)
+  assert.deepEqual(qualifyingPlanForAvailable(5), {23:1,24:2,25:2})
+  assert.deepEqual(qualifyingPlanForAvailable(6), {23:2,24:2,25:2})
+  assert.deepEqual(qualifyingPlanForAvailable(7), {23:2,24:3,25:2})
+  assert.deepEqual(qualifyingPlanForAvailable(0), {23:0,24:0,25:0})
 })
 
 test('event replacement normalizes saved picks and real result names only for that event', () => {

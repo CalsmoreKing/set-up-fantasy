@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react'
-import { supabase, TEAM_META, PILOTS, RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER } from '../lib/supabase'
-import { normalizeStageDriver, normalizeStageResults } from '../lib/roster'
+import { supabase, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
+import { normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage } from '../lib/roster'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
 import { archiveBaselineForPlayer } from '../lib/archive'
-import { canonicalStoredScore, calcQualAssignmentScore, recalculateForecast, recalculateQualAssignment } from '../lib/scoring'
+import { canonicalStoredScore, resultsList } from '../lib/scoring'
 import { calculateNewcomerBonuses } from '../lib/standings'
-import { newcomerPlayersForStage } from '../lib/roster'
 
 export default function AdminPage() {
   const { isAdmin, user, player: adminPlayer } = useAuth()
@@ -18,8 +17,8 @@ export default function AdminPage() {
   const [sessions,  setSessions]  = useState([])
   const [logs,      setLogs]      = useState([])
   const [scoreLedger, setScoreLedger] = useState({})
-  const [newcomerMinima, setNewcomerMinima] = useState({})
   const [pilotChanges, setPilotChanges] = useState([])
+  const [qualAssignments, setQualAssignments] = useState([])
   const [subStageId, setSubStageId] = useState('')
   const [subTeam, setSubTeam] = useState('')
   const [subOutgoing, setSubOutgoing] = useState('')
@@ -44,14 +43,14 @@ export default function AdminPage() {
       supabase.from('sessions').select('*, stages(name,flag,sort_order,key)').order('created_at', {ascending:false}),
       supabase.from('audit_log').select('*').order('created_at', {ascending:false}).limit(80),
       supabase.from('stage_pilot_substitutions').select('*,stages(name,key,flag)').order('created_at', {ascending:false}),
-      supabase.from('stage_newcomer_bonuses').select('stage_id,source_minimum').order('updated_at',{ascending:false}),
-    ]).then(([s,p,se,l,sub,b]) => {
+      supabase.from('qual_assignments').select('player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))'),
+    ]).then(([s,p,se,l,sub,qa]) => {
       setStages(s.data||[])
       setPlayers(p.data||[])
       setSessions(se.data||[])
       setLogs(l.data||[])
       setPilotChanges(sub.data || [])
-      setNewcomerMinima(Object.fromEntries((b.data||[]).map(row=>[row.stage_id,row.source_minimum])))
+      setQualAssignments(qa.data || [])
       buildPlayerScoreLedger(p.data || [], se.data || []).then(setScoreLedger)
       // collect distinct teams not in TEAM_META (custom-added)
       const teamsInDb = [...new Set((p.data||[]).map(x=>x.team))]
@@ -70,113 +69,12 @@ export default function AdminPage() {
 
   // ── STAGES ──
   async function toggleStageLock(stage) {
-    if (Number(stage.sort_order) < 10) return
     await supabase.from('stages').update({ is_locked: !stage.is_locked }).eq('id', stage.id)
     await supabase.from('sessions').update({ is_locked: !stage.is_locked }).eq('stage_id', stage.id)
     setStages(prev => prev.map(s => s.id===stage.id ? {...s, is_locked:!s.is_locked} : s))
     setMsg(`${stage.name} — ${stage.is_locked ? 'розблоковано' : 'заблоковано'}`)
     await log(stage.is_locked ? 'unlock_stage' : 'lock_stage', { stage: stage.key })
   }
-  async function toggleSessionLock(session) {
-    if (Number(session.stages?.sort_order) < 10) return
-    await supabase.from('sessions').update({ is_locked: !session.is_locked }).eq('id', session.id)
-    setSessions(prev => prev.map(s => s.id===session.id ? {...s, is_locked:!s.is_locked} : s))
-    setMsg(`Сесія ${session.type} — ${session.is_locked ? 'розблоковано' : 'заблоковано'}`)
-    await log(session.is_locked ? 'unlock_session' : 'lock_session', { session_id:session.id, stage_name:session.stages?.name, type:session.type })
-  }
-
-  // ── COMMIT SCORES ──
-  async function commitSession(session, recalculate = false) {
-    const verb = recalculate ? 'Перерахувати' : 'Зарахувати'
-    if (!window.confirm(`${verb} бали за ${session.stages?.name} — ${session.type}? Повторний перерахунок замінить старі бали, а не додасть їх повторно.`)) return
-
-    const forecastsResult = await supabase.from('forecasts').select('*, players(id,name,base_pts)').eq('session_id', session.id)
-    const qualResult = await supabase.from('qual_assignments').select('*, players(id,name,base_pts)').eq('session_id', session.id)
-    if (forecastsResult.error) throw forecastsResult.error
-    if (qualResult.error) throw qualResult.error
-    const forecasts = forecastsResult.data
-    const qualData = qualResult.data
-    const substitutionsResult = await supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',session.stage_id).eq('is_active',true).order('created_at')
-    if (substitutionsResult.error && !String(substitutionsResult.error.message).includes('stage_pilot_substitutions')) throw substitutionsResult.error
-    const pilotChanges = substitutionsResult.data || []
-    const normalizedResults = normalizeStageResults(session.results || {}, pilotChanges)
-    const results = Object.entries(normalizedResults).sort((a,b)=>+a[0]-+b[0]).map(([,v])=>v)
-    const flResult = normalizeStageDriver(session.fl_pilot || '', pilotChanges)
-    const ovResult = String(session.ov_pilot || '').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),pilotChanges)).filter(Boolean).join(', ')
-    const updates = []
-    const forecastScores = []
-    const qualScores = []
-    const breakdown_log = []
-
-    if (session.type === 'race') {
-      const { calcRaceScore } = await import('../lib/supabase')
-      for (const f of (forecasts||[])) {
-        const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'',pilotChanges))
-        const { total, breakdown } = calcRaceScore(preds, normalizeStageDriver(f.fl_pick,pilotChanges), normalizeStageDriver(f.ov_pick,pilotChanges), results, flResult, ovResult, session.stages?.sort_order)
-        updates.push({ id: f.players?.id, delta: total - (Number(f.score)||0) })
-        forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown, scored_input:{ predictions:Object.fromEntries(preds.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)), fl_pick:normalizeStageDriver(f.fl_pick,pilotChanges), ov_pick:normalizeStageDriver(f.ov_pick,pilotChanges) } })
-        breakdown_log.push({ player: f.players?.name, score: total, breakdown })
-      }
-    } else if (session.type === 'qual') {
-      for (const qa of (qualData||[])) {
-        const normalized = {
-          ...qa,
-          pilot_1:normalizeStageDriver(qa.pilot_1,pilotChanges),
-          pilot_2:normalizeStageDriver(qa.pilot_2,pilotChanges),
-          pilot_3:normalizeStageDriver(qa.pilot_3,pilotChanges),
-        }
-        const { total, breakdown } = calcQualAssignmentScore(normalized, results, session.stages?.sort_order)
-        updates.push({ id: qa.players?.id, delta: total - (Number(qa.score)||0) })
-        qualScores.push({ id:qa.id, score:total, scored_input:{ pilot_1:normalized.pilot_1, pred_pos_1:qa.pred_pos_1, pilot_2:normalized.pilot_2, pred_pos_2:qa.pred_pos_2, pilot_3:normalized.pilot_3, pred_pos_3:qa.pred_pos_3 } })
-        breakdown_log.push({ player: qa.players?.name, score: total, breakdown })
-      }
-    } else if (session.type === 'sprint') {
-      const { calcSprintScore } = await import('../lib/supabase')
-      for (const f of (forecasts||[])) {
-        const sprintSlots = Number(session.stages?.sort_order) < 10 ? 10 : 5
-        const preds = Array.from({length:sprintSlots}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'',pilotChanges))
-        const { total, breakdown } = calcSprintScore(preds, results, session.stages?.sort_order, normalizeStageDriver(f.fl_pick,pilotChanges), flResult)
-        updates.push({ id: f.players?.id, delta: total - (Number(f.score)||0) })
-        forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown, scored_input:{ predictions:Object.fromEntries(preds.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)), fl_pick:normalizeStageDriver(f.fl_pick,pilotChanges), ov_pick:normalizeStageDriver(f.ov_pick,pilotChanges) } })
-        breakdown_log.push({ player: f.players?.name, score: total, breakdown })
-      }
-    }
-
-    // Snapshot rank before the atomic replacement-based score transaction.
-    const beforeResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
-    if (beforeResult.error) throw beforeResult.error
-    const beforeSnapshot = beforeResult.data
-    const rankBefore = {}
-    ;(beforeSnapshot||[]).forEach((p,i) => { rankBefore[p.id] = i+1 })
-
-    const { error: applyError } = await supabase.rpc('apply_session_scores', {
-      p_session_id: session.id,
-      p_forecast_scores: forecastScores,
-      p_qual_scores: qualScores,
-      p_is_recalculation: Boolean(session.committed),
-    })
-    if (applyError) throw applyError
-
-    // Snapshot rank AFTER update
-    const afterResult = await supabase.from('players').select('id,base_pts').order('base_pts',{ascending:false})
-    if (afterResult.error) throw afterResult.error
-    const afterSnapshot = afterResult.data
-    const rankAfter = {}
-    ;(afterSnapshot||[]).forEach((p,i) => { rankAfter[p.id] = i+1 })
-
-    for (const u of updates) {
-      const before = rankBefore[u.id] || 0
-      const after  = rankAfter[u.id] || 0
-      await supabase.from('players').update({ last_rank_delta: before - after }).eq('id', u.id)
-    }
-
-    setSessions(prev => prev.map(s => s.id===session.id ? {...s, is_locked:true, committed:true} : s))
-    await log(recalculate ? 'recalculate_session' : 'commit_session', { session_id: session.id, stage: session.stages?.name, type: session.type, breakdown: breakdown_log })
-
-    loadAll()
-    setMsg(recalculate ? '✓ Бали перераховано без повторного додавання.' : '✓ Бали зараховано! Сесія заблокована.')
-  }
-
   // ── PLAYER EDIT ──
   async function updatePlayerField(playerId, field, value) {
     const target = players.find(p => p.id === playerId)
@@ -250,68 +148,106 @@ export default function AdminPage() {
     setMsg('✓ Команда додана до списку вибору (стане активною коли матиме гравця)')
   }
 
-  async function applyNewcomerBonus(stage) {
-    const eligible = newcomerPlayersForStage(players,stage.sort_order)
-    if (!eligible.length) { setMsg('Для цього ГП немає новачків із пропущеними етапами.'); return }
-    if (Number(stage.sort_order) < 10) { setMsg('Для архівного ГП потрібна підтверджена мінімальна сума зі старого сайту.'); return }
-    const stageSessions = sessions.filter(session => session.stage_id===stage.id)
-    if (!stageSessions.length || stageSessions.some(session=>!session.committed)) { setMsg('Спочатку мають бути зараховані всі сесії ГП.'); return }
-    if (!window.confirm(`Нарахувати кожному новачку мінімальну суму ГП ${stage.name}?`)) return
+  async function recalculateStage(stage) {
+    const stageSessions = sessions.filter(session => session.stage_id === stage.id)
+    if (!stageSessions.length) { setMsg(`${stage.name}: у базі ще немає сесій цього етапу.`); return }
+    if (stageSessions.some(session => !session.committed)) { setMsg(`${stage.name}: спершу зарахуй усі сесії ГП.`); return }
+    if (!stageSessions.some(session => session.type === 'race')) { setMsg(`${stage.name}: немає сесії гонки для перерахунку.`); return }
+    if (!window.confirm(`Перерахувати весь ГП ${stage.name}? Збережені бали буде замінено новим підрахунком, не додано повторно. Бонус новачка буде перерахований лише за гонку.`)) return
+    setMsg(`⟳ Перераховую ${stage.name}…`)
     try {
-      const ids = stageSessions.map(session=>session.id)
-      const [f,q,changesResult] = await Promise.all([
-        supabase.from('forecasts').select('id,player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
-        supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',stage.id).eq('is_active',true),
+      const ids = stageSessions.map(session => session.id)
+      const [forecastResult, qualResult, changesResult] = await Promise.all([
+        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id', ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
+        supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true),
       ])
-      if (f.error) throw f.error
-      if (q.error) throw q.error
+      if (forecastResult.error) throw forecastResult.error
+      if (qualResult.error) throw qualResult.error
+      if (changesResult.error) throw changesResult.error
       const changes = changesResult.data || []
-      const preparedForecasts = (f.data||[]).map(row=>{
-        const original = stageSessions.find(session=>session.id===row.session_id)
-        const session = { ...original, results:normalizeStageResults(original.results||{},changes), fl_pilot:normalizeStageDriver(original.fl_pilot||'',changes), ov_pilot:String(original.ov_pilot||'').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),changes)).filter(Boolean).join(', ') }
-        const predictions = Object.fromEntries(Object.entries(row.predictions||{}).map(([position,pilot])=>[position,normalizeStageDriver(pilot,changes)]))
-        return { ...row, predictions, fl_pick:normalizeStageDriver(row.fl_pick||'',changes), ov_pick:normalizeStageDriver(row.ov_pick||'',changes), computedScore:canonicalStoredScore(row) }
+      const scoreRows = []
+      const rescoredForecasts = []
+      const order = Number(stage.sort_order)
+      for (const session of stageSessions) {
+        if (!['qual','race','sprint'].includes(session.type)) throw new Error(`Непідтримуваний тип сесії: ${session.type}`)
+        const resultsObject = normalizeStageResults(session.results || {}, changes)
+        const results = resultsList(resultsObject)
+        const requiredResults = session.type==='qual' ? (order<7 ? 1 : 3) : session.type==='sprint' ? (order<10 ? 10 : 5) : 10
+        const positions = Object.keys(resultsObject).map(Number).sort((a,b)=>a-b)
+        const contiguous = positions.length >= requiredResults && positions.slice(0,requiredResults).every((position,index)=>position===index+1)
+        if (results.length < requiredResults || !contiguous) throw new Error(`${session.type.toUpperCase()}: є ${results.length} з ${requiredResults} потрібних реальних позицій; бали не змінено.`)
+        const fastLap = normalizeStageDriver(session.fl_pilot || '', changes)
+        const overtake = String(session.ov_pilot || '').split(/[,;|]/).map(pilot=>normalizeStageDriver(pilot.trim(),changes)).filter(Boolean).join(', ')
+        if (session.type === 'qual') {
+          const qualifyingScores = (qualResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
+            const normalized = {...row,
+              pilot_1:normalizeStageDriver(row.pilot_1,changes),
+              pilot_2:normalizeStageDriver(row.pilot_2,changes),
+              pilot_3:normalizeStageDriver(row.pilot_3,changes),
+            }
+            const {total} = calcQualAssignmentScore(normalized,results,order)
+            return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+          })
+          scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:qualifyingScores})
+        } else {
+          const rows = (forecastResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
+            const slotCount = session.type==='sprint' && order<10 ? 10 : session.type==='sprint' ? 5 : 10
+            const predictions = Array.from({length:slotCount},(_,index)=>normalizeStageDriver(row.predictions?.[index+1] || '',changes))
+            const result = session.type==='sprint'
+              ? calcSprintScore(predictions,results,order,normalizeStageDriver(row.fl_pick,changes),fastLap)
+              : calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,changes),normalizeStageDriver(row.ov_pick,changes),results,fastLap,overtake,order)
+            const scoredInput = {predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,changes)}
+            if (session.type==='race') scoredInput.ov_pick=normalizeStageDriver(row.ov_pick,changes)
+            const forecastScore = {id:row.id,score:result.total,score_breakdown:result.breakdown,scored_input:scoredInput}
+            if (session.type==='race') rescoredForecasts.push({...row,...forecastScore})
+            return forecastScore
+          })
+          scoreRows.push({session_id:session.id,forecast_scores:rows,qual_scores:[]})
+        }
+      }
+      const eligible = newcomerPlayersForStage(players,order).map(player=>player.id)
+      const raceResult = calculateNewcomerBonuses(players,stageSessions,rescoredForecasts,[],eligible)
+      if (!raceResult.ready) throw new Error('Не вдалося безпечно визначити рахунок гонки для бонусу новачка.')
+      const {error} = await supabase.rpc('apply_stage_scores',{
+        p_stage_id:stage.id,
+        p_session_scores:scoreRows,
+        p_newcomer_bonuses:raceResult.bonuses,
+        p_newcomer_minimum:raceResult.minimum,
       })
-      const preparedQual = (q.data||[]).map(row=>{
-        const original=stageSessions.find(session=>session.id===row.session_id)
-        const session={...original,results:normalizeStageResults(original.results||{},changes)}
-        const normalized={...row,pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
-        return {...normalized,computedScore:canonicalStoredScore(row)}
-      })
-      const result = calculateNewcomerBonuses(players,stageSessions,
-        preparedForecasts.map(row=>({...row,score:row.computedScore})),
-        preparedQual.map(row=>({...row,score:row.computedScore})),eligible.map(player=>player.id))
-      if (!result.ready || result.minimum == null) throw new Error('Немає повних результатів для обчислення мінімуму ГП.')
-      const { error } = await supabase.rpc('apply_stage_newcomer_bonuses',{p_stage_id:stage.id,p_bonuses:result.bonuses,p_source_minimum:result.minimum})
       if (error) throw error
-      await log('recalculate_session',{kind:'newcomer_bonus',stage:stage.name,minimum:result.minimum,awards:result.bonuses})
-      setMsg(`${stage.name}: бонус ${result.minimum} · ${result.bonuses.length} новачків`)
+      setMsg(`✓ ${stage.name}: бали перезаписано; бонус новачка за гонку — ${raceResult.minimum ?? 'немає учасників з прогнозом'}`)
       loadAll()
     } catch (error) {
-      setMsg(`⚠ ${error.message}`)
+      const message = String(error.message || error)
+      const migrationHint = /apply_stage_scores|schema cache|function.*exist/i.test(message)
+        ? ' Потрібні SQL-міграції після повного backup і перевіреного відновлення.'
+        : ''
+      setMsg(`⚠ Не вдалося перерахувати ${stage.name}: ${message}.${migrationHint}`)
     }
   }
 
-  async function addPilotSubstitution() {
-    const teamRoster = PILOT_TEAM_ROSTER.find(row => row.team === subTeam)
-    if (!subStageId || Number(stages.find(stage => stage.id === subStageId)?.sort_order) < 10 || !teamRoster || !teamRoster.drivers.includes(subOutgoing) || !RESERVE_PILOTS_2026.includes(subIncoming) || subOutgoing === subIncoming) {
+
+  async function addPilotSubstitution(teamName = subTeam, outgoingDriver = subOutgoing, incomingDriver = subIncoming) {
+    const teamRoster = PILOT_TEAM_ROSTER.find(row => row.team === teamName)
+    const teamReserves = TEAM_RESERVE_PILOTS_2026[teamName] || []
+    if (!subStageId || !teamRoster || !teamRoster.drivers.includes(outgoingDriver) || !teamReserves.includes(incomingDriver) || outgoingDriver === incomingDriver) {
       setMsg('⚠ Обери етап, команду, пілота, заміну; імена мають відрізнятися.')
       return
     }
-    const sameReserve = pilotChanges.find(change => change.stage_id === subStageId && change.incoming_driver === subIncoming && change.is_active && !(change.team_name===subTeam && change.outgoing_driver===subOutgoing))
+    const sameReserve = pilotChanges.find(change => change.stage_id === subStageId && change.incoming_driver === incomingDriver && change.is_active && !(change.team_name===teamName && change.outgoing_driver===outgoingDriver))
     if (sameReserve) { setMsg('⚠ Резерв уже використовується на цьому ГП.'); return }
-    const previous = pilotChanges.filter(change=>change.stage_id===subStageId && change.team_name===subTeam && change.outgoing_driver===subOutgoing && change.is_active)
+    const previous = pilotChanges.filter(change=>change.stage_id===subStageId && change.team_name===teamName && change.outgoing_driver===outgoingDriver && change.is_active)
     for (const change of previous) {
       const { error:deactivateError } = await supabase.from('stage_pilot_substitutions').update({is_active:false}).eq('id',change.id)
       if (deactivateError) { setMsg(`⚠ ${deactivateError.message}`); return }
     }
     const { data, error } = await supabase.from('stage_pilot_substitutions').insert({
-      stage_id:subStageId, team_name:subTeam, outgoing_driver:subOutgoing,
-      incoming_driver:subIncoming, is_active:true, created_by:user?.id || null,
+      stage_id:subStageId, team_name:teamName, outgoing_driver:outgoingDriver,
+      incoming_driver:incomingDriver, is_active:true, created_by:user?.id || null,
     }).select('*,stages(name,key,flag)').single()
     if (error) { setMsg(`⚠ Не вдалося зберегти заміну: ${error.message}. Перевір, чи застосована міграція меню замін.`); return }
-    await log('pilot_substitution', { stage_name:stages.find(x=>x.id===subStageId)?.name, team:subTeam, outgoing_driver:subOutgoing, incoming_driver:subIncoming, reason:null })
+    await log('pilot_substitution', { stage_name:stages.find(x=>x.id===subStageId)?.name, team:teamName, outgoing_driver:outgoingDriver, incoming_driver:incomingDriver, reason:null })
     setPilotChanges(prev => [data, ...prev.map(row=>previous.some(old=>old.id===row.id)?{...row,is_active:false}:row)])
     setSubOutgoing(''); setSubIncoming('')
     setMsg('✓ Заміна збережена для обраного ГП')
@@ -326,6 +262,24 @@ export default function AdminPage() {
   }
 
   const allTeamOptions = [...Object.keys(TEAM_META), ...customTeams]
+  const nextQualOrders = [23,24,25]
+  const qualifyingPlanRows = players.map(player => {
+    const used = new Set([...(USED_PILOTS[player.name] || [])].map(name => normalizeStageDriver(name)))
+    qualAssignments.forEach(row => {
+      if (row.player_id !== player.id || !Number.isFinite(Number(row.sessions?.stages?.sort_order)) || Number(row.sessions.stages.sort_order) >= 23) return
+      for (const [pilotKey,posKey] of [['pilot_1','pred_pos_1'],['pilot_2','pred_pos_2'],['pilot_3','pred_pos_3']]) {
+        if (row[pilotKey] && Number(row[posKey]) > 0) used.add(normalizeStageDriver(row[pilotKey]))
+      }
+    })
+    const available = Math.max(0, ACTIVE_PILOTS_2026.length - used.size)
+    const plan = qualifyingPlanForAvailable(available, 23)
+    const planned = nextQualOrders.reduce((sum,order)=>sum+(plan[order]||0),0)
+    return { player, available, plan, remaining:Math.max(0,available-planned) }
+  })
+  const qualifyingPlanStages = nextQualOrders.map((order,index) => ({
+    order,
+    label:stages.find(stage=>Number(stage.sort_order)===order)?.name || ['Лас-Вегас','Катар','ОАЕ'][index],
+  }))
 
   if (loading) return <main><div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2,padding:20}}>ЗАВАНТАЖЕННЯ...</div></main>
 
@@ -335,7 +289,6 @@ export default function AdminPage() {
     { key:'users',     label:'ГРАВЦІ' },
     { key:'teams',     label:'КОМАНДИ' },
     { key:'substitutions', label:'ПІЛОТИ' },
-    { key:'commit',    label:'БАЛИ' },
     { key:'log',       label:'ЖУРНАЛ' },
   ]
 
@@ -361,59 +314,24 @@ export default function AdminPage() {
       {/* STAGES */}
       {tab === 'stages' && (
         <>
-          <div className="section-label">Управління етапами</div>
+          <div className="section-label">Етапи · перерахунок повністю замінює збережені бали</div>
+          <p className="team-created-note">Для перерахунку потрібні зараховані сесії та збережені прогнози. Система перепише бали за всіма сесіями ГП та заново визначить бонус новачка лише за результатом гонки.</p>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            {stages.map(s => (
-              <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'10px 14px',opacity:Number(s.sort_order)<10?.42:1,filter:Number(s.sort_order)<10?'grayscale(1)':'none'}}>
-                <span style={{fontFamily:'Orbitron,sans-serif',fontSize:12,fontWeight:700,flex:1}}>{s.flag} {s.name} {Number(s.sort_order)<10 && <small style={{color:'var(--muted)',fontSize:9}}>· АРХІВ</small>}</span>
-                <span style={{fontFamily:'Orbitron,sans-serif',fontSize:9,color:'var(--muted)'}}>#{s.sort_order}</span>
-                <button className={`btn ${s.is_locked ? 'btn-ghost' : 'btn-red'}`} style={{padding:'6px 14px',fontSize:9}} onClick={() => toggleStageLock(s)} disabled={Number(s.sort_order)<10}>
-                  {s.is_locked ? '🔒 РОЗБЛОКУВАТИ' : '🔓 ЗАБЛОКУВАТИ'}
+            {stages.map(stage => {
+              const stageSessions = sessions.filter(session => session.stage_id===stage.id)
+              const ready = stageSessions.length > 0 && stageSessions.some(session=>session.type==='race') && stageSessions.every(session=>session.committed)
+              return <div key={stage.id} className="admin-stage-row">
+                <span className="admin-stage-name">{stage.flag} {stage.name}</span>
+                <span className="admin-stage-order">#{stage.sort_order}</span>
+                <button className="btn btn-ghost admin-recalc-btn" disabled={!ready} title={ready ? 'Перерахувати всі сесії ГП і замінити старі бали' : 'Потрібні сесії гонки та зараховані всі сесії ГП'} onClick={()=>recalculateStage(stage)}>
+                  ↻ ПЕРЕРАХУВАТИ ГП
+                </button>
+                <button className={`btn ${stage.is_locked ? 'btn-ghost' : 'btn-red'}`} style={{padding:'6px 12px',fontSize:9}} onClick={() => toggleStageLock(stage)}>
+                  {stage.is_locked ? '🔒 РОЗБЛОКУВАТИ' : '🔓 ЗАБЛОКУВАТИ'}
                 </button>
               </div>
-            ))}
+            })}
           </div>
-        </>
-      )}
-
-      {/* COMMIT */}
-      {tab === 'commit' && (
-        <>
-          <div className="section-label">Зарахування балів</div>
-          <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            {sessions.filter(s => !s.committed && Number(s.stages?.sort_order)>=10).map(s => (
-              <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'10px 14px',flexWrap:'wrap'}}>
-                <span style={{fontFamily:'Orbitron,sans-serif',fontSize:12,flex:1}}>{s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}</span>
-                {s.is_locked && <span className="badge badge-locked">🔒</span>}
-                <button className="btn btn-red" style={{fontSize:9,padding:'6px 14px'}} onClick={()=>commitSession(s).catch(e=>setMsg(`⚠ ${e.message}`))}>⚑ ЗАРАХУВАТИ</button>
-                {!s.is_locked && (
-                  <button className="btn btn-ghost" style={{fontSize:9,padding:'6px 14px'}} onClick={()=>toggleSessionLock(s)}>🔒 ЗАБЛОКУВАТИ</button>
-                )}
-              </div>
-            ))}
-            {sessions.filter(s=>s.committed && Number(s.stages?.sort_order)>=10).length > 0 && (
-              <>
-                <div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:9,letterSpacing:2,marginTop:12,marginBottom:6}}>ЗАРАХОВАНІ</div>
-                {sessions.filter(s=>s.committed && Number(s.stages?.sort_order)>=10).map(s=>(
-                  <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,padding:'8px 14px'}}>
-                    <span style={{fontFamily:'Orbitron,sans-serif',fontSize:11,flex:1}}>{s.stages?.flag} {s.stages?.name} — {s.type.toUpperCase()}</span>
-                    <span className="badge badge-committed">✓ ЗАРАХОВАНО</span>
-                    <button className="btn btn-ghost" style={{fontSize:9,padding:'6px 12px'}} onClick={()=>commitSession(s, true).catch(e=>setMsg(`⚠ ${e.message}`))}>↻ ПЕРЕРАХУВАТИ</button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-          <div className="section-label" style={{marginTop:24}}>Бонус новачка за ГП</div>
-          <div style={{overflowX:'auto'}}><table className="standings"><thead><tr><th>ГП</th><th>Мінімум за ГП</th><th>Новачки</th><th></th></tr></thead>
-            <tbody>{stages.filter(stage=>newcomerPlayersForStage(players,stage.sort_order).length>0).map(stage=>{
-              const roundSessions=sessions.filter(session=>session.stage_id===stage.id)
-              const ready=roundSessions.length>0&&roundSessions.every(session=>session.committed)
-              return <tr key={stage.id}><td>{stage.flag} {stage.name}</td><td>{newcomerMinima[stage.id] ?? '—'}</td>
-                <td>{newcomerPlayersForStage(players,stage.sort_order).map(player=>player.name).join(' · ')}</td>
-                <td><button className="btn btn-ghost" disabled={!ready} onClick={()=>applyNewcomerBonus(stage)}>НАРАХУВАТИ</button></td></tr>
-            })}</tbody>
-          </table></div>
         </>
       )}
 
@@ -437,7 +355,7 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addPlayer}>+ ДОДАТИ</button>
           </div>
 
-          <div className="section-label">Гравці та доступ · розподіл загальних балів за командами</div>
+          <div className="admin-ledger-heading"><div><div className="section-label">Гравці та доступ · розподіл загальних балів за командами</div><p>Залишок = підсумок у профілі мінус відомі складові; це показник для звірки, а не автоматичне списання чи нарахування.</p></div><button className="ledger-refresh-btn" onClick={async()=>{setScoreLedger(await buildPlayerScoreLedger(players,sessions));setMsg('✓ Залишок балів перераховано за збереженими записами (без змін у базі).')}}>⟳ Перерахувати залишок</button></div>
           <div style={{overflowX:'auto'}}>
           <table className="standings" style={{marginBottom:0,minWidth:1050}}>
             <thead>
@@ -508,23 +426,63 @@ export default function AdminPage() {
         </>
       )}
 
-      {/* EVENT-SCOPED DRIVER SUBSTITUTIONS */}
+      {/* INDIVIDUAL QUALIFYING PLAN + VERIFIED TEAM RESERVES */}
       {tab === 'substitutions' && (
         <>
-          <select className="field-input" value={subStageId} onChange={e=>setSubStageId(e.target.value)} style={{maxWidth:320,marginBottom:12}}><option value="">— Гран-прі —</option>{stages.filter(st=>Number(st.sort_order)>=10).map(st=><option key={st.id} value={st.id}>{st.flag} {st.name}</option>)}</select>
-          <div style={{display:'grid',gap:6}}>{PILOT_TEAM_ROSTER.map(row => {
-            const changes = pilotChanges.filter(item => item.stage_id===subStageId && item.team_name===row.team && item.is_active)
-            const replaced = new Set(changes.map(change=>change.outgoing_driver))
-            return <div key={row.team} style={{display:'grid',gridTemplateColumns:'110px minmax(180px,1fr) minmax(150px,220px)',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:4}}>
-              <strong style={{fontSize:11}}>{row.team}</strong>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>{row.drivers.map(driver=><button key={driver} className="btn btn-ghost" style={{padding:'5px 8px',fontSize:9,borderColor:replaced.has(driver)?'var(--border)':'var(--gold)',opacity:replaced.has(driver)?.48:1}} onClick={()=>{setSubTeam(row.team);setSubOutgoing(driver)}}>{driver}{replaced.has(driver)?' · ЗАМІНЕНО':' · АКТИВНИЙ'}</button>)}</div>
-              <div style={{display:'grid',gap:5}}>
-                {changes.map(change=><div key={change.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:5,fontSize:10,color:'var(--muted)'}}><span>{change.outgoing_driver} → {change.incoming_driver || '—'}</span><button className="btn btn-ghost" aria-label="Скасувати заміну" style={{padding:'2px 6px',fontSize:9}} onClick={()=>deactivatePilotSubstitution(change)}>×</button></div>)}
-                <select className="field-input" value={subTeam===row.team?subIncoming:''} onChange={e=>{setSubTeam(row.team);setSubIncoming(e.target.value);setSubOutgoing(current=>row.drivers.includes(current)?current:row.drivers.find(driver=>!replaced.has(driver))||row.drivers[0])}}><option value="">— Додати резерв —</option>{RESERVE_PILOTS_2026.map(p=><option key={p} value={p}>{p}</option>)}</select>
+          <section className="admin-plan-card">
+            <header className="admin-plan-heading">
+              <div>
+                <div className="admin-plan-kicker">VEGAS · QATAR · UAE</div>
+                <h2>Індивідуальний план кваліфікацій</h2>
+                <p>Кількість слотів розрахована окремо для кожного гравця з невикористаних пілотів. Коли адмін розігрує кваліфікацію, саме цей план визначає скільки пілотів отримає кожен.</p>
               </div>
+              <span className="admin-plan-badge">ПЛАН АКТИВНИЙ</span>
+            </header>
+            <div className="admin-plan-table-wrap">
+              <table className="admin-plan-table">
+                <thead><tr><th>Гравець</th><th>Доступно</th>{qualifyingPlanStages.map(stage=><th key={stage.order}>{stage.label}</th>)}<th>Залишиться</th></tr></thead>
+                <tbody>{qualifyingPlanRows.sort((a,b)=>a.player.name.localeCompare(b.player.name,'uk')).map(({player,available,plan,remaining})=>(
+                  <tr key={player.id}>
+                    <td><strong>{player.name}</strong><small>{player.team}</small></td>
+                    <td>{available}</td>
+                    {qualifyingPlanStages.map(stage=><td key={stage.order}><b>{plan[stage.order] || 0}</b></td>)}
+                    <td className={remaining ? 'plan-remaining' : 'plan-complete'}>{remaining}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
             </div>
-          })}</div>
-          {subTeam && <div style={{display:'flex',gap:8,alignItems:'center',marginTop:12}}><span style={{fontSize:11,color:'var(--muted)'}}>{subTeam} · {subOutgoing || 'оберіть активного пілота'} → {subIncoming || 'оберіть резерв'}</span><button className="btn btn-red" onClick={addPilotSubstitution}>ЗБЕРЕГТИ ЗАМІНУ</button></div>}
+            <p className="admin-plan-footnote">Пілотів призначаємо лише з офіційного списку чинних пілотів; один пілот не повторюється для гравця. Якщо після UAE лишається число більше нуля, у поточних трьох кваліфікаціях не вистачає слотів, щоб видати всіх пілотів.</p>
+          </section>
+
+          <section className="reserve-admin-section">
+            <header className="reserve-admin-heading">
+              <div><div className="admin-plan-kicker">F1 2026</div><h2>Резервні пілоти команд</h2></div>
+              <label className="reserve-stage-select"><span>Гран-прі для заміни</span>
+                <select className="reserve-select" value={subStageId} onChange={e=>setSubStageId(e.target.value)}><option value="">Оберіть етап</option>{stages.filter(st=>Number(st.sort_order)>=10).map(st=><option key={st.id} value={st.id}>{st.flag} {st.name}</option>)}</select>
+              </label>
+            </header>
+            <p className="reserve-admin-note">Резерви внесені окремо для кожної команди й не потрапляють у звичайний пул жеребкування. Базовий список звірений з <a href="https://www.formula1.com/en/latest/article/who-are-the-reserve-drivers-for-each-f1-team-in-2026.Ce8YvwuVJGLkVNgERX21U" target="_blank" rel="noreferrer">оглядом Formula 1 від 25.02.2026</a>; Camara для Haas і Slater для Audi додані за вашим уточненням.</p>
+            <div className="reserve-team-grid">{PILOT_TEAM_ROSTER.map(row => {
+              const teamChanges = pilotChanges.filter(item => item.stage_id===subStageId && item.team_name===row.team && item.is_active)
+              const replaced = new Set(teamChanges.map(change=>change.outgoing_driver))
+              const officialReserves = TEAM_RESERVE_PILOTS_2026[row.team] || []
+              const selected = subTeam === row.team
+              return <article key={row.team} className="reserve-team-card">
+                <div className="reserve-team-title"><strong>{row.team}</strong><span>{officialReserves.length ? `${officialReserves.length} у списку` : 'список порожній'}</span></div>
+                <div className="reserve-active-list">{row.drivers.map(driver=><span key={driver} className={`reserve-driver-chip ${replaced.has(driver)?'is-replaced':''}`}>{driver}{replaced.has(driver)?' · замінений':' · стартовий'}</span>)}</div>
+                {teamChanges.map(change=><div key={change.id} className="reserve-saved-change"><span>{change.outgoing_driver} <b>→</b> {change.incoming_driver || '—'}</span><button type="button" onClick={()=>deactivatePilotSubstitution(change)} aria-label={`Скасувати ${change.outgoing_driver}`}>Скасувати</button></div>)}
+                {officialReserves.length > 0 ? <div className="reserve-form-row">
+                  <select className="reserve-select" value={selected?subOutgoing:''} onChange={e=>{setSubTeam(row.team);setSubOutgoing(e.target.value);setSubIncoming(current=>officialReserves.includes(current)?current:'')}}>
+                    <option value="">Кого замінити</option>{row.drivers.filter(driver=>!replaced.has(driver)).map(driver=><option key={driver} value={driver}>{driver}</option>)}
+                  </select>
+                  <select className="reserve-select" value={selected?subIncoming:''} onChange={e=>{setSubTeam(row.team);setSubIncoming(e.target.value)}}>
+                    <option value="">Резервний пілот</option>{officialReserves.map(driver=><option key={driver} value={driver}>{driver}</option>)}
+                  </select>
+                  <button className="reserve-save-btn" disabled={!subStageId || !selected || !subOutgoing || !subIncoming} onClick={()=>addPilotSubstitution(row.team,subOutgoing,subIncoming)}>Зберегти заміну</button>
+                </div> : <div className="reserve-unconfirmed">У довіднику поки немає резервного пілота для цієї команди.</div>}
+              </article>
+            })}</div>
+          </section>
         </>
       )}
 
@@ -538,21 +496,24 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addCustomTeam}>+ ДОДАТИ КОМАНДУ</button>
           </div>
           <div className="section-label">Існуючі команди</div>
+          <p className="team-created-note">Сортування — за сумою балів гравців. «Створено» показує дату найранішої реєстрації гравця цієї команди, оскільки окремої таблиці команд і дати створення команди в базі немає.</p>
           <table className="team-table">
-            <thead><tr><th>Команда</th><th>Гравці</th><th>Сумарні бали</th></tr></thead>
+            <thead><tr><th>Команда</th><th>Гравці</th><th>Сумарні бали</th><th>Створено*</th></tr></thead>
             <tbody>
               {[...new Set(players.map(p=>p.team))].map(team => {
                 const teamPlayers = players.filter(p=>p.team===team)
-                const total = teamPlayers.reduce((s,p)=>s+p.base_pts,0)
+                const total = teamPlayers.reduce((s,p)=>s+(Number(p.base_pts)||0),0)
+                const firstAdded = teamPlayers.map(p=>p.created_at).filter(Boolean).sort()[0]
                 const color = TEAM_META[team]?.color || '#888'
-                return (
+                return {team,teamPlayers,total,firstAdded,color}
+              }).sort((a,b)=>b.total-a.total || a.team.localeCompare(b.team,'uk')).map(({team,teamPlayers,total,firstAdded,color}) => (
                   <tr key={team} style={{borderLeft:`3px solid ${color}`}}>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color}}>{team}</td>
                     <td style={{fontSize:11,color:'var(--muted)'}}>{teamPlayers.map(p=>p.name).join(' · ')}</td>
                     <td className="team-score">{total}</td>
+                    <td style={{fontSize:11,color:'var(--muted)'}}>{firstAdded ? new Date(firstAdded).toLocaleDateString('uk-UA',{timeZone:'Europe/Warsaw'}) : '—'}</td>
                   </tr>
-                )
-              })}
+                ))}
             </tbody>
           </table>
         </>
@@ -588,15 +549,15 @@ export default function AdminPage() {
 }
 
 async function buildPlayerScoreLedger(players, sessions) {
-  const activeSessions = sessions.filter(session => session.committed && Number(session.stages?.sort_order) >= 10)
+  const activeSessions = sessions.filter(session => session.committed)
   const sessionIds = activeSessions.map(session => session.id)
   let forecasts = [], qualifying = [], bonuses = [], adjustments = []
   const adjustmentResult = await supabase.from('score_manual_adjustments').select('player_id,delta').in('player_id', players.map(p=>p.id))
   adjustments = adjustmentResult.data || []
   if (sessionIds.length) {
     const [f, q, b] = await Promise.all([
-      supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id', sessionIds),
-      supabase.from('qual_assignments').select('player_id,session_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', sessionIds),
+      supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,predictions,fl_pick,ov_pick').in('session_id', sessionIds),
+      supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', sessionIds),
       supabase.from('stage_newcomer_bonuses').select('player_id,points').in('stage_id', [...new Set(activeSessions.map(s => s.stage_id))]),
     ])
     forecasts = f.data || []

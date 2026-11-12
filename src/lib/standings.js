@@ -47,37 +47,28 @@ export function buildStageTotals(players, sessions, forecasts, qualAssignments, 
   return byStage
 }
 
-/** Compute stage newcomer awards; awards are only ready after every stage session is committed. */
-export function calculateNewcomerBonuses(players, sessions, forecasts, qualAssignments, eligiblePlayerIds = []) {
-  const committedSessions = (sessions || []).filter(s => SESSION_TYPES.includes(s.type))
-  if (!committedSessions.length || committedSessions.some(s => !s.committed)) return { ready: false, minimum: null, bonuses: [] }
-  const committedIds = new Set(committedSessions.map(s => s.id))
-  if ((forecasts || []).some(row => committedIds.has(row.session_id) && row.score == null)
-      || (qualAssignments || []).some(row => committedIds.has(row.session_id) && row.score == null)) {
-    return { ready: false, minimum: null, bonuses: [] }
+/** Reconcile newcomer awards against only this GP's race; qualifying and sprint never affect the minimum. */
+export function calculateNewcomerBonuses(players, sessions, forecasts, _qualAssignments = [], eligiblePlayerIds = []) {
+  const raceSessions = (sessions || []).filter(session => session.type === 'race')
+  if (raceSessions.length !== 1 || raceSessions.some(session => !session.committed)) return { ready:false, minimum:null, bonuses:[] }
+  const raceSession = raceSessions[0]
+  if ((forecasts || []).some(row => row.session_id === raceSession.id && row.score == null)) {
+    return { ready:false, minimum:null, bonuses:[] }
   }
   const eligible = new Set(eligiblePlayerIds || [])
-  const sessionById = new Map(committedSessions.map(s => [s.id, s]))
-  const totals = new Map((players || []).map(p => [p.id, 0]))
   const submitted = new Set()
+  const scores = new Map()
   for (const row of forecasts || []) {
-    const session = sessionById.get(row.session_id)
-    if (!session || session.type === 'qual') continue
-    totals.set(row.player_id, (totals.get(row.player_id) || 0) + (Number(row.score) || 0))
-    const predictions = Object.values(row.predictions || {}).some(Boolean)
-    if (predictions || row.fl_pick || row.ov_pick) submitted.add(row.player_id)
+    if (row.session_id !== raceSession.id) continue
+    scores.set(row.player_id, Number(row.score) || 0)
+    if (Object.values(row.predictions || {}).some(Boolean)) submitted.add(row.player_id)
   }
-  for (const row of qualAssignments || []) {
-    if (!sessionById.has(row.session_id)) continue
-    totals.set(row.player_id, (totals.get(row.player_id) || 0) + (Number(row.score) || 0))
-    if ([[row.pilot_1,row.pred_pos_1],[row.pilot_2,row.pred_pos_2],[row.pilot_3,row.pred_pos_3]].some(([pilot,pos]) => pilot && Number(pos) > 0)) submitted.add(row.player_id)
-  }
-  const actuals = [...submitted].filter(id => !eligible.has(id)).map(id => totals.get(id) || 0)
+  const actuals = [...submitted].map(playerId => scores.get(playerId) || 0)
   const minimum = actuals.length ? Math.min(...actuals) : null
   const bonuses = minimum == null ? [] : (players || [])
     .filter(player => eligible.has(player.id) && !submitted.has(player.id))
-    .map(player => ({ player_id: player.id, points: minimum }))
-  return { ready: true, minimum, bonuses }
+    .map(player => ({ player_id:player.id, points:minimum }))
+  return { ready:true, minimum, bonuses }
 }
 
 /** Competition ranking: tied scores share a place and skip the following place. */

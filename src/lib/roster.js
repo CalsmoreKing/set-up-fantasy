@@ -13,7 +13,22 @@ export const PILOT_TEAM_ROSTER = [
   { team:'Cadillac', drivers:['Bottas','Pérez'] },
 ]
 export const ACTIVE_PILOTS_2026 = PILOT_TEAM_ROSTER.flatMap(team => team.drivers)
-export const RESERVE_PILOTS_2026 = ['Tsunoda','Hirakawa','Câmara']
+// Team-by-team 2026 reserves. Use the surnames used elsewhere in the app.
+// Camara and Slater were explicitly supplied by the user in the latest correction.
+export const TEAM_RESERVE_PILOTS_2026 = Object.freeze({
+  'McLaren':['Fornaroli',"O'Ward"],
+  'Mercedes':['Vesti'],
+  'Red Bull':['Tsunoda'],
+  'Ferrari':['Giovinazzi'],
+  'Williams':['Browning'],
+  'Racing Bulls':['Tsunoda','Iwasa'],
+  'Aston Martin':['Crawford','Vandoorne'],
+  'Haas':['Hirakawa','Doohan','Camara'],
+  'Audi':['Slater'],
+  'Alpine':['Aron','Maini'],
+  'Cadillac':['Zhou'],
+})
+export const RESERVE_PILOTS_2026 = [...new Set(Object.values(TEAM_RESERVE_PILOTS_2026).flat())]
 // Backward-compatible export: consumers of the roulette pool get starters only.
 export const PILOTS_2026_ORDER = ACTIVE_PILOTS_2026
 
@@ -24,7 +39,7 @@ export function buildStagePilotPool(changes = []) {
     .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))) {
     const team = PILOT_TEAM_ROSTER.find(row => row.team === change.team_name)
     if (!team || !team.drivers.includes(change.outgoing_driver)) continue
-    if (!RESERVE_PILOTS_2026.includes(change.incoming_driver) || usedReserves.has(change.incoming_driver)) continue
+    if (!(TEAM_RESERVE_PILOTS_2026[change.team_name] || []).includes(change.incoming_driver) || usedReserves.has(change.incoming_driver)) continue
     const index = starters.indexOf(change.outgoing_driver)
     if (index < 0) continue
     starters[index] = change.incoming_driver
@@ -107,27 +122,40 @@ export function priorQualAssignments(assignments, currentSessionId, currentStage
 // The remaining 2026 qualifying rounds use the regular Vegas slot plus the two double rounds.
 export const FUTURE_QUAL_SLOT_BASE = { 23:1, 24:2, 25:2 }
 
-/** Allocate the outstanding unique-driver slots to this round, putting catch-up slots first. */
+/** Build one per-player plan across all remaining Vegas/Qatar/UAE qualifying rounds. */
+export function qualifyingPlanForAvailable(availableCount, fromStageOrder = 23, maxPerStage = 3) {
+  const orders = Object.keys(FUTURE_QUAL_SLOT_BASE).map(Number).filter(order => order >= Number(fromStageOrder)).sort((a,b)=>a-b)
+  const plan = Object.fromEntries(orders.map(order => [order, 0]))
+  let remaining = Math.max(0, Number(availableCount) || 0)
+  for (const order of orders) {
+    const future = orders.filter(value => value >= order)
+    const baseTotal = future.reduce((sum, value) => sum + Math.min(maxPerStage, FUTURE_QUAL_SLOT_BASE[value]), 0)
+    const maxTotal = future.length * maxPerStage
+    let extras = Math.max(0, Math.min(remaining, maxTotal) - baseTotal)
+    const counts = future.map(value => Math.min(maxPerStage, FUTURE_QUAL_SLOT_BASE[value]))
+    while (extras > 0) {
+      let placed = false
+      for (let index = 0; index < counts.length && extras > 0; index++) {
+        if (counts[index] >= maxPerStage) continue
+        counts[index]++
+        extras--
+        placed = true
+      }
+      if (!placed) break
+    }
+    const count = Math.min(remaining, counts[0] || 0)
+    plan[order] = count
+    remaining -= count
+  }
+  return plan
+}
+
+/** The active individual allocation for this round, with catch-up slots first. */
 export function qualifyingSlotsForStage(availableCount, stageOrder, maxPerStage = 3) {
   const order = Number(stageOrder)
-  const futureOrders = Object.keys(FUTURE_QUAL_SLOT_BASE).map(Number).filter(value => value >= order).sort((a,b)=>a-b)
-  if (!futureOrders.length || !Number.isFinite(order)) return 1
-  const base = futureOrders.map(value => FUTURE_QUAL_SLOT_BASE[value])
-  let extras = Math.max(0, Math.min(Number(availableCount) || 0, futureOrders.length * maxPerStage) - base.reduce((a,b)=>a+b,0))
-  const counts = base.map(value => Math.min(maxPerStage, value))
-  while (extras > 0) {
-    let placed = false
-    for (let i=0; i<counts.length && extras>0; i++) {
-      if (counts[i] >= maxPerStage) continue
-      counts[i]++
-      extras--
-      placed = true
-    }
-    if (!placed) break
-  }
-  const index = futureOrders.indexOf(order)
-  if (index >= 0) return Math.min(Number(availableCount) || 0, counts[index])
-  return 1
+  if (!Number.isFinite(order)) return 1
+  const plan = qualifyingPlanForAvailable(availableCount, order, maxPerStage)
+  return Object.hasOwn(plan, order) ? plan[order] : 1
 }
 
 // These two profiles first entered the game before Madrid (order 16); earlier GPs qualify for newcomer awards.

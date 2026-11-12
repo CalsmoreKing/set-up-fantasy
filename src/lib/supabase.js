@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { PILOTS_2026_ORDER, RESERVE_PILOTS_2026 } from './roster.js'
-export { USED_PILOTS, PILOTS_2026_ORDER, ACTIVE_PILOTS_2026, RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, buildStagePilotPool, qualifyingSlotsForStage, NEWCOMER_FIRST_STAGE_ORDER, newcomerPlayersForStage } from './roster.js'
+export { USED_PILOTS, PILOTS_2026_ORDER, ACTIVE_PILOTS_2026, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, buildStagePilotPool, qualifyingSlotsForStage, qualifyingPlanForAvailable, NEWCOMER_FIRST_STAGE_ORDER, newcomerPlayersForStage } from './roster.js'
 export { calcRaceScore, calcQualScore, calcQualAssignmentScore, calcSprintScore } from './scoring.js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL

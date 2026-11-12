@@ -3,8 +3,8 @@ import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
 import PodiumCalendar from '../components/PodiumCalendar'
-import ScoreAuditModal from '../components/ScoreAuditModal'
 import { canonicalStoredScore } from '../lib/scoring'
+import { ARCHIVE_PREVIEW, archiveScoresForStage } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -25,7 +25,6 @@ export default function StandingsPage() {
   const [sortCol,         setSortCol]         = useState('total')
   const [statsOpen,       setStatsOpen]       = useState(false)
   const [podiumOpen,      setPodiumOpen]      = useState(false)
-  const [auditOpen,       setAuditOpen]       = useState(false)
   const [sortDir,         setSortDir]         = useState('desc')
 
   // Load players + stages + committed sessions
@@ -37,10 +36,11 @@ export default function StandingsPage() {
     ]).then(([p, s, cs]) => {
       const stagesData = s.data || []
       const committedIds = new Set((cs.data||[]).map(x => x.stage_id))
+      ARCHIVE_PREVIEW.sessions.forEach(session => committedIds.add(session.stage_id))
       setPlayers(p.data||[])
       setStages(stagesData)
       setStagesWithCommit(committedIds)
-      // Default: last stage with any committed session
+      // Default to the latest live round; archives remain available in the selector.
       const withCommit = stagesData.filter(st => Number(st.sort_order) >= 10 && committedIds.has(st.id))
       if (withCommit.length) setStageTab(withCommit[withCommit.length-1].key)
       setLoading(false)
@@ -57,31 +57,43 @@ export default function StandingsPage() {
       .eq('stage_id', stage.id)
       .then(async ({ data: sessList, error: sessionsError }) => {
         if (sessionsError) throw sessionsError
+        if (Number(stage.sort_order) < 10 && !(sessList || []).length) {
+          setStageScores(archiveScoresForStage(stage.key))
+          return
+        }
         const scores = {}
+        let bonusRows = []
+        const bonusResult = await supabase.from('stage_newcomer_bonuses').select('player_id,points').eq('stage_id',stage.id)
+        if (!bonusResult.error) bonusRows = bonusResult.data || []
+        else if (bonusResult.error.code !== 'PGRST205' && bonusResult.error.code !== '42P01') throw bonusResult.error
         for (const session of (sessList || [])) {
           if (!session.committed) continue
           if (session.type === 'qual') {
             const { data: assignments, error } = await supabase.from('qual_assignments')
-              .select('player_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .select('player_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
               .eq('session_id', session.id)
             if (error) throw error
             ;(assignments || []).forEach(assignment => {
-              if (!scores[assignment.player_id]) scores[assignment.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
+              if (!scores[assignment.player_id]) scores[assignment.player_id] = { qual:0, qualBonus:0, sprint:0, race:0, newcomerBonus:0 }
               scores[assignment.player_id].qual += canonicalStoredScore(assignment)
             })
           } else {
             const { data: forecasts, error } = await supabase.from('forecasts')
-              .select('player_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').eq('session_id', session.id)
+              .select('player_id,score,score_breakdown,predictions,fl_pick,ov_pick').eq('session_id', session.id)
             if (error) throw error
             ;(forecasts || []).forEach(forecast => {
-              if (!scores[forecast.player_id]) scores[forecast.player_id] = { qual:0, qualBonus:0, sprint:0, race:0 }
+              if (!scores[forecast.player_id]) scores[forecast.player_id] = { qual:0, qualBonus:0, sprint:0, race:0, newcomerBonus:0 }
               const score = canonicalStoredScore(forecast)
               scores[forecast.player_id][session.type] = score
             })
           }
         }
+        for (const bonus of bonusRows) {
+          if (!scores[bonus.player_id]) scores[bonus.player_id] = {qual:0,qualBonus:0,sprint:0,race:0,newcomerBonus:0}
+          scores[bonus.player_id].newcomerBonus += Number(bonus.points)||0
+        }
         Object.keys(scores).forEach(pid => {
-          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0)
+          scores[pid].total = (scores[pid].qual||0) + (scores[pid].qualBonus||0) + (scores[pid].sprint||0) + (scores[pid].race||0) + (scores[pid].newcomerBonus||0)
         })
         setStageScores(scores)
       }).catch(error => console.error('Failed to load stage score details:', error))
@@ -112,6 +124,7 @@ export default function StandingsPage() {
   })
 
   const selectedStage = stages.find(s => s.key === stageTab)
+  const selectedStageHasSprint = Boolean(selectedStage?.has_sprint || ARCHIVE_PREVIEW.sessions.some(session => session.stage_key === selectedStage?.key && session.type === 'sprint'))
 
   function toggleSort(col) {
     if (sortCol === col) setSortDir(d => d==='desc'?'asc':'desc')
@@ -150,9 +163,6 @@ export default function StandingsPage() {
         </button>
         <button className="btn btn-gold" onClick={()=>setPodiumOpen(true)}>
           🏆 КАЛЕНДАР ПОДІУМІВ
-        </button>
-        <button className="btn btn-gold" onClick={()=>setAuditOpen(true)}>
-          🔎 АУДИТ БАЛІВ
         </button>
       </div>
 
@@ -227,7 +237,7 @@ export default function StandingsPage() {
       <div style={{marginBottom:14,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
         <select className="stage-select" value={stageTab} onChange={e=>setStageTab(e.target.value)}>
           <option value="">— Оберіть етап —</option>
-          {stages.filter(s => Number(s.sort_order) >= 10 && stagesWithCommit.has(s.id)).map(s=>(
+          {stages.filter(s => stagesWithCommit.has(s.id)).map(s=>(
             <option key={s.key} value={s.key}>{s.flag} {s.name}</option>
           ))}
         </select>
@@ -244,9 +254,10 @@ export default function StandingsPage() {
             <thead>
               <tr>
                 <th>Гравець</th>
-                <SortHdr col="qual"   label="КВАЛІФІКАЦІЯ · СУМА" />
-                {selectedStage?.has_sprint && <SortHdr col="sprint" label="СПРИНТ" />}
+                <SortHdr col="qual"   label="КВАЛІФІКАЦІЯ" />
+                {selectedStageHasSprint && <SortHdr col="sprint" label="СПРИНТ" />}
                 <SortHdr col="race"  label="ГОНКА" />
+                <th>БОНУС НОВАЧКА</th>
                 <SortHdr col="total" label="СУМА" />
               </tr>
             </thead>
@@ -259,10 +270,11 @@ export default function StandingsPage() {
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
                     </td>
-                    {selectedStage?.has_sprint && (
+                    {selectedStageHasSprint && (
                       <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.sprint?'var(--text)':'var(--muted)'}}>{sc.sprint ?? '—'}</td>
                     )}
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.race?'var(--text)':'var(--muted)'}}>{sc.race ?? '—'}</td>
+                    <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.newcomerBonus?'var(--gold)':'var(--muted)'}}>{sc.newcomerBonus || '—'}</td>
                     <td><span className="score-total">{sc.total ?? '—'}</span></td>
                   </tr>
                 )
@@ -274,7 +286,6 @@ export default function StandingsPage() {
 
       <StatsModal open={statsOpen} onClose={()=>setStatsOpen(false)} players={players} />
       <PodiumCalendar open={podiumOpen} onClose={()=>setPodiumOpen(false)} />
-      <ScoreAuditModal open={auditOpen} onClose={()=>setAuditOpen(false)} players={players} />
     </main>
   )
 }

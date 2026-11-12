@@ -43,6 +43,13 @@ test('podium always contains fixed P1, P2 and P3 rows when three score tiers exi
   ])
 })
 
+test('podium totals include newcomer race bonuses without changing the underlying session scores', () => {
+  const podium = rankEventPodium(players,[{id:'r',stage_id:'gp',type:'race',committed:true}],[{session_id:'r',player_id:'a',score:8}],[],[{stage_id:'gp',player_id:'b',points:9}])
+  assert.equal(podium[0].total,9)
+  assert.deepEqual(podium[0].players.map(player=>player.id),['b'])
+  assert.equal(podium[1].total,8)
+})
+
 test('a GP podium is not final until the race and every scheduled session are committed', () => {
   assert.equal(isCompletedGrandPrix(sessions), true)
   assert.equal(isCompletedGrandPrix([{id:'q',type:'qual',committed:true},{id:'r',type:'race',committed:false}]), false)

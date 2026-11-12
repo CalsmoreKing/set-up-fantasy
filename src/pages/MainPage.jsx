@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
 import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments } from '../lib/roster'
+import { archiveSessionsForStage, archiveForecastsForSession, archiveQualifyingForSession, ARCHIVE_PREVIEW } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
 
@@ -47,6 +48,22 @@ export default function MainPage() {
     if (!stageKey || !stages.length) return
     const stage = stages.find(s => s.key === stageKey)
     if (!stage) return
+    if (Number(stage.sort_order) < 10) {
+      setStagePilotChanges([])
+      supabase.from('sessions').select('*').eq('stage_id',stage.id).then(({data,error})=>{
+        if (error) { setCommitMsg(`Не вдалося завантажити сесії ${stage.name}: ${error.message}`); return }
+        if (data?.length) {
+          const map = Object.fromEntries(data.map(session=>[session.type,session]))
+          setSessions(map)
+          setSessionType(['race','sprint','qual'].find(type=>map[type]&&!map[type].committed)||'race')
+        } else {
+          const archiveMap = Object.fromEntries(archiveSessionsForStage(stage.key,stage.id).map(session=>[session.type,session]))
+          setSessions(archiveMap)
+          setSessionType(['race','sprint','qual'].find(type=>archiveMap[type])||'race')
+        }
+      })
+      return
+    }
     supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true)
       .order('created_at').then(({ data, error }) => {
         if (error) { setStagePilotChanges([]); return }
@@ -74,6 +91,11 @@ export default function MainPage() {
   useEffect(() => {
     const session = sessions[sessionType]
     if (!session) return
+    if (session.archive_preview) {
+      setForecasts(Object.fromEntries(archiveForecastsForSession(session.id).map(row => [row.player_id, row])))
+      setQualAssign(Object.fromEntries(archiveQualifyingForSession(session.id).map(row => [row.player_id, row])))
+      return
+    }
     Promise.all([
       supabase.from('forecasts').select('*').eq('session_id', session.id),
       supabase.from('qual_assignments').select('*').eq('session_id', session.id),
@@ -88,6 +110,7 @@ export default function MainPage() {
   useEffect(() => {
     const session = sessions[sessionType]
     if (!session) return
+    if (session.archive_preview) { setQualHistory([]); return }
     const stageOrder = stages.find(stage => stage.key === stageKey)?.sort_order
     supabase.from('qual_assignments').select('id,session_id,player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))')
       .then(({data}) => setQualHistory(priorQualAssignments(data, session.id, stageOrder)))
@@ -106,12 +129,12 @@ export default function MainPage() {
     return [player.id, qualifyingSlotsForStage(available, stages.find(stage => stage.key === stageKey)?.sort_order)]
   }))
 
-  const activeStages = stages.filter(stage => Number(stage.sort_order) >= 10 && !stage.is_archived)
+  const navigationStages = stages.filter(stage => Number(stage.sort_order) < 10 || !stage.is_archived)
   const currentStage   = stages.find(s => s.key === stageKey)
   const currentSession = sessions[sessionType]
-  const currentStageIndex = activeStages.findIndex(stage => stage.key === stageKey)
+  const currentStageIndex = navigationStages.findIndex(stage => stage.key === stageKey)
   function moveStage(step) {
-    const nextStage = activeStages[currentStageIndex + step]
+    const nextStage = navigationStages[currentStageIndex + step]
     if (nextStage) setStageKey(nextStage.key)
   }
 
@@ -165,23 +188,25 @@ export default function MainPage() {
   const effectiveSession = currentSession ? { ...currentSession, results:normalizedResults, fl_pilot:normalizedFlResult, ov_pilot:normalizedOvResult } : currentSession
 
   async function saveResults(results, fl, ov) {
-    if (!currentSession || Number(currentStage?.sort_order) < 10) return
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Це локальна копія без запису в базу. Спершу відновіть архівні сесії в Supabase.'); return }
     const update = { results }
     if (fl !== undefined) update.fl_pilot = fl
     if (ov !== undefined) update.ov_pilot = ov
-    const { data } = await supabase.from('sessions')
+    const { data, error } = await supabase.from('sessions')
       .update(update).eq('id', currentSession.id).select().single()
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти результати: ${error.message}`); return }
     if (data) {
       setSessions(prev => ({ ...prev, [sessionType]: data }))
       await supabase.from('audit_log').insert({ action:'save_results', actor:me?.name || user?.email || 'Адміністратор', details:{ stage:stageKey, stage_name:currentStage?.name, type:sessionType, session_id:currentSession.id, previous:{results:currentSession.results,fl_pilot:currentSession.fl_pilot,ov_pilot:currentSession.ov_pilot}, next:{results,fl_pilot:fl,ov_pilot:ov}, actor_name:me?.name || null, actor_email:user?.email || null, actor_user_id:user?.id || null } })
+      if (ov !== undefined) setCommitMsg('✓ Прорив збережено')
     }
   }
 
   async function saveForecast(playerId, preds, fl, ov) {
-    if (!currentSession || Number(currentStage?.sort_order) < 10) return
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     const predsObj = {}
     preds.forEach((p, i) => { if (p) predsObj[i+1] = p })
-    const { data } = await supabase.from('forecasts').upsert({
+    const { data, error } = await supabase.from('forecasts').upsert({
       session_id: currentSession.id,
       player_id:  playerId,
       predictions: predsObj,
@@ -189,22 +214,24 @@ export default function MainPage() {
       ov_pick: ov || '',
       updated_at: new Date().toISOString(),
     }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти прогноз: ${error.message}`); return }
     if (data) setForecasts(prev => ({ ...prev, [playerId]: data }))
   }
 
   async function saveQualAssign(playerId, pilots, positions) {
-    if (!currentSession || Number(currentStage?.sort_order) < 10) return
-    const { data } = await supabase.from('qual_assignments').upsert({
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    const { data, error } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id, player_id: playerId,
       pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
       pred_pos_1: positions[0]||null, pred_pos_2: positions[1]||null, pred_pos_3: positions[2]||null,
     }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`⚠ Не вдалося зберегти пілота кваліфікації: ${error.message}`); return }
     if (data) setQualAssign(prev => ({ ...prev, [playerId]: data }))
   }
 
   // ── COMMIT INLINE ──
   async function handleCommit() {
-    if (!currentSession || Number(currentStage?.sort_order) < 10) return
+    if (!currentSession || currentSession.archive_preview) return
     if (!window.confirm(`Зарахувати бали за ${currentStage?.name} — ${sessionType.toUpperCase()}?\nЦе заблокує сесію назавжди.`)) return
     setCommitting(true)
     try {
@@ -235,7 +262,7 @@ export default function MainPage() {
           const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
           const { total, breakdown } = calcRaceScore(preds, normalizeStageDriver(f.fl_pick, stagePilotChanges), normalizeStageDriver(f.ov_pick, stagePilotChanges), results, flResult, ovResult, currentStage?.sort_order)
           updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
-          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown, scored_input:{ predictions:Object.fromEntries(preds.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)), fl_pick:normalizeStageDriver(f.fl_pick,stagePilotChanges), ov_pick:normalizeStageDriver(f.ov_pick,stagePilotChanges) } })
+          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
           bdLog.push({ player: f.players?.name, score: total })
         }
       } else if (sessionType === 'qual') {
@@ -248,7 +275,7 @@ export default function MainPage() {
           }
           const { total, breakdown } = calcQualAssignmentScore(normalized, results, currentStage?.sort_order)
           updates.push({ id: qa.players?.id, delta: total-(Number(qa.score)||0) })
-          qualScores.push({ id:qa.id, score:total, scored_input:{ pilot_1:normalized.pilot_1, pred_pos_1:qa.pred_pos_1, pilot_2:normalized.pilot_2, pred_pos_2:qa.pred_pos_2, pilot_3:normalized.pilot_3, pred_pos_3:qa.pred_pos_3 } })
+          qualScores.push({ id:qa.id, score:total })
           bdLog.push({ player: qa.players?.name, score: total, breakdown })
         }
       } else if (sessionType === 'sprint') {
@@ -257,12 +284,12 @@ export default function MainPage() {
           const preds = Array.from({length:sprintSlots}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
           const { total, breakdown } = calcSprintScore(preds, results, currentStage?.sort_order, normalizeStageDriver(f.fl_pick,stagePilotChanges), normalizedFlResult)
           updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
-          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown, scored_input:{ predictions:Object.fromEntries(preds.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)), fl_pick:normalizeStageDriver(f.fl_pick,stagePilotChanges), ov_pick:normalizeStageDriver(f.ov_pick,stagePilotChanges) } })
+          forecastScores.push({ id:f.id, score:total, score_breakdown:breakdown })
           bdLog.push({ player: f.players?.name, score: total })
         }
       }
 
-      // One database transaction replaces scored rows, updates only score deltas, and locks the session.
+      // One database transaction replaces scored rows, updates score deltas, and locks the session.
       const { error: applyError } = await supabase.rpc('apply_session_scores', {
         p_session_id: currentSession.id,
         p_forecast_scores: forecastScores,
@@ -301,7 +328,7 @@ export default function MainPage() {
     teamGroups[p.team].push(p)
   })
 
-  const availableSessions = [...(currentStage?.has_sprint ? ['sprint'] : []), 'qual', 'race']
+  const availableSessions = ['sprint','qual','race'].filter(type => Boolean(sessions[type]) || (type === 'sprint' && currentStage?.has_sprint))
 
   if (loading) return <main><div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2}}>ЗАВАНТАЖЕННЯ...</div></main>
 
@@ -311,13 +338,13 @@ export default function MainPage() {
       <div className="stage-bar">
         <div className="stage-stepper" aria-label="Перемикання етапів">
           <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
-          <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= activeStages.length - 1} onClick={() => moveStage(1)}>▼</button>
+          <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
         </div>
         <select className="stage-select" value={stageKey} onChange={e=>setStageKey(e.target.value)}>
           <option value="">— Оберіть етап —</option>
-          {activeStages.map(s => (
+          {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
-              {s.flag} {s.name} {s.is_locked ? '🔒' : ''}
+              {s.flag} {s.name}
             </option>
           ))}
         </select>
@@ -346,6 +373,14 @@ export default function MainPage() {
           </span>
         )}
       </div>
+
+      {currentSession?.archive_preview && (
+        <div className="archive-preview-banner" role="status">
+          <strong>ДАНІ ЩЕ НЕ ВІДНОВЛЕНО · {currentStage?.name}</strong>
+          <span>Це лише локальна копія прогнозів і результатів. Сесії ще не завантажені в Supabase, тому збереження та зарахування вимкнені до відновлення.</span>
+          {ARCHIVE_PREVIEW.results_need_final_review && <span className="archive-preview-warning">Результати ще потребують фінальної звірки перед імпортом.</span>}
+        </div>
+      )}
 
       {!stageKey && (
         <div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2,padding:'30px 0',textAlign:'center'}}>
@@ -379,7 +414,7 @@ export default function MainPage() {
           )}
 
           {/* Commit button — only admin, only unlocked, only not yet committed */}
-          {isAdmin && Number(currentStage?.sort_order) >= 10 && !isLocked && currentSession && !currentSession.committed && (
+          {isAdmin && !currentSession?.archive_preview && !isLocked && currentSession && !currentSession.committed && (
             <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20,padding:'12px 16px',background:'rgba(225,6,0,.06)',border:'1px solid rgba(225,6,0,.2)',borderRadius:6}}>
               <button
                 className="btn btn-red"

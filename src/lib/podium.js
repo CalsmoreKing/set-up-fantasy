@@ -1,7 +1,7 @@
 const SCORE_TYPES = new Set(['qual', 'sprint', 'race'])
 
 /** Sum persisted fantasy points across all scored sessions belonging to one GP. */
-export function buildEventScores(sessions, forecasts, qualifyingAssignments) {
+export function buildEventScores(sessions, forecasts, qualifyingAssignments, newcomerBonuses = []) {
   const sessionById = new Map((sessions || []).filter(s => s.committed && SCORE_TYPES.has(s.type)).map(s => [s.id, s]))
   const totals = new Map()
   const add = (sessionId, playerId, rawScore) => {
@@ -16,12 +16,20 @@ export function buildEventScores(sessions, forecasts, qualifyingAssignments) {
 
   for (const forecast of forecasts || []) add(forecast.session_id, forecast.player_id, forecast.score)
   for (const assignment of qualifyingAssignments || []) add(assignment.session_id, assignment.player_id, assignment.score)
+  const completedStageIds = new Set([...sessionById.values()].map(session=>session.stage_id))
+  for (const bonus of newcomerBonuses || []) {
+    if (!completedStageIds.has(bonus.stage_id) || !bonus.player_id) continue
+    const entry = totals.get(bonus.player_id) || {qual:0,sprint:0,race:0,total:0}
+    const points = Number(bonus.points)||0
+    entry.total += points
+    totals.set(bonus.player_id,entry)
+  }
   return totals
 }
 
 /** Keep tied players together; each distinct score fills the next fixed podium place. */
-export function rankEventPodium(players, sessions, forecasts, qualifyingAssignments) {
-  const totals = buildEventScores(sessions, forecasts, qualifyingAssignments)
+export function rankEventPodium(players, sessions, forecasts, qualifyingAssignments, newcomerBonuses = []) {
+  const totals = buildEventScores(sessions, forecasts, qualifyingAssignments, newcomerBonuses)
   const ranked = (players || [])
     .filter(player => totals.has(player.id))
     .map(player => ({ ...player, ...(totals.get(player.id)) }))

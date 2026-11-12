@@ -38,8 +38,8 @@ export default function ProfilePage() {
     let forecasts = [], qualifying = [], bonuses = []
     if (sessionIds.length) {
       const [f,q,b] = await Promise.all([
-        supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('player_id,session_id,score,scored_input,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
         supabase.from('stage_newcomer_bonuses').select('player_id,stage_id,points').eq('player_id',player.id),
       ])
       forecasts = f.data || []
@@ -51,8 +51,7 @@ export default function ProfilePage() {
     setRoster(allPlayers)
     const mySeasonRank = [...allPlayers].sort((a,b) => (Number(b.base_pts)||0) - (Number(a.base_pts)||0)).findIndex(p => p.id === player.id) + 1
     setSeasonRank(mySeasonRank || null)
-    const activeStageIds = new Set(stages.filter(stage => Number(stage.sort_order) >= 10).map(stage => stage.id))
-    const raceSessions = sessions.filter(session => session.type === 'race' && activeStageIds.has(session.stage_id))
+    const raceSessions = sessions.filter(session => session.type === 'race')
     const rows = []
     for (const stage of stages) {
       const session = raceSessions.find(s => s.stage_id === stage.id)
@@ -64,8 +63,7 @@ export default function ProfilePage() {
     }
     setPosterRows(rows)
     setSeasonTotal(rows.reduce((sum, row) => sum + row.score, 0))
-    const currentStageIds = new Set(stages.filter(stage => Number(stage.sort_order) >= 10).map(stage => stage.id))
-    const activeSessionIds = new Set(sessions.filter(session => currentStageIds.has(session.stage_id)).map(session => session.id))
+    const activeSessionIds = new Set(sessions.filter(session=>session.committed).map(session=>session.id))
     const activePoints = forecasts.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
       + qualifying.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
     const newcomerPoints = bonuses.reduce((sum,row)=>sum+(Number(row.points)||0),0)

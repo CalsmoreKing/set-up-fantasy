@@ -760,6 +760,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .stage-highlight .country-flag-emoji, .stage-highlight .country-flag-svg { font-size: 14px; grid-row: span 2; }
 .stage-highlight > div b { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .stage-highlight > div strong { color: var(--text); font: 700 9px 'Orbitron', sans-serif; }
+.stage-highlight > div small { grid-column: 2; color: var(--muted); font-size: 8px; }
 .stage-highlight em { color: var(--muted); font-size: 9px; }
 .mini-stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 9px; }
 .mini-stat { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px; background: #151515; border: 1px solid #242424; border-radius: 5px; }
@@ -887,3 +888,72 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   .stage-bar { gap: 7px; padding: 9px; }
   .stage-stepper button { width: 28px; height: 18px; }
 }
+
+/* Admin qualifying plan and event-scoped reserve controls */
+.admin-plan-card,.reserve-admin-section{background:linear-gradient(145deg,rgba(20,25,34,.96),rgba(12,15,21,.98));border:1px solid rgba(255,255,255,.09);border-radius:10px;padding:clamp(16px,3vw,26px);margin-bottom:22px;box-shadow:0 15px 40px rgba(0,0,0,.2)}
+.admin-plan-heading,.reserve-admin-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+.admin-plan-heading h2,.reserve-admin-heading h2{font-size:clamp(17px,2vw,22px);margin:5px 0 8px;color:var(--text)}
+.admin-plan-heading p,.reserve-admin-note,.admin-plan-footnote,.team-created-note,.admin-ledger-heading p{color:var(--muted);font-size:12px;line-height:1.6;margin:0;max-width:780px}
+.admin-plan-kicker{font:700 9px 'Orbitron',sans-serif;letter-spacing:2px;color:var(--red)}
+.admin-plan-badge{border:1px solid rgba(107,255,138,.34);background:rgba(107,255,138,.08);color:var(--green);border-radius:999px;padding:8px 12px;font:700 9px 'Orbitron',sans-serif;letter-spacing:1px;white-space:nowrap}
+.admin-plan-table-wrap{overflow:auto;border:1px solid rgba(255,255,255,.07);border-radius:8px}
+.admin-plan-table{width:100%;min-width:650px;border-collapse:collapse;text-align:left}
+.admin-plan-table th{padding:12px;background:rgba(255,255,255,.035);color:var(--muted);font:700 9px 'Orbitron',sans-serif;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+.admin-plan-table td{padding:12px;border-top:1px solid rgba(255,255,255,.055);font-size:12px;color:var(--text)}
+.admin-plan-table td small{display:block;color:var(--muted);margin-top:3px}
+.admin-plan-table td b{display:inline-grid;place-items:center;min-width:26px;height:26px;border-radius:7px;background:rgba(225,6,0,.12);color:#ff817c}
+.admin-plan-table .plan-remaining{color:#ffbf69;font-weight:700}.admin-plan-table .plan-complete{color:var(--green);font-weight:700}
+.admin-plan-footnote{margin-top:12px;font-size:11px}
+.reserve-stage-select{display:grid;gap:6px;min-width:min(100%,260px);font-size:10px;color:var(--muted)}
+.reserve-select{appearance:auto;min-width:0;width:100%;background:#171c25!important;color:#f3f4f6!important;border:1px solid #3b4452!important;border-radius:7px;padding:10px 11px;font-family:inherit;font-size:12px;font-weight:500;outline:none;box-shadow:inset 0 1px 2px rgba(0,0,0,.3)}
+.reserve-select:focus{border-color:var(--red)!important;box-shadow:0 0 0 3px rgba(225,6,0,.13)}
+.reserve-select option{background:#171c25;color:#f3f4f6}
+.reserve-admin-note{margin:-4px 0 16px;font-size:11px}
+.reserve-team-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:12px}
+.reserve-team-card{min-width:0;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:15px;display:grid;gap:12px}
+.reserve-team-title{display:flex;justify-content:space-between;align-items:center;gap:10px}.reserve-team-title strong{font-size:13px;color:var(--text)}.reserve-team-title span{font-size:9px;color:var(--muted);text-align:right}
+.reserve-active-list{display:flex;flex-wrap:wrap;gap:6px}.reserve-driver-chip{font-size:10px;padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.055);color:#dce0e8}.reserve-driver-chip.is-replaced{opacity:.5;text-decoration:line-through}
+.reserve-form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.reserve-form-row .reserve-save-btn{grid-column:1/-1}
+.reserve-save-btn,.ledger-refresh-btn{border:1px solid rgba(225,6,0,.45);background:rgba(225,6,0,.13);color:#ffaaa6;border-radius:7px;padding:10px 12px;font:700 9px 'Orbitron',sans-serif;letter-spacing:.7px;cursor:pointer;transition:.18s}
+.reserve-save-btn:hover:not(:disabled),.ledger-refresh-btn:hover{background:var(--red);color:white}.reserve-save-btn:disabled{opacity:.38;cursor:not-allowed}
+.reserve-saved-change{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 9px;border-radius:6px;background:rgba(107,255,138,.055);font-size:11px;color:var(--green)}
+.reserve-saved-change button{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:5px 8px;font-size:10px;cursor:pointer}
+.reserve-unconfirmed{font-size:11px;color:var(--muted);border-top:1px solid rgba(255,255,255,.07);padding-top:10px}
+.admin-ledger-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}.admin-ledger-heading .section-label{margin:0 0 5px}.admin-ledger-heading p{font-size:11px}.ledger-refresh-btn{white-space:nowrap}
+.team-created-note{margin:-7px 0 12px;font-size:11px}
+@media(max-width:580px){.reserve-form-row{grid-template-columns:1fr}.reserve-form-row .reserve-save-btn{grid-column:auto}.admin-plan-badge{margin-top:0}}
+
+/* The rules are grouped by the two scoring eras. */
+.rules-intro{color:var(--muted);font-size:13px;line-height:1.65;margin:-4px 0 16px}
+.rules-period{margin:0 0 14px;border:1px solid rgba(255,255,255,.09);border-radius:9px;background:rgba(18,22,30,.72);overflow:hidden}
+.rules-period>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;list-style:none;padding:16px 18px;font:700 12px 'Orbitron',sans-serif;letter-spacing:1.1px;color:var(--text)}
+.rules-period>summary::-webkit-details-marker{display:none}
+.rules-period>summary::after{content:'＋';color:var(--red);margin-left:auto}
+.rules-period[open]>summary::after{content:'−'}
+.rules-period>summary span{color:var(--red)}
+.rules-period>summary small{font-family:inherit;font-size:10px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.rules-period-body{padding:0 16px 14px;border-top:1px solid rgba(255,255,255,.06)}
+.rules-period-body .rules-section{padding:14px 2px;margin:0;border:0;border-radius:0;background:transparent}
+.rules-period-body .rules-section+ .rules-section{border-top:1px solid rgba(255,255,255,.07)}
+.rules-period-body h3,.rules-page>.rules-section h3{font:700 11px 'Orbitron',sans-serif;letter-spacing:1.3px;color:var(--gold);margin:0 0 10px;text-transform:uppercase}
+.rules-period-body p,.rules-page>.rules-section p{font-size:12px;line-height:1.75;color:var(--muted);margin:0 0 10px}
+.rules-period-body p strong{color:var(--text)}
+.rules-period-body .rules-note,.rules-page>.rules-section .rules-note{font-size:11px;line-height:1.6;margin:10px 0 0}
+.rules-period-body .rules-table{margin:8px 0 12px}
+@media(max-width:560px){.rules-period>summary{padding:14px}.rules-period>summary small{width:100%}.rules-period-body{padding:0 12px 10px}}
+
+.admin-stage-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:10px 12px}
+.admin-stage-name{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;flex:1 1 180px}
+.admin-stage-order{font:700 9px 'Orbitron',sans-serif;color:var(--muted)}
+.admin-recalc-btn{padding:7px 11px!important;font-size:9px!important;border-color:rgba(255,190,70,.35)!important;color:#ffd27d!important}
+.admin-recalc-btn:not(:disabled):hover{background:rgba(255,190,70,.12)!important}
+.admin-recalc-btn:disabled{opacity:.38;cursor:not-allowed}
+.overtake-picker{position:relative;width:100%;min-width:0}
+.overtake-picker-trigger{display:flex!important;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;cursor:pointer;text-align:left;overflow:hidden}
+.overtake-picker-trigger span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.overtake-picker-menu{position:absolute;z-index:50;top:calc(100% + 5px);right:0;left:0;min-width:200px;max-height:260px;overflow-y:auto;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:7px;box-shadow:0 12px 30px rgba(0,0,0,.55)}
+.overtake-picker-option{display:flex;align-items:center;gap:9px;padding:7px 5px;color:var(--text);font-size:12px;white-space:nowrap;cursor:pointer;border-radius:4px}
+.overtake-picker-option:hover{background:rgba(255,255,255,.06)}
+.overtake-picker-option input{accent-color:var(--red);margin:0}
+.overtake-picker-apply{width:100%;margin-top:7px;padding:9px 10px;border:0;border-radius:5px;background:var(--red);color:#fff;font:700 9px 'Orbitron',sans-serif;letter-spacing:.8px;cursor:pointer}
+.overtake-picker-apply:hover{filter:brightness(1.12)}

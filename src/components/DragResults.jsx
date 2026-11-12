@@ -15,6 +15,7 @@ export default function DragResults({
   const [dragFrom,  setDragFrom]    = useState(null)
   const [dragOver,  setDragOver]    = useState(null)
   const [selPilot,  setSelPilot]    = useState(null)
+  const [ovOpen, setOvOpen] = useState(false)
 
   useEffect(() => {
     setLocalSlots(Array.from({length:slotsCount}, (_,i) => (session?.results||{})[i+1] || ''))
@@ -32,9 +33,12 @@ export default function DragResults({
     const winners = new Set(parseOvertakeWinners(localOv))
     if (checked) winners.add(pilot)
     else winners.delete(pilot)
-    const value = [...winners].join(', ')
-    setLocalOv(value)
-    save(localSlots, localFl, value)
+    setLocalOv([...winners].join(', '))
+  }
+
+  function applyOvertakeWinners() {
+    save(localSlots, localFl, localOv)
+    setOvOpen(false)
   }
 
   function dropOnSlot(toIdx) {
@@ -202,16 +206,17 @@ export default function DragResults({
           </div>
           {!isSprint && <div className="special-result">
             <span className="special-result-label">🚀 ПРОРИВ</span>
-            <details style={{position:'relative',width:'100%'}}>
-              <summary className="base-select" style={{cursor:'pointer',listStyle:'none'}}>
-                {parseOvertakeWinners(localOv).join(' / ') || 'Обрати пілотів'}
-              </summary>
-              <div style={{position:'absolute',zIndex:20,top:'100%',left:0,width:'max-content',minWidth:'100%',maxHeight:180,overflowY:'auto',padding:8,background:'var(--card)',border:'1px solid var(--border)',borderRadius:4,boxShadow:'0 8px 24px rgba(0,0,0,.5)'}}>
-                {driverOptions.map(p=><label key={p} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',whiteSpace:'nowrap',cursor:'pointer'}}>
+            <div className="overtake-picker">
+              <button type="button" className="base-select overtake-picker-trigger" aria-expanded={ovOpen} onClick={()=>setOvOpen(open=>!open)}>
+                <span>{parseOvertakeWinners(localOv).join(' / ') || 'Обрати пілота'}</span><span aria-hidden="true">{ovOpen?'▲':'▼'}</span>
+              </button>
+              {ovOpen && <div className="overtake-picker-menu">
+                {driverOptions.map(p=><label key={p} className="overtake-picker-option">
                   <input type="checkbox" checked={parseOvertakeWinners(localOv).includes(p)} onChange={e=>toggleOvertakeWinner(p,e.target.checked)} />{p}
                 </label>)}
-              </div>
-            </details>
+                <button type="button" className="overtake-picker-apply" onClick={applyOvertakeWinners}>Зберегти прорив</button>
+              </div>}
+            </div>
           </div>}
         </div>
       )}

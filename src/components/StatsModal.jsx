@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { canonicalStoredScore, hasForecastSubmission, hasQualifyingPrediction } from '../lib/scoring'
+import { ARCHIVE_PREVIEW } from '../lib/archivePreview'
 import CountryFlag from './CountryFlag'
 
 export default function StatsModal({ open, onClose, players }) {
@@ -109,20 +110,42 @@ export default function StatsModal({ open, onClose, players }) {
 }
 
 async function loadPlayerStats(playerId, player) {
-  const [forecastsResult, qualsResult] = await Promise.all([
+  const [forecastsResult, qualsResult, stagesResult, stageSessionsResult, newcomerResult] = await Promise.all([
     supabase.from('forecasts')
-      .select('score, score_breakdown, scored_input, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,name,flag,sort_order))')
+      .select('player_id,score, score_breakdown, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,key,name,flag,sort_order))')
       .eq('player_id', playerId),
     supabase.from('qual_assignments')
-      .select('score, scored_input, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(stage_id, committed, results, stages(id,name,flag,sort_order))')
+      .select('player_id,score, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(type,stage_id, committed, results, stages(id,key,name,flag,sort_order))')
       .eq('player_id', playerId)
       .gt('score', -1),
+    supabase.from('stages').select('id,key,name,flag,sort_order'),
+    supabase.from('sessions').select('type,stage_id,stages(key)'),
+    supabase.from('stage_newcomer_bonuses').select('stage_id,points').eq('player_id',playerId),
   ])
   if (forecastsResult.error) throw forecastsResult.error
   if (qualsResult.error) throw qualsResult.error
+  if (stagesResult.error) throw stagesResult.error
+  if (stageSessionsResult.error) throw stageSessionsResult.error
+  if (newcomerResult.error && newcomerResult.error.code !== 'PGRST205' && newcomerResult.error.code !== '42P01') throw newcomerResult.error
 
-  const savedForecasts = (forecastsResult.data || []).filter(row => row.sessions?.committed && Number(row.sessions?.stages?.sort_order)>=10 && hasForecastSubmission(row))
-  const savedQuals = (qualsResult.data || []).filter(row => row.sessions?.committed && Number(row.sessions?.stages?.sort_order)>=10 && hasQualifyingPrediction(row))
+  const stageByKey = new Map((stagesResult.data || []).map(stage => [stage.key, stage]))
+  const dbForecasts = forecastsResult.data || []
+  const dbQuals = qualsResult.data || []
+  const dbForecastKeys = new Set(dbForecasts.map(row => `${row.session_id}:${row.player_id}`))
+  const dbQualKeys = new Set(dbQuals.map(row => `${row.session_id}:${row.player_id}`))
+  const dbStageTypes = new Set((stageSessionsResult.data || []).map(row => `${row.stages?.key}:${row.type}`))
+  const staticForecasts = ARCHIVE_PREVIEW.forecasts.filter(row => row.player_id === playerId && !dbStageTypes.has(`${row.stage_key}:${row.session_type}`) && !dbForecastKeys.has(`${row.session_id}:${row.player_id}`)).map(row => {
+    const session = ARCHIVE_PREVIEW.sessions.find(item => item.id === row.session_id)
+    const stage = stageByKey.get(row.stage_key)
+    return { ...row, score:row.score, sessions:session && stage ? { ...session, committed:true, stage_id:stage.id, type:session.type, stages:stage } : null }
+  }).filter(row => row.sessions)
+  const staticQuals = ARCHIVE_PREVIEW.qualifying_assignments.filter(row => row.player_id === playerId && !dbStageTypes.has(`${row.stage_key}:qual`) && !dbQualKeys.has(`${row.session_id}:${row.player_id}`)).map(row => {
+    const session = ARCHIVE_PREVIEW.sessions.find(item => item.id === row.session_id)
+    const stage = stageByKey.get(row.stage_key)
+    return { ...row, sessions:session && stage ? { ...session, committed:true, stage_id:stage.id, type:'qual', stages:stage } : null }
+  }).filter(row => row.sessions)
+  const savedForecasts = [...dbForecasts, ...staticForecasts].filter(row => row.sessions?.committed && hasForecastSubmission(row))
+  const savedQuals = [...dbQuals, ...staticQuals].filter(row => row.sessions?.committed && hasQualifyingPrediction(row))
   const committedForecasts = savedForecasts.map(row => {
     return { ...row, score:canonicalStoredScore(row), savedScore:canonicalStoredScore(row), currentBreakdown:row.score_breakdown || [], wasRecalculated:false }
   })
@@ -138,13 +161,21 @@ async function loadPlayerStats(playerId, player) {
   const stageMap = new Map()
   const addStageScore = (stage, score, savedScore = score) => {
     if (!stage?.id) return
-    const row = stageMap.get(stage.id) || { stage, score: 0, savedScore: 0 }
+    const row = stageMap.get(stage.id) || { stage, score: 0, savedScore: 0, newcomerBonus:0 }
     row.score += Number(score) || 0
     row.savedScore += Number(savedScore) || 0
     stageMap.set(stage.id, row)
   }
   committedForecasts.forEach(row => addStageScore(row.sessions?.stages, row.score, row.savedScore))
   committedQuals.forEach(row => addStageScore(row.sessions?.stages, row.score, row.savedScore))
+  const stageById = new Map((stagesResult.data || []).map(stage=>[stage.id,stage]))
+  for (const bonus of newcomerResult.data || []) {
+    const stage = stageById.get(bonus.stage_id)
+    if (!stage) continue
+    addStageScore(stage,bonus.points)
+    const row = stageMap.get(stage.id)
+    row.newcomerBonus += Number(bonus.points)||0
+  }
   const allSessions = [...stageMap.values()].sort((a, b) => (a.stage?.sort_order || 0) - (b.stage?.sort_order || 0))
   const staleSessions = [...committedForecasts, ...committedQuals]
     .filter(row => row.wasRecalculated && row.savedScore !== row.score)
@@ -180,6 +211,7 @@ async function loadPlayerStats(playerId, player) {
     avgRace: average(byType.race),
     avgSprint: average(byType.sprint),
     avgQual: average(committedQuals.map(row => Number(row.score) || 0)),
+    newcomerBonusTotal:(newcomerResult.data||[]).reduce((sum,row)=>sum+(Number(row.points)||0),0),
     flHits, flTotal, ovHits, ovTotal, podiumHits, top5Hits,
     totalSessions: committedForecasts.length + committedQuals.length,
   }
@@ -255,6 +287,7 @@ function PlayerStatsCard({ stats, side }) {
       <StatBox label="СЕР. ГОНКА" value={stats.avgRace.toFixed(1)} />
       <StatBox label="СЕР. СПРИНТ" value={stats.avgSprint.toFixed(1)} />
       <StatBox label="СЕР. КВАЛА" value={stats.avgQual.toFixed(1)} />
+      <StatBox label="БОНУС НОВАЧКА" value={stats.newcomerBonusTotal} />
     </div>
     <div className="best-worst-grid">
       <StageHighlight label="КРАЩИЙ ГП" row={stats.best} type="best" />
@@ -278,7 +311,7 @@ function PlayerStatsCard({ stats, side }) {
 function StageHighlight({ label, row, type }) {
   return <div className={`stage-highlight stage-highlight-${type}`}>
     <span>{label}</span>
-    {row ? <div><CountryFlag flag={row.stage?.flag} /><b>{row.stage?.name}</b><strong>{row.score} pts</strong></div> : <em>Поки немає даних</em>}
+    {row ? <div><CountryFlag flag={row.stage?.flag} /><b>{row.stage?.name}</b><strong>{row.score} pts</strong>{row.newcomerBonus>0 && <small>з них бонус новачка: {row.newcomerBonus}</small>}</div> : <em>Поки немає даних</em>}
   </div>
 }
 

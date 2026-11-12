@@ -35,20 +35,21 @@ test('competition ranks share ties and skip the next place', () => {
   assert.deepEqual(podiumPlayers(players, totals).map(row => row.id), ['a', 'b', 'c'])
 })
 
-test('newcomer bonus uses the lowest whole-event score only for explicitly eligible newcomers after the stage is complete', () => {
-  const players = [{id:'experienced'}, {id:'rookie'}, {id:'no_prediction'}]
+test('newcomer bonus uses only the lowest submitted race score and ignores sprint and qualifying totals', () => {
+  const players = [{id:'experienced'}, {id:'rookie'}, {id:'no_prediction'}, {id:'not_eligible'}]
   const sessions = [
-    {id:'q',type:'qual',committed:true},
+    {id:'q',type:'qual',committed:false},
+    {id:'s',type:'sprint',committed:false},
     {id:'r',type:'race',committed:true},
   ]
   const forecasts = [
     {session_id:'r',player_id:'experienced',score:5,predictions:{1:'Norris'}},
-    {session_id:'r',player_id:'rookie',score:0,predictions:{}},
+    {session_id:'s',player_id:'experienced',score:99,predictions:{1:'Norris'}},
   ]
-  const quals = [{session_id:'q',player_id:'experienced',score:2,pilot_1:'Norris',pred_pos_1:1}]
-  assert.deepEqual(calculateNewcomerBonuses(players, sessions, forecasts, quals, ['rookie']), {
-    ready:true, minimum:7, bonuses:[{player_id:'rookie',points:7}],
+  const quals = [{session_id:'q',player_id:'experienced',score:99,pilot_1:'Norris',pred_pos_1:1}]
+  assert.deepEqual(calculateNewcomerBonuses(players, sessions, forecasts, quals, ['rookie','no_prediction']), {
+    ready:true, minimum:5, bonuses:[{player_id:'rookie',points:5},{player_id:'no_prediction',points:5}],
   })
-  assert.equal(calculateNewcomerBonuses(players, [{...sessions[0],committed:false},sessions[1]], forecasts, quals, ['rookie']).ready, false)
+  assert.equal(calculateNewcomerBonuses(players, [{...sessions[2],committed:false}], forecasts, quals, ['rookie']).ready, false)
   assert.equal(calculateNewcomerBonuses(players, sessions, [{...forecasts[0],score:null}], quals, ['rookie']).ready, false)
 })
