@@ -221,6 +221,17 @@ export default function MainPage() {
     if (data) setForecasts(prev => ({ ...prev, [playerId]: data }))
   }
 
+  async function savePolePick(playerId, pilot) {
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    const { data, error } = await supabase.from('qual_assignments').upsert({
+      session_id: currentSession.id,
+      player_id: playerId,
+      pole_pick: pilot || null,
+    }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`Не вдалося зберегти прогноз на поул: ${error.message}`); return }
+    setQualAssign(prev => ({ ...prev, [playerId]: data }))
+  }
+
   async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     const { data, error } = await supabase.from('qual_assignments').upsert({
@@ -272,6 +283,7 @@ export default function MainPage() {
         for (const qa of (qualData||[])) {
           const normalized = {
             ...qa,
+            pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
             pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
             pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
             pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
@@ -339,7 +351,7 @@ export default function MainPage() {
       const ids = stageSessions.map(session=>session.id)
       const [forecastResult,qualResult,changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
         supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',currentStage.id).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -356,9 +368,9 @@ export default function MainPage() {
         const overtake=String(session.ov_pilot||'').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),changes)).filter(Boolean).join(', ')
         if(session.type==='qual'){
           const rows=assignments.filter(row=>row.session_id===session.id).map(row=>{
-            const normalized={...row,pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
+            const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
             const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order)
-            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
           return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
@@ -503,9 +515,14 @@ export default function MainPage() {
           {/* Players grid */}
           <div className="toolbar">
             <div className="section-label" style={{margin:0,flex:1}}>
-              {sessionType==='qual'?'ПРОГНОЗИ — КВАЛІФІКАЦІЯ':sessionType==='sprint'?'ПРОГНОЗИ — СПРИНТ':'ПРОГНОЗИ — ГОНКА'}
+              {sessionType==='qual'
+                ? Number(currentStage?.sort_order)<7 ? 'ПРОГНОЗ НА ПОУЛ' : 'ПРОГНОЗИ — КВАЛІФІКАЦІЯ'
+                : sessionType==='sprint' ? 'ПРОГНОЗИ — СПРИНТ' : 'ПРОГНОЗИ — ГОНКА'}
             </div>
-            {isAdmin && sessionType==='qual' && (
+            {sessionType==='qual' && Number(currentStage?.sort_order)<7 && (
+              <span className="qual-rule-note">До Канади: обери одного пілота на поул · 1 бал</span>
+            )}
+            {isAdmin && sessionType==='qual' && Number(currentStage?.sort_order)>=7 && (
               <button className="roulette-btn all" onClick={() => rollAllQual(players, qualAssign, stageKey, currentSession?.id, setQualAssign, stagePilotOptions, currentStage?.sort_order, qualSlotsByPlayer)}>
                 🎲 РАНДОМАЙЗЕР ВСІМ
               </button>
@@ -531,6 +548,7 @@ export default function MainPage() {
               } else if (sessionType === 'qual' && qa) {
                 const normalizedAssignment = {
                   ...qa,
+                  pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
                   pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
                   pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
                   pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
@@ -595,6 +613,7 @@ export default function MainPage() {
                         forecastHidden={!canSeeForecast}
                         onSaveForecast={(preds, fl, ov) => saveForecast(p.id, preds, fl, ov)}
                         onSaveQual={(pilots, positions) => saveQualAssign(p.id, pilots, positions)}
+                        onSavePolePick={pilot => savePolePick(p.id, pilot)}
                         teamSiblingId={siblingId}
                         formData={formData}
                         liveScore={isLiveMode ? liveScores[p.id] : undefined}
@@ -613,6 +632,7 @@ export default function MainPage() {
 }
 
 async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, pilotPool = PILOTS, stageOrder, slotCounts = {}) {
+  if (Number(stageOrder) < 7) { alert('До Канади кваліфікаційний прогноз — лише вибір поула; рулетка починається з Канади.'); return }
   if (!sessionId) { alert('Спочатку оберіть сесію'); return }
   const { USED_PILOTS } = await import('../lib/supabase')
   const { data: allAssignData } = await supabase

@@ -115,7 +115,7 @@ async function loadPlayerStats(playerId, player) {
       .select('player_id,score, score_breakdown, fl_pick, ov_pick, predictions, session_id, sessions(type, stage_id, committed, results, fl_pilot, ov_pilot, stages(id,key,name,flag,sort_order))')
       .eq('player_id', playerId),
     supabase.from('qual_assignments')
-      .select('player_id,score, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(type,stage_id, committed, results, stages(id,key,name,flag,sort_order))')
+      .select('player_id,score, pole_pick, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, session_id, sessions(type,stage_id, committed, results, stages(id,key,name,flag,sort_order))')
       .eq('player_id', playerId)
       .gt('score', -1),
     supabase.from('stages').select('id,key,name,flag,sort_order'),

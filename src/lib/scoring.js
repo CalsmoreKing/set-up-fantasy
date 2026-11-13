@@ -65,14 +65,14 @@ export function calcQualScore(pilot, predPos, results) {
     : { total: 0, breakdown: [] }
 }
 
-export function calcPolePickScore(pilot, results) {
-  if (!pilot || !results.length || pilot !== results[0]) return { total: 0, breakdown: [] }
+export function calcPolePickScore(pilot, results, submitted = false) {
+  if (!submitted || !pilot || !results.length || pilot !== results[0]) return { total: 0, breakdown: [] }
   return { total: 1, breakdown: [{ label: `Поул: ${pilot}`, pts: 1 }] }
 }
 
 export function calcQualAssignmentScore(assignment, results, stageOrder = 10) {
   if (Number(stageOrder) < QUAL_ROULETTE_START_SORT_ORDER) {
-    return calcPolePickScore(assignment?.pilot_1, results)
+    return calcPolePickScore(assignment?.pole_pick, results, Boolean(assignment?.pole_pick))
   }
   return [[assignment?.pilot_1, assignment?.pred_pos_1], [assignment?.pilot_2, assignment?.pred_pos_2], [assignment?.pilot_3, assignment?.pred_pos_3]]
     .reduce((sum, [pilot, position]) => {
@@ -106,8 +106,9 @@ export function hasForecastSubmission(forecast) {
 }
 
 export function hasQualifyingPrediction(assignment) {
-  return [[assignment?.pilot_1, assignment?.pred_pos_1], [assignment?.pilot_2, assignment?.pred_pos_2], [assignment?.pilot_3, assignment?.pred_pos_3]]
-    .some(([pilot, position]) => Boolean(pilot) && Number(position) > 0)
+  return Boolean(assignment?.pole_pick)
+    || [[assignment?.pilot_1, assignment?.pred_pos_1], [assignment?.pilot_2, assignment?.pred_pos_2], [assignment?.pilot_3, assignment?.pred_pos_3]]
+      .some(([pilot, position]) => Boolean(pilot) && Number(position) > 0)
 }
 
 export function resultsList(results) {
@@ -250,6 +251,7 @@ export function recalculateQualAssignment(session, assignment, stageOrder, optio
     pilot_1:assignment.pilot_1, pred_pos_1:assignment.pred_pos_1,
     pilot_2:assignment.pilot_2, pred_pos_2:assignment.pred_pos_2,
     pilot_3:assignment.pilot_3, pred_pos_3:assignment.pred_pos_3,
+    pole_pick:assignment.pole_pick || '',
   }
   return {
     score:result.total,

@@ -300,6 +300,8 @@ select.stage-select option {
    QUAL INPUTS
    ───────────────────────────────────────── */
 .qual-pilot-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.pole-pick-row .pilot-select { flex: 1; min-width: 180px; }
+.qual-rule-note { color: var(--muted); font-size: 10px; letter-spacing: .3px; }
 .pilot-tag {
   font-size: 11px; font-weight: 600; color: var(--text);
   background: #0d0d0d; border: 1px solid var(--border);

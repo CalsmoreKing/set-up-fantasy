@@ -70,7 +70,7 @@ export default function StandingsPage() {
           if (!session.committed) continue
           if (session.type === 'qual') {
             const { data: assignments, error } = await supabase.from('qual_assignments')
-              .select('player_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .select('player_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
               .eq('session_id', session.id)
             if (error) throw error
             ;(assignments || []).forEach(assignment => {

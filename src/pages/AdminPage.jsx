@@ -83,19 +83,6 @@ export default function AdminPage() {
     setMsg('✓ Збережено')
   }
 
-  async function setPlayerManualTotal(player, rawValue) {
-    const nextTotal = Number.parseInt(rawValue, 10)
-    if (!Number.isFinite(nextTotal) || nextTotal === Number(player.base_pts || 0)) return
-    const { data: manualPoints, error } = await supabase.rpc('set_player_manual_total', {
-      p_player_id: player.id,
-      p_total: nextTotal,
-    })
-    if (error) { setMsg(`⚠ Не вдалося зберегти ручний підсумок: ${error.message}`); return }
-    setPlayers(prev => prev.map(row => row.id === player.id ? { ...row, base_pts:nextTotal, manual_pts:manualPoints } : row))
-    await log('manual_player_total', {player_id:player.id,player_name:player.name,previous_total:Number(player.base_pts)||0,total:nextTotal,manual_points:manualPoints})
-    setMsg(`✓ Підсумок ${player.name}: ${nextTotal} балів`)
-  }
-
   async function resetPlayerPassword(player) {
     if (!player.email_for_reset) {
       const email = window.prompt(`Email гравця ${player.name} для надсилання листа скидання паролю:`)
@@ -164,7 +151,7 @@ export default function AdminPage() {
       const ids = stageSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id', ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
         supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -187,12 +174,13 @@ export default function AdminPage() {
         if (session.type === 'qual') {
           const qualifyingScores = (qualResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
             const normalized = {...row,
+              pole_pick:normalizeStageDriver(row.pole_pick,changes),
               pilot_1:normalizeStageDriver(row.pilot_1,changes),
               pilot_2:normalizeStageDriver(row.pilot_2,changes),
               pilot_3:normalizeStageDriver(row.pilot_3,changes),
             }
             const {total} = calcQualAssignmentScore(normalized,results,order)
-            return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:qualifyingScores})
         } else {
@@ -253,7 +241,7 @@ export default function AdminPage() {
       return rows.length && !rows.some(session => session.committed)
     }).length
     const confirmed = window.confirm(
-      `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки буде замінено сумою заново розрахованих прогнозів, кваліфікацій і перевірених бонусів. Архівні залишки та ручні коригування буде скинуто. ${notCommitted} ГП без зарахованих сесій буде пропущено.`
+      `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки буде замінено сумою заново розрахованих прогнозів, кваліфікацій і перевірених бонусів. ${notCommitted} ГП без зарахованих сесій буде пропущено.`
     )
     if (!confirmed) return
     setRecalculatingAll(true)
@@ -264,7 +252,7 @@ export default function AdminPage() {
       const sessionIds = eventSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
         supabase.from('stage_pilot_substitutions').select('*').in('stage_id',stageIds).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -296,12 +284,13 @@ export default function AdminPage() {
           if (session.type === 'qual') {
             const rows = allQualifying.filter(row => row.session_id === session.id).map(row => {
               const normalized = {...row,
+                pole_pick:normalizeStageDriver(row.pole_pick,stageChanges),
                 pilot_1:normalizeStageDriver(row.pilot_1,stageChanges),
                 pilot_2:normalizeStageDriver(row.pilot_2,stageChanges),
                 pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
               }
               const {total} = calcQualAssignmentScore(normalized,results,order)
-              return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+              return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
             })
             scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})
             continue
@@ -352,7 +341,7 @@ export default function AdminPage() {
         })
       })
       const previewText = players.map(player => `${player.name}: ${Number(player.base_pts)||0} → ${projectedTotals[player.id]||0} (${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)>=0?'+':''}${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)})`).join('\n')
-      if (!window.confirm(`СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки без старих/ручних залишків. Підтвердити атомарний перезапис?`)) {
+      if (!window.confirm(`СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки, перераховані за результатами сесій. Підтвердити атомарний перезапис?`)) {
         setMsg('Сухий прогін завершено; базу не змінено.')
         return
       }
@@ -498,7 +487,7 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addPlayer}>+ ДОДАТИ</button>
           </div>
 
-          <div className="section-label">Гравці та доступ · підсумкові бали можна виправити вручну або перерахувати з результатів</div>
+          <div className="section-label">Гравці та доступ · підсумкові бали формуються перерахунком результатів</div>
           <div style={{overflowX:'auto'}}>
           <table className="standings" style={{marginBottom:0,minWidth:750}}>
             <thead>
@@ -528,7 +517,7 @@ export default function AdminPage() {
                       {allTeamOptions.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </td>
-                  <td><input aria-label={`Підсумкові бали ${p.name}`} type="number" step="1" defaultValue={p.base_pts ?? 0} onBlur={event=>setPlayerManualTotal(p,event.target.value)} style={{width:78,background:'var(--card)',border:'1px solid var(--border)',color:'var(--gold)',fontFamily:'Orbitron,sans-serif',fontSize:11,padding:'5px 6px',borderRadius:3}} /></td>
+                  <td aria-label={`Підсумкові бали ${p.name}`} style={{width:78,color:'var(--gold)',fontFamily:'Orbitron,sans-serif',fontSize:11,padding:'5px 6px'}}>{Number(p.base_pts) || 0}</td>
                   <td style={{fontSize:11}}>
                     {p.auth_user_id ? (
                       <div style={{display:'flex',alignItems:'center',gap:6}}>

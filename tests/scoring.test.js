@@ -184,7 +184,8 @@ test('qualifying uses roulette from Canada and one point for a correct pole pick
     pilot_1:'Norris', pred_pos_1:null,
     pilot_2:'Russell', pred_pos_2:null,
     pilot_3:'', pred_pos_3:null,
-    scored_input:{pilot_1:'Norris',pred_pos_1:null,pilot_2:'Russell',pred_pos_2:null,pilot_3:'',pred_pos_3:null},
+    pole_pick:'',
+    scored_input:{pilot_1:'Norris',pred_pos_1:null,pilot_2:'Russell',pred_pos_2:null,pilot_3:'',pred_pos_3:null,pole_pick:''},
   }
   const session = { type:'qual', stage_sort_order:7, results:{1:'Russell',2:'Norris',3:'Antonelli'} }
   const roulette = recalculateQualAssignment(session, { ...assignment, pred_pos_1:1, pred_pos_2:2, scored_input:{...assignment.scored_input,pred_pos_1:1,pred_pos_2:2} }, 7)
@@ -196,9 +197,22 @@ test('qualifying uses roulette from Canada and one point for a correct pole pick
   assert.equal(poleOnly.score, 0)
   assert.equal(poleOnly.ruleVersion, 'legacy-pole-only')
 
-  const correctPole = recalculateQualAssignment({ ...session, stage_sort_order:6, results:{1:'Norris',2:'Russell'} }, assignment, 6)
+  const matchingAssignedPilotIsNotASubmission = recalculateQualAssignment(
+    { ...session, stage_sort_order:6, results:{1:'Norris',2:'Russell'} },
+    { ...assignment, pilot_1:'Russell', scored_input:{...assignment.scored_input,pilot_1:'Russell'} },
+    6,
+  )
+  assert.equal(matchingAssignedPilotIsNotASubmission.score, 0)
+
+  const correctPole = recalculateQualAssignment(
+    { ...session, stage_sort_order:6, results:{1:'Norris',2:'Russell'} },
+    { ...assignment, pole_pick:'Norris', scored_input:{...assignment.scored_input,pole_pick:'Norris'} },
+    6,
+  )
   assert.equal(correctPole.score, 1)
   assert.equal(correctPole.breakdown[0].pts, 1)
+  assert.equal(hasQualifyingPrediction({pilot_1:'Russell',pred_pos_1:null}), false)
+  assert.equal(hasQualifyingPrediction({pole_pick:'Russell'}), true)
 })
 
 test('without official results the audit reports the persisted score without claiming a recalculation', () => {

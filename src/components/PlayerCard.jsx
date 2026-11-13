@@ -8,7 +8,7 @@ import { isOvertakeWinner } from '../lib/scoring'
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
-  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
+  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, onSavePolePick, teamSiblingId,
   forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
@@ -29,6 +29,8 @@ export default function PlayerCard({
   const [ov,    setOv]      = useState(forecast?.ov_pick || '')
   const [qPilots, setQPilots] = useState([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
   const [qPos,    setQPos]    = useState([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+  const [polePick, setPolePick] = useState(qualAssign?.pole_pick || '')
+  const legacyPoleOnly = Number(stageOrder) < 7
 
   // Sync from DB
   useEffect(() => {
@@ -39,6 +41,7 @@ export default function PlayerCard({
   useEffect(() => {
     setQPilots([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
     setQPos([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+    setPolePick(qualAssign?.pole_pick || '')
   }, [qualAssign])
 
   // Body height animation
@@ -46,7 +49,7 @@ export default function PlayerCard({
     if (bodyRef.current) {
       bodyRef.current.style.maxHeight = open ? bodyRef.current.scrollHeight + 'px' : '0'
     }
-  }, [open, preds, fl, ov, qPilots, qPos])
+  }, [open, preds, fl, ov, qPilots, qPos, polePick])
 
   // Debounced save
   function schedSave(newPreds, newFl, newOv) {
@@ -78,6 +81,7 @@ export default function PlayerCard({
       pilot_1:normalizeStageDriver(qPilots[0], pilotSubstitutions), pred_pos_1:parseInt(qPos[0]) || null,
       pilot_2:normalizeStageDriver(qPilots[1], pilotSubstitutions), pred_pos_2:parseInt(qPos[1]) || null,
       pilot_3:normalizeStageDriver(qPilots[2], pilotSubstitutions), pred_pos_3:parseInt(qPos[2]) || null,
+      pole_pick:normalizeStageDriver(polePick, pilotSubstitutions),
     }
     const result = calcQualAssignmentScore(assignment, results, stageOrder)
     score = result.total; breakdown = result.breakdown
@@ -91,7 +95,7 @@ export default function PlayerCard({
   // Fill indicator — shows only when PREDICTION is entered, not just pilot assigned
   const sprintSlots = 5
   const fillCount = sessionType === 'qual'
-    ? qPos.filter(p => p !== '' && p !== null && p !== undefined).length
+    ? legacyPoleOnly ? (polePick ? 1 : 0) : qPos.filter(p => p !== '' && p !== null && p !== undefined).length
     : sessionType === 'sprint'
     ? preds.slice(0,sprintSlots).filter(Boolean).length
     : preds.filter(Boolean).length
@@ -256,7 +260,25 @@ export default function PlayerCard({
         {/* QUAL */}
         {sessionType === 'qual' && (
           <div style={{padding:'10px 12px'}}>
-            {Array.from({length: slotCount}, (_,i)=>i).map(idx => (
+            {legacyPoleOnly ? (
+              <div className="qual-pilot-row pole-pick-row">
+                <span className="spec-label">ПОУЛ</span>
+                <select
+                  className="pilot-select"
+                  value={polePick}
+                  disabled={!canEdit}
+                  onChange={event => {
+                    const value = event.target.value
+                    setPolePick(value)
+                    onSavePolePick?.(value)
+                  }}
+                >
+                  <option value="">Обери пілота на поул…</option>
+                  {driverOptions.map(pilot => <option key={pilot} value={pilot}>{pilot}</option>)}
+                </select>
+                <span className="pts-badge">{polePick && polePick === results[0] ? '1' : ''}</span>
+              </div>
+            ) : Array.from({length: slotCount}, (_,i)=>i).map(idx => (
               <div className="qual-pilot-row" key={idx}>
                 {qPilots[idx] ? (
                   <>
