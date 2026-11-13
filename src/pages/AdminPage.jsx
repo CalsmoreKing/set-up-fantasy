@@ -40,11 +40,20 @@ export default function AdminPage() {
     Promise.all([
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('players').select('*').order('name'),
-      supabase.from('sessions').select('*, stages(name,flag,sort_order,key)').order('created_at', {ascending:false}),
+      supabase.from('sessions').select('*, stages(name,flag,sort_order,key)').order('committed_at', {ascending:false}),
       supabase.from('audit_log').select('*').order('created_at', {ascending:false}).limit(80),
       supabase.from('stage_pilot_substitutions').select('*,stages(name,key,flag)').order('created_at', {ascending:false}),
       supabase.from('qual_assignments').select('player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))'),
     ]).then(([s,p,se,l,sub,qa]) => {
+      const loadErrors = [
+        s.error && `етапи: ${s.error.message}`,
+        p.error && `гравці: ${p.error.message}`,
+        se.error && `сесії: ${se.error.message}`,
+        l.error && `журнал: ${l.error.message}`,
+        sub.error && `заміни пілотів: ${sub.error.message}`,
+        qa.error && `кваліфікації: ${qa.error.message}`,
+      ].filter(Boolean)
+      if (loadErrors.length) setMsg(`⚠ Не вдалося завантажити частину даних адмінки — ${loadErrors.join('; ')}`)
       setStages((s.data||[]))
       setPlayers(p.data||[])
       setSessions(se.data||[])
