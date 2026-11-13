@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { rankPlayers } from '../lib/standings'
-import { archiveBaselineForPlayer } from '../lib/archive'
 import { canonicalStoredScore } from '../lib/scoring'
 
 export default function ProfilePage() {
@@ -12,7 +11,7 @@ export default function ProfilePage() {
   const [roster, setRoster] = useState([])
   const [seasonRank, setSeasonRank] = useState(null)
   const [seasonTotal, setSeasonTotal] = useState(0)
-  const [scoreSplit, setScoreSplit] = useState({ archive:0, active:0, newcomer:0, manual:0 })
+  const [scoreSplit, setScoreSplit] = useState({ active:0, newcomer:0 })
   const [schemaReady, setSchemaReady] = useState(true)
   const [bannerBusy, setBannerBusy] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
@@ -67,11 +66,7 @@ export default function ProfilePage() {
     const activePoints = forecasts.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
       + qualifying.filter(row => row.player_id===player.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
     const newcomerPoints = bonuses.reduce((sum,row)=>sum+(Number(row.points)||0),0)
-    const { data:adjustments } = await supabase.from('score_manual_adjustments').select('delta').eq('player_id',player.id)
-    const manualPoints = (adjustments||[]).reduce((sum,row)=>sum+(Number(row.delta)||0),0)
-    const total = Number(player.base_pts) || 0
-    const archive = archiveBaselineForPlayer(player.name)
-    setScoreSplit({ active:activePoints, newcomer:newcomerPoints, manual:manualPoints, archive, unallocated:archive==null?null:total-archive-activePoints-newcomerPoints-manualPoints })
+    setScoreSplit({ active:activePoints, newcomer:newcomerPoints })
     setLoading(false)
   }
 
@@ -129,11 +124,8 @@ export default function ProfilePage() {
       <ProfileMetric label="МІСЦЕ В СЕЗОНІ" value={seasonRank ? `#${seasonRank}` : '—'} />
       <ProfileMetric label="КОМАНДА / НАПАРНИК" value={`${TEAM_META[player?.team]?.code || ''} · ${teammate?.name || '—'}`} />
       <ProfileMetric label="ЗАГАЛЬНІ ОЧКИ" value={player?.base_pts ?? 0} />
-      <ProfileMetric label="АРХІВ" value={scoreSplit.archive ?? '—'} />
       <ProfileMetric label="АКТИВНИЙ СЕЗОН" value={scoreSplit.active} />
       <ProfileMetric label="БОНУС НОВАЧКА" value={scoreSplit.newcomer} />
-      <ProfileMetric label="РУЧНІ КОРИГУВАННЯ*" value={scoreSplit.manual} />
-      <ProfileMetric label="ЗАЛИШОК / НЕВІДОМЕ" value={scoreSplit.unallocated ?? '—'} />
       <ProfileMetric label="ГОНКОВІ ОЧКИ" value={seasonTotal} />
       <ProfileMetric label="ЕТАПІВ З РЕЗУЛЬТАТОМ" value={posterRows.length} />
     </div>
