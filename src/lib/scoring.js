@@ -82,17 +82,18 @@ export function calcQualAssignmentScore(assignment, results, stageOrder = 10) {
 }
 
 export function calcSprintScore(preds, results) {
-  // Sprint predictions/results are always the top five. Exact picks use the
-  // top-ten scale (P1 = 11, descending by predicted slot); ±1 earns one point.
+  // Sprint uses the same positional scale as the first five race slots,
+  // limited to the actual sprint top five and with no sprint-specific bonuses.
+  const sprintResults = results.slice(0, 5)
   const breakdown = []
   let total = 0
   for (let i = 0; i < 5; i++) {
     const predicted = preds[i]
     if (!predicted) continue
-    const actualPos = results.slice(0, 5).indexOf(predicted)
+    const actualPos = sprintResults.indexOf(predicted)
     if (actualPos === -1) continue
     const diff = Math.abs(i - actualPos)
-    const points = diff === 0 ? 11 - i : diff === 1 ? 1 : 0
+    const points = diff === 0 ? 5 : diff === 1 ? 2 : diff === 2 ? 1 : 0
     if (points > 0) {
       total += points
       breakdown.push({ label: `P${i + 1} ${predicted} → факт P${actualPos + 1}`, pts: points })

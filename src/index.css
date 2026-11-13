@@ -176,6 +176,7 @@ main { position: relative; z-index: 2; padding: 16px; max-width: 960px; margin: 
 .stage-select:focus { border-color: var(--red); }
 .session-btns { display: flex; gap: 4px; flex-wrap: wrap; }
 .stage-recalc-btn { margin-left: auto; }
+.admin-edit-mode-banner { margin: 0 0 12px; padding: 10px 12px; border: 1px solid rgba(225,6,0,.45); border-radius: 3px; background: rgba(225,6,0,.08); color: var(--text); font-size: 11px; line-height: 1.5; }
 .stage-recalc-report { margin: 0 0 16px; padding: 14px; border: 1px solid rgba(255,215,0,.28); border-radius: 4px; background: rgba(255,215,0,.035); }
 .stage-recalc-report > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .stage-recalc-report h3 { margin: 0; color: var(--gold); font: 700 11px 'Orbitron', sans-serif; letter-spacing: 1px; }
@@ -420,11 +421,10 @@ select.stage-select option {
 
 .rank { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 14px; color: var(--muted); }
 .rank.r1 { color: var(--gold); } .rank.r2 { color: var(--silver); } .rank.r3 { color: var(--bronze); }
-/* Profile links keep the table's original name color and typography in every state. */
-.player-name-plain,
-.player-name-plain:visited,
-.player-name-plain:hover,
-.player-name-plain:active { color: inherit; font: inherit; font-weight: 600; text-decoration: none; }
+/* Use a real button, not a browser-styled anchor, for profile navigation from the standings. */
+.player-name-action { appearance:none; -webkit-appearance:none; display:inline; margin:0; padding:0; border:0; background:transparent; color:var(--text); font:inherit; font-weight:600; text-align:left; cursor:pointer; }
+.player-name-action:hover { color:var(--text); text-decoration:none; }
+.player-name-action:focus-visible { outline:2px solid var(--red); outline-offset:2px; border-radius:1px; }
 .team-badge { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 2px; font-weight: 600; border: 1px solid; white-space: nowrap; }
 .score-add { font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700; color: var(--red); }
 .score-total { font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 900; color: var(--gold); }

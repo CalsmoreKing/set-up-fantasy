@@ -33,14 +33,16 @@ test('race scoring strictly ignores actual results outside the top ten', () => {
   assert.equal(calcRaceScore(['Alonso', ...Array(9).fill('')], '', '', withLowerPlaces, '', '').total, 0)
 })
 
-test('sprint always scores top-five picks on the top-ten scale, with no legacy bonuses', () => {
+test('sprint uses the general P1-P5 race scale, scores only the actual top five, and has no bonuses', () => {
   const results = ['A','B','C','D','E','F','G']
   const exact = calcSprintScore(['A','B','C','D','E'], results)
-  assert.equal(exact.total, 11 + 10 + 9 + 8 + 7)
-  assert.deepEqual(exact.breakdown.map(item => item.pts), [11,10,9,8,7])
+  assert.equal(exact.total, 5 * 5)
+  assert.deepEqual(exact.breakdown.map(item => item.pts), [5,5,5,5,5])
   const oneOff = calcSprintScore(['B','A','C','D','E'], results)
-  assert.equal(oneOff.total, 1 + 1 + 9 + 8 + 7)
-  assert.equal(calcSprintScore(['F','G','A','B','C'], results).total, 0)
+  assert.equal(oneOff.total, 2 + 2 + 5 + 5 + 5)
+  const twoOff = calcSprintScore(['C','B','A','D','E'], results)
+  assert.equal(twoOff.total, 1 + 5 + 1 + 5 + 5)
+  assert.equal(calcSprintScore(['F','G','','',''], results).total, 0)
   assert.equal(calcSprintScore(['A','B','C','D','E','F'], results).total, exact.total)
 })
 
@@ -70,10 +72,19 @@ test('one season-wide race scoring rule applies to every stage', () => {
   assert.equal(calcRaceScore(results, '', 'A', results, '', 'A', 1).total, 63)
 })
 
-test('sprint scoring is consistent in archived and current rounds', () => {
+test('the same general sprint scale applies in archived and current rounds', () => {
   const exact = ['A','B','C','D','E']
-  assert.equal(calcSprintScore(exact, exact, 9).total, 45)
-  assert.equal(calcSprintScore(exact, exact, 10).total, 45)
+  assert.equal(calcSprintScore(exact, exact, 1).total, 25)
+  assert.equal(calcSprintScore(exact, exact, 25).total, 25)
+})
+
+test('прогноз Валентина на гонку Каталонії дає 23 бали за спільними правилами гонки', () => {
+  const predictions = ['Russell','Hamilton','Antonelli','Norris','Piastri','Verstappen','Leclerc','Hadjar','Lindblad','Lawson']
+  const results = ['Hamilton','Russell','Norris','Verstappen','Piastri','Hadjar','Gasly','Lawson','Lindblad','Colapinto']
+  const score = calcRaceScore(predictions,'Russell','',results,'Hamilton','Gasly',9)
+  assert.equal(score.total,23)
+  assert.deepEqual(score.breakdown.map(item=>item.pts),[2,2,2,5,2,2,6,2])
+  assert.equal(score.breakdown.some(item=>item.label.includes('Швидке коло')),false)
 })
 
 test('current race rules award two points for top-three and top-five sets in any order', () => {

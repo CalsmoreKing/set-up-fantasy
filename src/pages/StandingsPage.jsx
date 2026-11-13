@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
@@ -15,6 +16,7 @@ function RankArrow({ delta }) {
 }
 
 export default function StandingsPage() {
+  const navigate = useNavigate()
   const { isAdmin } = useAuth()
   const [players,         setPlayers]         = useState([])
   const [stages,          setStages]          = useState([])
@@ -187,7 +189,7 @@ export default function StandingsPage() {
                 <tr key={p.id} className={rank<=3?`p${rank}`:''}>
                   <td><span className={`rank${rank<=3?` r${rank}`:''}`}>{rank}</span></td>
                   <td><RankArrow delta={p.last_rank_delta} /></td>
-                  <td><a className="player-name-plain" href={`/profile?player=${encodeURIComponent(p.id)}`}>{p.name}</a></td>
+                  <td><button type="button" className="player-name-action" onClick={() => navigate(`/profile?player=${encodeURIComponent(p.id)}`)}>{p.name}</button></td>
                   <td><span className="team-badge" style={{borderColor:tc,color:tc}}>{code} · {p.team}</span></td>
                   <td>
                     <span className="score-total">{p.base_pts}</span>
@@ -266,7 +268,7 @@ export default function StandingsPage() {
                 const sc = stageScores[p.id] || {}
                 return (
                   <tr key={p.id}>
-                    <td><a className="player-name-plain" href={`/profile?player=${encodeURIComponent(p.id)}`}>{p.name}</a></td>
+                    <td><button type="button" className="player-name-action" onClick={() => navigate(`/profile?player=${encodeURIComponent(p.id)}`)}>{p.name}</button></td>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
                     </td>

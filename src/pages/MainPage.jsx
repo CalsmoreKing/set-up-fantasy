@@ -28,6 +28,7 @@ export default function MainPage() {
   const [committing,setCommitting]= useState(false)
   const [recalculatingStage,setRecalculatingStage] = useState(false)
   const [stageRecalcReport,setStageRecalcReport] = useState(null)
+  const [adminForecastEditMode,setAdminForecastEditMode] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -141,6 +142,7 @@ export default function MainPage() {
     const nextStage = navigationStages[currentStageIndex + step]
     if (nextStage) {
       setStageRecalcReport(null)
+      setAdminForecastEditMode(false)
       setStageKey(nextStage.key)
     }
   }
@@ -189,7 +191,7 @@ export default function MainPage() {
   const isDouble       = DOUBLE_STAGES.has(stageKey)
 
   const normalizedResults = normalizeStageResults(currentSession?.results || {}, stagePilotChanges)
-  const resultsList = Object.entries(normalizedResults).sort(([a],[b]) => Number(a)-Number(b)).map(([,pilot]) => pilot)
+  const currentResultsList = Object.entries(normalizedResults).sort(([a],[b]) => Number(a)-Number(b)).map(([,pilot]) => pilot)
   const normalizedFlResult = normalizeStageDriver(currentSession?.fl_pilot || '', stagePilotChanges)
   const normalizedOvResult = String(currentSession?.ov_pilot || '').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(), stagePilotChanges)).filter(Boolean).join(', ')
   const effectiveSession = currentSession ? { ...currentSession, results:normalizedResults, fl_pilot:normalizedFlResult, ov_pilot:normalizedOvResult } : currentSession
@@ -365,8 +367,8 @@ export default function MainPage() {
       if (changesResult.error) throw changesResult.error
       const changes=changesResult.data||[], forecasts_=forecastResult.data||[], assignments=qualResult.data||[]
       const scoreRows=[], raceRows=[]
-      recalcPhase = 'перерахунок кваліфікації, спринту й гонки'
       const report=stageSessions.map(session=>{
+        recalcPhase = `${session.type.toUpperCase()}: нормалізація результатів`
         const resultObject=normalizeStageResults(session.results||{},changes),results=resultsList(resultObject)
         const required=session.type==='qual'?(Number(currentStage.sort_order)<7?1:3):session.type==='sprint'?5:10
         const positions=Object.keys(resultObject).map(Number).sort((a,b)=>a-b)
@@ -374,7 +376,10 @@ export default function MainPage() {
         const fastLap=normalizeStageDriver(session.fl_pilot||'',changes)
         const overtake=String(session.ov_pilot||'').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),changes)).filter(Boolean).join(', ')
         if(session.type==='qual'){
+          recalcPhase = 'КВАЛІФІКАЦІЯ: читання прогнозів'
           const rows=assignments.filter(row=>row.session_id===session.id).map(row=>{
+            const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
+            recalcPhase = `КВАЛІФІКАЦІЯ: розрахунок прогнозу ${playerName}`
             const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
             const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order)
             return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
@@ -382,7 +387,10 @@ export default function MainPage() {
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
           return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
         }
+        recalcPhase = `${session.type.toUpperCase()}: читання прогнозів`
         const rows=forecasts_.filter(row=>row.session_id===session.id).map(row=>{
+          const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
+          recalcPhase = `${session.type.toUpperCase()}: розрахунок прогнозу ${playerName}`
           const size=session.type==='sprint'?5:10,predictions=Array.from({length:size},(_,i)=>normalizeStageDriver(row.predictions?.[i+1]||'',changes))
           const calculated=session.type==='sprint'?calcSprintScore(predictions,results):calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,changes),normalizeStageDriver(row.ov_pick,changes),results,fastLap,overtake,currentStage.sort_order)
           const scoredInput={predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,changes)}
@@ -394,6 +402,7 @@ export default function MainPage() {
         scoreRows.push({session_id:session.id,forecast_scores:rows.map(({player_id,...row})=>row),qual_scores:[]})
         return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
       })
+      recalcPhase = 'БОНУС НОВАЧКА: перевірка мінімуму за гонку'
       const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order)).map(player=>player.id)
       const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
       if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
@@ -431,7 +440,7 @@ export default function MainPage() {
           <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
           <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
         </div>
-        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setStageKey(e.target.value)}}>
+        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setAdminForecastEditMode(false);setStageKey(e.target.value)}}>
           <option value="">— Оберіть етап —</option>
           {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
@@ -441,7 +450,7 @@ export default function MainPage() {
         </select>
         <div className="session-btns">
           {availableSessions.map(t => (
-            <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>setSessionType(t)}>
+            <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>{setAdminForecastEditMode(false);setSessionType(t)}}>
               {t==='qual'?'КВАЛІФІКАЦІЯ':t==='sprint'?'СПРИНТ':'ГОНКА'}
             </button>
           ))}
@@ -463,8 +472,18 @@ export default function MainPage() {
             закр. {deadlineDate.toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
           </span>
         )}
+        {isAdmin && currentSession && !currentSession.archive_preview && <button type="button" className={`btn ${adminForecastEditMode?'btn-red':'btn-ghost'}`} aria-pressed={adminForecastEditMode} onClick={() => {
+          if (adminForecastEditMode) setAdminForecastEditMode(false)
+          else if (window.confirm(`Увімкнути редагування прогнозів гравців для ${currentStage?.name} · ${sessionType.toUpperCase()}? Це дозволить змінювати навіть зараховані/заблоковані прогнози. Після змін треба окремо перерахувати ГП.`)) setAdminForecastEditMode(true)
+        }} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{adminForecastEditMode ? '🔒 ВИМКНУТИ РЕДАГУВАННЯ' : '✎ РЕДАГУВАТИ ПРОГНОЗИ'}</button>}
         {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={`Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`Перерахувати ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
       </div>
+
+      {adminForecastEditMode && (
+        <div className="admin-edit-mode-banner" role="status">
+          Адмін-редагування увімкнено для {currentStage?.name} · {sessionType.toUpperCase()}. Зміни збережуться в прогнозах; бали оновляться лише після перерахунку ГП.
+        </div>
+      )}
 
       {stageRecalcReport && (
         <section className="stage-recalc-report" aria-label={`Звіт перерахунку ${stageRecalcReport.stageName}`}>
@@ -572,7 +591,7 @@ export default function MainPage() {
               const qa = qualAssign[p.id]
               if (sessionType === 'race' && fc) {
                 const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(fc.predictions?.[i+1]||'', stagePilotChanges))
-                const { total } = calcRaceScore(preds, normalizeStageDriver(fc.fl_pick, stagePilotChanges), normalizeStageDriver(fc.ov_pick, stagePilotChanges), resultsList,
+                const { total } = calcRaceScore(preds, normalizeStageDriver(fc.fl_pick, stagePilotChanges), normalizeStageDriver(fc.ov_pick, stagePilotChanges), currentResultsList,
                   normalizedFlResult, normalizedOvResult, currentStage?.sort_order)
                 liveScores[p.id] = total
               } else if (sessionType === 'qual' && qa) {
@@ -583,11 +602,11 @@ export default function MainPage() {
                   pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
                   pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
                 }
-                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, resultsList, currentStage?.sort_order).total
+                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, currentResultsList, currentStage?.sort_order).total
               } else if (sessionType === 'sprint' && fc) {
                 const sprintSlots = 5
                 const preds = Array.from({length:sprintSlots}, (_,i) => fc.predictions?.[i+1]||'')
-                const { total } = calcSprintScore(preds, resultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
+                const { total } = calcSprintScore(preds, currentResultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
                 liveScores[p.id] = total
               } else {
                 liveScores[p.id] = 0
@@ -627,12 +646,12 @@ export default function MainPage() {
                         session={currentSession}
                         forecast={canSeeForecast ? forecasts[p.id] : null}
                         qualAssign={canSeeForecast ? qualAssign[p.id] : null}
-                        results={resultsList}
+                        results={currentResultsList}
                         flResult={normalizedFlResult}
                         ovResult={normalizedOvResult}
                         isMe={me?.id === p.id}
                         isAdmin={isAdmin}
-                        isLocked={isLocked}
+                        isLocked={isLocked && !adminForecastEditMode}
                         isDouble={isDouble}
                         qualSlotCount={qualSlotsByPlayer[p.id] ?? (isDouble ? 2 : 1)}
                         stageKey={stageKey}
