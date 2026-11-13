@@ -24,6 +24,7 @@ export default function AdminPage() {
   const [loading,   setLoading]   = useState(true)
   const [msg,       setMsg]       = useState('')
   const [recalculatingAll, setRecalculatingAll] = useState(false)
+  const [previewRecalculationReports, setPreviewRecalculationReports] = useState([])
 
   // New player / team forms
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -240,12 +241,14 @@ export default function AdminPage() {
       const rows = sessions.filter(session => session.stage_id === stage.id)
       return rows.length && !rows.some(session => session.committed)
     }).length
-    const confirmed = window.confirm(
-      `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки буде замінено сумою заново розрахованих прогнозів, кваліфікацій і перевірених бонусів. ${notCommitted} ГП без зарахованих сесій буде пропущено.`
+    const confirmed = window.confirm(IS_PREVIEW_DEPLOYMENT
+      ? `Виконати сухий прогін ${completedStages.length} ГП? Перерахую кожну сесію для перевірки й покажу нові підсумки. Робочу базу не зміню.`
+      : `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки буде замінено сумою заново розрахованих прогнозів, кваліфікацій і перевірених бонусів. ${notCommitted} ГП без зарахованих сесій буде пропущено.`
     )
     if (!confirmed) return
     setRecalculatingAll(true)
-    setMsg('⟳ Перераховую всі завершені ГП атомарно…')
+    setPreviewRecalculationReports([])
+    setMsg(IS_PREVIEW_DEPLOYMENT ? '🧪 Рахую сухий прогін усіх доступних ГП…' : '⟳ Перераховую всі завершені ГП атомарно…')
     try {
       const stageIds = completedStages.map(stage => stage.id)
       const eventSessions = sessions.filter(session => stageIds.includes(session.stage_id))
@@ -341,8 +344,19 @@ export default function AdminPage() {
         })
       })
       const previewText = players.map(player => `${player.name}: ${Number(player.base_pts)||0} → ${projectedTotals[player.id]||0} (${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)>=0?'+':''}${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)})`).join('\n')
-      if (!window.confirm(`СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки, перераховані за результатами сесій. Підтвердити атомарний перезапис?`)) {
+      const confirmationText = IS_PREVIEW_DEPLOYMENT
+        ? `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nБали за всіма сесіями буде лише пораховано й показано для звірки. Запис у робочу базу заблокований.`
+        : `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки, перераховані за результатами сесій. Підтвердити атомарний перезапис?`
+      if (!window.confirm(confirmationText)) {
         setMsg('Сухий прогін завершено; базу не змінено.')
+        return
+      }
+      if (IS_PREVIEW_DEPLOYMENT) {
+        setPreviewRecalculationReports({
+          stages:recalculationReports,
+          totals:players.map(player => ({name:player.name,base:Number(player.base_pts)||0,projected:projectedTotals[player.id]||0})).sort((a,b)=>b.projected-a.projected),
+        })
+        setMsg(`🧪 Сухий прогін завершено: перевірено ${payload.length} ГП. Підсумки й бали по кожній сесії показані нижче; база не змінена.`)
         return
       }
 
@@ -447,7 +461,30 @@ export default function AdminPage() {
         <>
           <div className="section-label">Етапи · повний перерахунок</div>
           <p className="team-created-note">Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.</p>
-          <button className="btn btn-red" style={{marginBottom:14}} disabled={IS_PREVIEW_DEPLOYMENT || !canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Зміни бази заблоковано в прев’ю. Для сухої перевірки обери ГП на сторінці прогнозів.' : undefined} onClick={recalculateAllScores}>↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ</button>
+          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін усіх ГП без запису в робочу базу' : 'Перерахувати всі доступні завершені ГП і замінити підсумки'} onClick={recalculateAllScores}>{IS_PREVIEW_DEPLOYMENT ? '🧪 СУХИЙ ПРОГІН УСІХ ГП' : '↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ'}</button>
+          {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports && (
+            <div style={{margin:'8px 0 20px',padding:14,border:'1px solid var(--green)',borderRadius:6,background:'rgba(107,255,138,.04)'}}>
+              <div className="section-label">🧪 Результат сухого прогону · база не змінена</div>
+              <div style={{overflowX:'auto',marginBottom:18}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr><th style={{textAlign:'left',padding:7}}>Гравець</th><th style={{textAlign:'right',padding:7}}>Було</th><th style={{textAlign:'right',padding:7}}>За прогнозами</th><th style={{textAlign:'right',padding:7}}>Різниця</th></tr></thead>
+                  <tbody>{previewRecalculationReports.totals.map(row => <tr key={row.name}>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)'}}>{row.name}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right'}}>{row.base}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right'}}>{row.projected}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right',color:row.projected-row.base<0?'var(--red)':'var(--green)'}}>{row.projected-row.base>0?'+':''}{row.projected-row.base}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+              {previewRecalculationReports.stages.map(stage => <details key={stage.stage} style={{marginTop:8}}>
+                <summary style={{cursor:'pointer',fontFamily:'Orbitron,sans-serif',fontSize:11}}>{stage.stage_name} · бонус новачка: {stage.newcomer_bonus_minimum} очок</summary>
+                {stage.report.map((session,index) => <div key={`${session.type}-${index}`} style={{margin:'10px 0 14px',fontSize:12}}>
+                  <strong>{session.type.toUpperCase()}</strong>
+                  {session.scores.length ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:'4px 12px',marginTop:6}}>{session.scores.map((score,i) => <span key={`${score.player}-${i}`}>{score.player}: <b>{score.points}</b></span>)}</div> : <div style={{color:'var(--muted)',marginTop:5}}>Немає прогнозів для підрахунку.</div>}
+                </div>)}
+              </details>)}
+            </div>
+          )}
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {stages.map(stage => {
               const stageSessions = sessions.filter(session => session.stage_id===stage.id)
