@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
+import { supabase, IS_PREVIEW_DEPLOYMENT, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
@@ -215,6 +215,12 @@ export default function MainPage() {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     const predsObj = {}
     preds.forEach((p, i) => { if (p) predsObj[i+1] = p })
+    if (IS_PREVIEW_DEPLOYMENT) {
+      const draft = { ...(forecasts[playerId] || {}), id:forecasts[playerId]?.id || `preview-${currentSession.id}-${playerId}`, session_id:currentSession.id, player_id:playerId, predictions:predsObj, fl_pick:fl || '', ov_pick:ov || '', preview_draft:true }
+      setForecasts(prev => ({...prev,[playerId]:draft}))
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      return
+    }
     const { data, error } = await supabase.from('forecasts').upsert({
       session_id: currentSession.id,
       player_id:  playerId,
@@ -229,6 +235,11 @@ export default function MainPage() {
 
   async function savePolePick(playerId, pilot) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    if (IS_PREVIEW_DEPLOYMENT) {
+      setQualAssign(prev => ({...prev,[playerId]:{...(prev[playerId]||{}),id:prev[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pole_pick:pilot || '',preview_draft:true}}))
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      return
+    }
     const { data, error } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id,
       player_id: playerId,
@@ -240,6 +251,11 @@ export default function MainPage() {
 
   async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    if (IS_PREVIEW_DEPLOYMENT) {
+      setQualAssign(prev => ({...prev,[playerId]:{...(prev[playerId]||{}),id:prev[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,preview_draft:true}}))
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      return
+    }
     const { data, error } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id, player_id: playerId,
       pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
@@ -351,7 +367,10 @@ export default function MainPage() {
       setCommitMsg('⚠ Для перерахунку потрібні збережені сесії ГП, і всі вони мають бути зараховані.')
       return
     }
-    if (!window.confirm(`Перерахувати ${currentStage.name}? Збережені бали буде замінено; це не змінить прогнози.`)) return
+    const actionMessage = IS_PREVIEW_DEPLOYMENT
+      ? `Виконати сухий прогін ${currentStage.name}? Перерахую бали локально для перевірки; робочу базу та прогнози не змінюватиму.`
+      : `Перерахувати ${currentStage.name}? Збережені бали буде замінено; це не змінить прогнози.`
+    if (!window.confirm(actionMessage)) return
     setStageRecalcReport(null)
     setRecalculatingStage(true)
     let recalcPhase = 'завантаження прогнозів і реальних результатів'
@@ -365,7 +384,13 @@ export default function MainPage() {
       if (forecastResult.error) throw forecastResult.error
       if (qualResult.error) throw qualResult.error
       if (changesResult.error) throw changesResult.error
-      const changes=changesResult.data||[], forecasts_=forecastResult.data||[], assignments=qualResult.data||[]
+      const changes=changesResult.data||[]
+      const mergePreviewRows=(saved,drafts)=>{
+        const rows=new Map((saved||[]).map(row=>[`${row.session_id}:${row.player_id}`,row]))
+        if(IS_PREVIEW_DEPLOYMENT) Object.values(drafts||{}).filter(row=>ids.includes(row.session_id)).forEach(row=>rows.set(`${row.session_id}:${row.player_id}`,{...rows.get(`${row.session_id}:${row.player_id}`),...row}))
+        return [...rows.values()]
+      }
+      const forecasts_=mergePreviewRows(forecastResult.data,forecasts), assignments=mergePreviewRows(qualResult.data,qualAssign)
       const scoreRows=[], raceRows=[]
       const report=stageSessions.map(session=>{
         recalcPhase = `${session.type.toUpperCase()}: нормалізація результатів`
@@ -406,6 +431,11 @@ export default function MainPage() {
       const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order)).map(player=>player.id)
       const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
       if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
+      if (IS_PREVIEW_DEPLOYMENT) {
+        setStageRecalcReport({stageName:currentStage.name,report,newcomerBonusMinimum:bonus.minimum,dryRun:true})
+        setCommitMsg(`🧪 Сухий прогін ${currentStage.name} завершено. Бали розраховано для перевірки, але в базу не записано.`)
+        return
+      }
       recalcPhase = 'атомарне збереження балів цього ГП'
       const {error}=await supabase.rpc('apply_stage_scores',{p_stage_id:currentStage.id,p_session_scores:scoreRows,p_newcomer_bonuses:bonus.bonuses,p_newcomer_minimum:bonus.minimum})
       if(error) throw error
@@ -476,7 +506,7 @@ export default function MainPage() {
           if (adminForecastEditMode) setAdminForecastEditMode(false)
           else if (window.confirm(`Увімкнути редагування прогнозів гравців для ${currentStage?.name} · ${sessionType.toUpperCase()}? Це дозволить змінювати навіть зараховані/заблоковані прогнози. Після змін треба окремо перерахувати ГП.`)) setAdminForecastEditMode(true)
         }} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{adminForecastEditMode ? '🔒 ВИМКНУТИ РЕДАГУВАННЯ' : '✎ РЕДАГУВАТИ ПРОГНОЗИ'}</button>}
-        {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={`Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`Перерахувати ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
+        {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={IS_PREVIEW_DEPLOYMENT ? `Сухий прогін зарахованих сесій етапу ${currentStage.name}; без запису в базу` : `Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`${IS_PREVIEW_DEPLOYMENT?'Перевірити':'Перерахувати'} ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : IS_PREVIEW_DEPLOYMENT ? '🧪 ПЕРЕВІРИТИ ЦЕЙ ГП' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
       </div>
 
       {adminForecastEditMode && (
@@ -491,7 +521,7 @@ export default function MainPage() {
             <h3>ЗВІТ ПЕРЕРАХУНКУ · {stageRecalcReport.stageName}</h3>
             <button type="button" className="btn btn-ghost" onClick={() => setStageRecalcReport(null)}>Закрити</button>
           </header>
-          <p>Звір бали по кожній сесії з прогнозами й фактичними результатами. Повторний перерахунок цього ГП замінює попередні бали, не додає їх удруге.</p>
+          <p>{stageRecalcReport.dryRun ? 'Це сухий прогін у прев’ю: бали обчислено для звірки, робочу базу не змінено.' : 'Звір бали по кожній сесії з прогнозами й фактичними результатами. Повторний перерахунок цього ГП замінює попередні бали, не додає їх удруге.'}</p>
           {stageRecalcReport.report.map((sessionReport,index) => (
             <details className="stage-recalc-session" key={`${sessionReport.type}-${index}`} open>
               <summary>{sessionReport.type==='qual'?'Кваліфікація':sessionReport.type==='sprint'?'Спринт':'Гонка'} · {sessionReport.scores.reduce((sum,row)=>sum+(Number(row.points)||0),0)} балів</summary>

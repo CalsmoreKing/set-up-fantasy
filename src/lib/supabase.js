@@ -17,7 +17,24 @@ if (!SUPABASE_URL || !SUPABASE_ANON) {
   throw new Error('Missing Supabase env vars')
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
+export const IS_PREVIEW_DEPLOYMENT = import.meta.env.VITE_DEPLOYMENT_ENV === 'preview'
+
+function previewReadOnlyFetch(input, init = {}) {
+  const requestUrl = typeof input === 'string' ? input : input?.url || String(input)
+  const method = String(init.method || input?.method || 'GET').toUpperCase()
+  const writesSupabaseData = /\/(?:rest\/v1|storage\/v1|functions\/v1)\//.test(requestUrl)
+  if (IS_PREVIEW_DEPLOYMENT && writesSupabaseData && !['GET','HEAD','OPTIONS'].includes(method)) {
+    return Promise.resolve(new Response(JSON.stringify({message:'PREVIEW_READ_ONLY: зміни бази даних вимкнено у прев’ю, щоб не змінювати робочі дані.'}), {
+      status:403,
+      headers:{'Content-Type':'application/json'},
+    }))
+  }
+  return fetch(input,init)
+}
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+  global:{fetch:previewReadOnlyFetch},
+})
 
 // Roulette and race-result defaults contain starters only. Reserves are offered only in substitutions.
 export const PILOTS = [...PILOTS_2026_ORDER]

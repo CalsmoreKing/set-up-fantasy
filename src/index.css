@@ -176,6 +176,8 @@ main { position: relative; z-index: 2; padding: 16px; max-width: 960px; margin: 
 .stage-select:focus { border-color: var(--red); }
 .session-btns { display: flex; gap: 4px; flex-wrap: wrap; }
 .stage-recalc-btn { margin-left: auto; }
+.preview-safety-banner { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; margin: 10px 16px; padding:10px 12px; border:1px solid rgba(255,190,70,.55); border-radius:3px; background:rgba(255,190,70,.08); color:#ffe0a3; font-size:11px; line-height:1.5; }
+.preview-safety-banner strong { font:700 9px 'Orbitron',sans-serif; letter-spacing:1px; color:#ffbe46; }
 .admin-edit-mode-banner { margin: 0 0 12px; padding: 10px 12px; border: 1px solid rgba(225,6,0,.45); border-radius: 3px; background: rgba(225,6,0,.08); color: var(--text); font-size: 11px; line-height: 1.5; }
 .stage-recalc-report { margin: 0 0 16px; padding: 14px; border: 1px solid rgba(255,215,0,.28); border-radius: 4px; background: rgba(255,215,0,.035); }
 .stage-recalc-report > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
+import { supabase, IS_PREVIEW_DEPLOYMENT, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
 import { normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage } from '../lib/roster'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -447,7 +447,7 @@ export default function AdminPage() {
         <>
           <div className="section-label">Етапи · повний перерахунок</div>
           <p className="team-created-note">Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.</p>
-          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} onClick={recalculateAllScores}>↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ</button>
+          <button className="btn btn-red" style={{marginBottom:14}} disabled={IS_PREVIEW_DEPLOYMENT || !canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Зміни бази заблоковано в прев’ю. Для сухої перевірки обери ГП на сторінці прогнозів.' : undefined} onClick={recalculateAllScores}>↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ</button>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {stages.map(stage => {
               const stageSessions = sessions.filter(session => session.stage_id===stage.id)
@@ -455,7 +455,7 @@ export default function AdminPage() {
               return <div key={stage.id} className="admin-stage-row">
                 <span className="admin-stage-name">{stage.flag} {stage.name}</span>
                 <span className="admin-stage-order">#{stage.sort_order}</span>
-                <button className="btn btn-ghost admin-recalc-btn" disabled={!ready} title={ready ? 'Перерахувати всі сесії ГП і замінити старі бали' : 'Потрібні сесії гонки та зараховані всі сесії ГП'} onClick={()=>recalculateStage(stage)}>
+                <button className="btn btn-ghost admin-recalc-btn" disabled={IS_PREVIEW_DEPLOYMENT || !ready} title={IS_PREVIEW_DEPLOYMENT ? 'Зміни бази заблоковано в прев’ю; скористайся сухим прогоном на сторінці прогнозів' : ready ? 'Перерахувати всі сесії ГП і замінити старі бали' : 'Потрібні сесії гонки та зараховані всі сесії ГП'} onClick={()=>recalculateStage(stage)}>
                   ↻ ПЕРЕРАХУВАТИ ГП
                 </button>
                 <button className={`btn ${stage.is_locked ? 'btn-ghost' : 'btn-red'}`} style={{padding:'6px 12px',fontSize:9}} onClick={() => toggleStageLock(stage)}>
