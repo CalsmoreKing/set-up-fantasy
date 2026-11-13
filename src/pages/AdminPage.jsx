@@ -4,8 +4,7 @@ import { normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage } 
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
-import { archiveBaselineForPlayer } from '../lib/archive'
-import { canonicalStoredScore, resultsList } from '../lib/scoring'
+import { resultsList } from '../lib/scoring'
 import { calculateNewcomerBonuses } from '../lib/standings'
 
 export default function AdminPage() {
@@ -16,7 +15,6 @@ export default function AdminPage() {
   const [players,   setPlayers]   = useState([])
   const [sessions,  setSessions]  = useState([])
   const [logs,      setLogs]      = useState([])
-  const [scoreLedger, setScoreLedger] = useState({})
   const [pilotChanges, setPilotChanges] = useState([])
   const [qualAssignments, setQualAssignments] = useState([])
   const [subStageId, setSubStageId] = useState('')
@@ -25,6 +23,7 @@ export default function AdminPage() {
   const [subIncoming, setSubIncoming] = useState('')
   const [loading,   setLoading]   = useState(true)
   const [msg,       setMsg]       = useState('')
+  const [recalculatingAll, setRecalculatingAll] = useState(false)
 
   // New player / team forms
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -51,7 +50,6 @@ export default function AdminPage() {
       setLogs(l.data||[])
       setPilotChanges(sub.data || [])
       setQualAssignments(qa.data || [])
-      buildPlayerScoreLedger(p.data || [], se.data || []).then(setScoreLedger)
       // collect distinct teams not in TEAM_META (custom-added)
       const teamsInDb = [...new Set((p.data||[]).map(x=>x.team))]
       setCustomTeams(teamsInDb.filter(t => !TEAM_META[t]))
@@ -78,16 +76,10 @@ export default function AdminPage() {
   // ── PLAYER EDIT ──
   async function updatePlayerField(playerId, field, value) {
     const target = players.find(p => p.id === playerId)
-    if (field === 'base_pts') {
-      const { error } = await supabase.rpc('apply_player_score_adjustment', { p_player_id:playerId, p_target_total:value, p_note:'Ручне коригування з панелі адміністратора' })
-      if (error) { setMsg(`⚠ ${error.message}`); return }
-    } else {
-      const { error } = await supabase.from('players').update({ [field]: value }).eq('id', playerId)
-      if (error) { setMsg(`⚠ ${error.message}`); return }
-    }
+    const { error } = await supabase.from('players').update({ [field]: value }).eq('id', playerId)
+    if (error) { setMsg(`⚠ ${error.message}`); return }
     setPlayers(prev => prev.map(p => p.id===playerId ? {...p, [field]:value} : p))
     await log('edit_player', { player_id:playerId, player_name:target?.name, field, old_value:target?.[field], value })
-    if (field === 'base_pts') loadAll()
     setMsg('✓ Збережено')
   }
 
@@ -131,7 +123,7 @@ export default function AdminPage() {
   async function addPlayer() {
     if (!newPlayerName.trim() || !newPlayerTeam) { setMsg('⚠ Вкажи ім\'я та команду'); return }
     const { error } = await supabase.from('players').insert({
-      name: newPlayerName.trim(), team: newPlayerTeam, base_pts: 0
+      name: newPlayerName.trim(), team: newPlayerTeam
     })
     if (error) { setMsg(`⚠ ${error.message}`); return }
     await log('add_player', { player_name:newPlayerName.trim(), team:newPlayerTeam })
@@ -228,6 +220,102 @@ export default function AdminPage() {
   }
 
 
+  async function recalculateAllScores() {
+    const completedStages = stages.filter(stage => {
+      const rows = sessions.filter(session => session.stage_id === stage.id)
+      return rows.length && rows.some(session => session.committed)
+    })
+    if (!canRecalculateAll(stages,sessions)) {
+      setMsg('⚠ Є ГП із частково зарахованими сесіями. Спершу зарахуй усі сесії кожного розпочатого ГП.')
+      return
+    }
+    const notCommitted = stages.filter(stage => {
+      const rows = sessions.filter(session => session.stage_id === stage.id)
+      return rows.length && !rows.some(session => session.committed)
+    }).length
+    const confirmed = window.confirm(
+      `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки гравців буде замінено сумою заново розрахованих прогнозів, кваліфікацій та бонусів. Архівні/невідомі залишки буде прибрано. ${notCommitted} ГП без зарахованих сесій будуть пропущені.`
+    )
+    if (!confirmed) return
+    setRecalculatingAll(true)
+    setMsg('⟳ Перераховую всі завершені ГП атомарно…')
+    try {
+      const stageIds = completedStages.map(stage => stage.id)
+      const eventSessions = sessions.filter(session => stageIds.includes(session.stage_id))
+      const sessionIds = eventSessions.map(session => session.id)
+      const [forecastResult, qualResult, changesResult] = await Promise.all([
+        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('stage_pilot_substitutions').select('*').in('stage_id',stageIds).eq('is_active',true),
+      ])
+      if (forecastResult.error) throw forecastResult.error
+      if (qualResult.error) throw qualResult.error
+      if (changesResult.error) throw changesResult.error
+      const allForecasts = forecastResult.data || []
+      const allQualifying = qualResult.data || []
+      const changes = changesResult.data || []
+      const payload = []
+
+      for (const stage of completedStages) {
+        const stageSessions = eventSessions.filter(session => session.stage_id === stage.id)
+        const stageChanges = changes.filter(change => change.stage_id === stage.id)
+        const scoreRows = []
+        const rescoredRaceForecasts = []
+        const order = Number(stage.sort_order)
+        for (const session of stageSessions) {
+          if (!['qual','race','sprint'].includes(session.type)) throw new Error(`${stage.name}: непідтримуваний тип сесії ${session.type}`)
+          const resultObject = normalizeStageResults(session.results || {}, stageChanges)
+          const results = resultsList(resultObject)
+          const requiredResults = session.type === 'qual' ? (order < 7 ? 1 : 3) : session.type === 'sprint' && order < 10 ? 10 : session.type === 'sprint' ? 5 : 10
+          const positions = Object.keys(resultObject).map(Number).sort((a,b)=>a-b)
+          if (results.length < requiredResults || !positions.slice(0,requiredResults).every((position,index)=>position === index+1)) {
+            throw new Error(`${stage.name} ${session.type.toUpperCase()}: немає ${requiredResults} послідовних реальних результатів; база не змінена.`)
+          }
+          const fastLap = normalizeStageDriver(session.fl_pilot || '',stageChanges)
+          const overtake = String(session.ov_pilot || '').split(/[,;|]/).map(pilot=>normalizeStageDriver(pilot.trim(),stageChanges)).filter(Boolean).join(', ')
+          if (session.type === 'qual') {
+            const rows = allQualifying.filter(row => row.session_id === session.id).map(row => {
+              const normalized = {...row,
+                pilot_1:normalizeStageDriver(row.pilot_1,stageChanges),
+                pilot_2:normalizeStageDriver(row.pilot_2,stageChanges),
+                pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
+              }
+              const {total} = calcQualAssignmentScore(normalized,results,order)
+              return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            })
+            scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})
+            continue
+          }
+          const rows = allForecasts.filter(row => row.session_id === session.id).map(row => {
+            const slots = session.type === 'sprint' ? (order < 10 ? 10 : 5) : 10
+            const predictions = Array.from({length:slots},(_,index)=>normalizeStageDriver(row.predictions?.[index+1] || '',stageChanges))
+            const result = session.type === 'sprint'
+              ? calcSprintScore(predictions,results,order,normalizeStageDriver(row.fl_pick,stageChanges),fastLap)
+              : calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,stageChanges),normalizeStageDriver(row.ov_pick,stageChanges),results,fastLap,overtake,order)
+            const scored = {id:row.id,score:result.total,score_breakdown:result.breakdown}
+            if (session.type === 'race') rescoredRaceForecasts.push({...row,...scored})
+            return scored
+          })
+          scoreRows.push({session_id:session.id,forecast_scores:rows,qual_scores:[]})
+        }
+        const eligible = newcomerPlayersForStage(players,order).map(player=>player.id)
+        const raceBonus = calculateNewcomerBonuses(players,stageSessions,rescoredRaceForecasts,[],eligible)
+        if (!raceBonus.ready) throw new Error(`${stage.name}: не вдалося безпечно перерахувати бонус новачка за гонку.`)
+        payload.push({stage_id:stage.id,session_scores:scoreRows,newcomer_bonuses:raceBonus.bonuses,newcomer_minimum:raceBonus.minimum})
+      }
+
+      const {data,error} = await supabase.rpc('recalculate_all_stage_scores',{p_stages:payload})
+      if (error) throw error
+      setMsg(`✓ Перераховано ${payload.length} ГП; підсумки гравців замінено лише на суму даних і правил.`)
+      loadAll()
+    } catch (error) {
+      setMsg(`⚠ Повний перерахунок скасовано — жодні бали не змінено: ${error.message || error}`)
+    } finally {
+      setRecalculatingAll(false)
+    }
+  }
+
+
   async function addPilotSubstitution(teamName = subTeam, outgoingDriver = subOutgoing, incomingDriver = subIncoming) {
     const teamRoster = PILOT_TEAM_ROSTER.find(row => row.team === teamName)
     const teamReserves = TEAM_RESERVE_PILOTS_2026[teamName] || []
@@ -314,8 +402,9 @@ export default function AdminPage() {
       {/* STAGES */}
       {tab === 'stages' && (
         <>
-          <div className="section-label">Етапи · перерахунок повністю замінює збережені бали</div>
-          <p className="team-created-note">Для перерахунку потрібні зараховані сесії та збережені прогнози. Система перепише бали за всіма сесіями ГП та заново визначить бонус новачка лише за результатом гонки.</p>
+          <div className="section-label">Етапи · повний перерахунок</div>
+          <p className="team-created-note">Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.</p>
+          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} onClick={recalculateAllScores}>↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ</button>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {stages.map(stage => {
               const stageSessions = sessions.filter(session => session.stage_id===stage.id)
@@ -355,18 +444,13 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addPlayer}>+ ДОДАТИ</button>
           </div>
 
-          <div className="admin-ledger-heading"><div><div className="section-label">Гравці та доступ · розподіл загальних балів за командами</div><p>Залишок = підсумок у профілі мінус відомі складові; це показник для звірки, а не автоматичне списання чи нарахування.</p></div><button className="ledger-refresh-btn" onClick={async()=>{setScoreLedger(await buildPlayerScoreLedger(players,sessions));setMsg('✓ Залишок балів перераховано за збереженими записами (без змін у базі).')}}>⟳ Перерахувати залишок</button></div>
+          <div className="section-label">Гравці та доступ · бали змінюються лише перерахунком результатів</div>
           <div style={{overflowX:'auto'}}>
-          <table className="standings" style={{marginBottom:0,minWidth:1050}}>
+          <table className="standings" style={{marginBottom:0,minWidth:750}}>
             <thead>
               <tr>
                 <th>Ім'я</th>
                 <th>Команда</th>
-                <th>Архівні бали</th>
-                <th>Активний сезон</th>
-                <th>Бонус новачка</th>
-                <th>Ручні коригування*</th>
-                <th>Залишок / невідоме</th>
                 <th>Разом</th>
                 <th>Акаунт</th>
                 <th>Адмін</th>
@@ -376,7 +460,7 @@ export default function AdminPage() {
             <tbody>
               {[...new Set(players.map(p => p.team))].sort((a,b)=>a.localeCompare(b,'uk')).flatMap(team => [
                 <tr key={`team-${team}`} style={{background:'rgba(255,255,255,.045)'}}>
-                  <td colSpan={11} style={{fontWeight:800,color:TEAM_META[team]?.color || 'var(--gold)',fontSize:11,letterSpacing:.6}}>{TEAM_META[team]?.code || '◆'} · {team}</td>
+                  <td colSpan={6} style={{fontWeight:800,color:TEAM_META[team]?.color || 'var(--gold)',fontSize:11,letterSpacing:.6}}>{TEAM_META[team]?.code || '◆'} · {team}</td>
                 </tr>,
                 ...players.filter(p => p.team === team).map(p => (
                 <tr key={p.id}>
@@ -390,16 +474,7 @@ export default function AdminPage() {
                       {allTeamOptions.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{scoreLedger[p.id]?.archive ?? '—'}</td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{scoreLedger[p.id]?.season ?? '—'}</td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{scoreLedger[p.id]?.newcomer ?? '—'}</td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{scoreLedger[p.id]?.manual ?? '—'}</td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11,color:scoreLedger[p.id]?.unallocated===0?'var(--green)':'#ff8585'}}>{scoreLedger[p.id]?.unallocated ?? '—'}</td>
-                  <td>
-                    <input type="number" className="score-input" defaultValue={p.base_pts} min={0}
-                      onBlur={e => updatePlayerField(p.id,'base_pts', parseInt(e.target.value)||0)}
-                      onKeyDown={e=>{if(e.key==='Enter')e.target.blur()}} />
-                  </td>
+                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{p.base_pts ?? 0}</td>
                   <td style={{fontSize:11}}>
                     {p.auth_user_id ? (
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -548,47 +623,12 @@ export default function AdminPage() {
   )
 }
 
-async function buildPlayerScoreLedger(players, sessions) {
-  const activeSessions = sessions.filter(session => session.committed)
-  const sessionIds = activeSessions.map(session => session.id)
-  let forecasts = [], qualifying = [], bonuses = [], adjustments = []
-  const adjustmentResult = await supabase.from('score_manual_adjustments').select('player_id,delta').in('player_id', players.map(p=>p.id))
-  adjustments = adjustmentResult.data || []
-  if (sessionIds.length) {
-    const [f, q, b] = await Promise.all([
-      supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,predictions,fl_pick,ov_pick').in('session_id', sessionIds),
-      supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', sessionIds),
-      supabase.from('stage_newcomer_bonuses').select('player_id,points').in('stage_id', [...new Set(activeSessions.map(s => s.stage_id))]),
-    ])
-    forecasts = f.data || []
-    qualifying = q.data || []
-    bonuses = b.data || []
-  }
-  const sessionsById = new Map(activeSessions.map(session => [session.id, session]))
-  const season = new Map(players.map(player => [player.id, 0]))
-  for (const row of forecasts) {
-    const session = sessionsById.get(row.session_id)
-    const score = canonicalStoredScore(row)
-    season.set(row.player_id, (season.get(row.player_id) || 0) + score)
-  }
-  for (const row of qualifying) {
-    const session = sessionsById.get(row.session_id)
-    const score = canonicalStoredScore(row)
-    season.set(row.player_id, (season.get(row.player_id) || 0) + score)
-  }
-  const newcomer = new Map(players.map(player => [player.id, 0]))
-  for (const row of bonuses) newcomer.set(row.player_id, (newcomer.get(row.player_id) || 0) + (Number(row.points) || 0))
-  const manual = new Map(players.map(player=>[player.id,0]))
-  for (const row of adjustments) manual.set(row.player_id,(manual.get(row.player_id)||0)+(Number(row.delta)||0))
-  return Object.fromEntries(players.map(player => {
-    const total = Number(player.base_pts) || 0
-    const archive = archiveBaselineForPlayer(player.name)
-    const seasonPoints = season.get(player.id) || 0
-    const newcomerPoints = newcomer.get(player.id) || 0
-    const manualPoints = manual.get(player.id) || 0
-    return [player.id, { archive, season:seasonPoints, newcomer:newcomerPoints, manual:manualPoints,
-      unallocated:archive == null ? null : total - archive - seasonPoints - newcomerPoints - manualPoints }]
-  }))
+function canRecalculateAll(stages,sessions) {
+  const started = (stages || []).filter(stage => (sessions || []).some(session => session.stage_id === stage.id && session.committed))
+  return started.length > 0 && started.every(stage => {
+    const rows = sessions.filter(session => session.stage_id === stage.id)
+    return rows.length > 0 && rows.some(session => session.type === 'race') && rows.every(session => session.committed)
+  })
 }
 
 // ════════════════════════════════════════

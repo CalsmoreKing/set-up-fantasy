@@ -411,13 +411,6 @@ select.stage-select option {
 /* Plain player name — no underline, no hover effect */
 .player-name-plain { font-weight: 600; }
 .team-badge { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 2px; font-weight: 600; border: 1px solid; white-space: nowrap; }
-.score-input {
-  background: #0d0d0d; border: 1px solid var(--border); color: var(--text);
-  font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700;
-  padding: 4px 8px; border-radius: 2px; width: 64px; outline: none; text-align: center;
-}
-.score-input:focus { border-color: var(--red); }
-.score-input:disabled { opacity: .35; cursor: not-allowed; }
 .score-add { font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700; color: var(--red); }
 .score-total { font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 900; color: var(--gold); }
 /* Arrow indicators */
@@ -893,7 +886,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .admin-plan-card,.reserve-admin-section{background:linear-gradient(145deg,rgba(20,25,34,.96),rgba(12,15,21,.98));border:1px solid rgba(255,255,255,.09);border-radius:10px;padding:clamp(16px,3vw,26px);margin-bottom:22px;box-shadow:0 15px 40px rgba(0,0,0,.2)}
 .admin-plan-heading,.reserve-admin-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:18px}
 .admin-plan-heading h2,.reserve-admin-heading h2{font-size:clamp(17px,2vw,22px);margin:5px 0 8px;color:var(--text)}
-.admin-plan-heading p,.reserve-admin-note,.admin-plan-footnote,.team-created-note,.admin-ledger-heading p{color:var(--muted);font-size:12px;line-height:1.6;margin:0;max-width:780px}
+.admin-plan-heading p,.reserve-admin-note,.admin-plan-footnote,.team-created-note{color:var(--muted);font-size:12px;line-height:1.6;margin:0;max-width:780px}
 .admin-plan-kicker{font:700 9px 'Orbitron',sans-serif;letter-spacing:2px;color:var(--red)}
 .admin-plan-badge{border:1px solid rgba(107,255,138,.34);background:rgba(107,255,138,.08);color:var(--green);border-radius:999px;padding:8px 12px;font:700 9px 'Orbitron',sans-serif;letter-spacing:1px;white-space:nowrap}
 .admin-plan-table-wrap{overflow:auto;border:1px solid rgba(255,255,255,.07);border-radius:8px}
@@ -914,12 +907,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .reserve-team-title{display:flex;justify-content:space-between;align-items:center;gap:10px}.reserve-team-title strong{font-size:13px;color:var(--text)}.reserve-team-title span{font-size:9px;color:var(--muted);text-align:right}
 .reserve-active-list{display:flex;flex-wrap:wrap;gap:6px}.reserve-driver-chip{font-size:10px;padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.055);color:#dce0e8}.reserve-driver-chip.is-replaced{opacity:.5;text-decoration:line-through}
 .reserve-form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.reserve-form-row .reserve-save-btn{grid-column:1/-1}
-.reserve-save-btn,.ledger-refresh-btn{border:1px solid rgba(225,6,0,.45);background:rgba(225,6,0,.13);color:#ffaaa6;border-radius:7px;padding:10px 12px;font:700 9px 'Orbitron',sans-serif;letter-spacing:.7px;cursor:pointer;transition:.18s}
-.reserve-save-btn:hover:not(:disabled),.ledger-refresh-btn:hover{background:var(--red);color:white}.reserve-save-btn:disabled{opacity:.38;cursor:not-allowed}
+.reserve-save-btn{border:1px solid rgba(225,6,0,.45);background:rgba(225,6,0,.13);color:#ffaaa6;border-radius:7px;padding:10px 12px;font:700 9px 'Orbitron',sans-serif;letter-spacing:.7px;cursor:pointer;transition:.18s}
+.reserve-save-btn:hover:not(:disabled){background:var(--red);color:white}.reserve-save-btn:disabled{opacity:.38;cursor:not-allowed}
 .reserve-saved-change{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 9px;border-radius:6px;background:rgba(107,255,138,.055);font-size:11px;color:var(--green)}
 .reserve-saved-change button{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:5px 8px;font-size:10px;cursor:pointer}
 .reserve-unconfirmed{font-size:11px;color:var(--muted);border-top:1px solid rgba(255,255,255,.07);padding-top:10px}
-.admin-ledger-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}.admin-ledger-heading .section-label{margin:0 0 5px}.admin-ledger-heading p{font-size:11px}.ledger-refresh-btn{white-space:nowrap}
 .team-created-note{margin:-7px 0 12px;font-size:11px}
 @media(max-width:580px){.reserve-form-row{grid-template-columns:1fr}.reserve-form-row .reserve-save-btn{grid-column:auto}.admin-plan-badge{margin-top:0}}
 
