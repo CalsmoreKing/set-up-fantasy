@@ -175,6 +175,17 @@ main { position: relative; z-index: 2; padding: 16px; max-width: 960px; margin: 
 }
 .stage-select:focus { border-color: var(--red); }
 .session-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.stage-recalc-btn { margin-left: auto; }
+.stage-recalc-report { margin: 0 0 16px; padding: 14px; border: 1px solid rgba(255,215,0,.28); border-radius: 4px; background: rgba(255,215,0,.035); }
+.stage-recalc-report > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stage-recalc-report h3 { margin: 0; color: var(--gold); font: 700 11px 'Orbitron', sans-serif; letter-spacing: 1px; }
+.stage-recalc-report > p { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.stage-recalc-session { border-top: 1px solid var(--border); padding: 9px 0; }
+.stage-recalc-session summary { color: var(--text); cursor: pointer; font: 600 10px 'Orbitron', sans-serif; letter-spacing: .5px; }
+.stage-recalc-score-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap: 4px 12px; padding: 9px 0 0; }
+.stage-recalc-score-list > div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.stage-recalc-score-list strong { color: var(--gold); font-family: 'Orbitron',sans-serif; }
+.stage-recalc-bonus { margin-top: 8px; color: var(--muted); font-size: 10px; }
 .session-btn {
   background: none; border: 1px solid var(--border); color: var(--muted);
   font-family: 'Orbitron', sans-serif; font-size: 9px; letter-spacing: 1px;
@@ -301,7 +312,6 @@ select.stage-select option {
    ───────────────────────────────────────── */
 .qual-pilot-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .pole-pick-row .pilot-select { flex: 1; min-width: 180px; }
-.qual-rule-note { color: var(--muted); font-size: 10px; letter-spacing: .3px; }
 .pilot-tag {
   font-size: 11px; font-weight: 600; color: var(--text);
   background: #0d0d0d; border: 1px solid var(--border);
@@ -410,8 +420,11 @@ select.stage-select option {
 
 .rank { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 14px; color: var(--muted); }
 .rank.r1 { color: var(--gold); } .rank.r2 { color: var(--silver); } .rank.r3 { color: var(--bronze); }
-/* Plain player name — no underline, no hover effect */
-.player-name-plain { font-weight: 600; }
+/* Profile links keep the table's original name color and typography in every state. */
+.player-name-plain,
+.player-name-plain:visited,
+.player-name-plain:hover,
+.player-name-plain:active { color: inherit; font: inherit; font-weight: 600; text-decoration: none; }
 .team-badge { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 2px; font-weight: 600; border: 1px solid; white-space: nowrap; }
 .score-add { font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700; color: var(--red); }
 .score-total { font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 900; color: var(--gold); }

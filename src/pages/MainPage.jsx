@@ -27,6 +27,7 @@ export default function MainPage() {
   const [commitMsg, setCommitMsg] = useState('')
   const [committing,setCommitting]= useState(false)
   const [recalculatingStage,setRecalculatingStage] = useState(false)
+  const [stageRecalcReport,setStageRecalcReport] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -138,7 +139,10 @@ export default function MainPage() {
   const currentStageIndex = navigationStages.findIndex(stage => stage.key === stageKey)
   function moveStage(step) {
     const nextStage = navigationStages[currentStageIndex + step]
-    if (nextStage) setStageKey(nextStage.key)
+    if (nextStage) {
+      setStageRecalcReport(null)
+      setStageKey(nextStage.key)
+    }
   }
 
   // Deadline logic — session locks automatically when deadline_utc passes
@@ -346,7 +350,9 @@ export default function MainPage() {
       return
     }
     if (!window.confirm(`Перерахувати ${currentStage.name}? Збережені бали буде замінено; це не змінить прогнози.`)) return
+    setStageRecalcReport(null)
     setRecalculatingStage(true)
+    let recalcPhase = 'завантаження прогнозів і реальних результатів'
     try {
       const ids = stageSessions.map(session=>session.id)
       const [forecastResult,qualResult,changesResult] = await Promise.all([
@@ -359,6 +365,7 @@ export default function MainPage() {
       if (changesResult.error) throw changesResult.error
       const changes=changesResult.data||[], forecasts_=forecastResult.data||[], assignments=qualResult.data||[]
       const scoreRows=[], raceRows=[]
+      recalcPhase = 'перерахунок кваліфікації, спринту й гонки'
       const report=stageSessions.map(session=>{
         const resultObject=normalizeStageResults(session.results||{},changes),results=resultsList(resultObject)
         const required=session.type==='qual'?(Number(currentStage.sort_order)<7?1:3):session.type==='sprint'?5:10
@@ -390,12 +397,19 @@ export default function MainPage() {
       const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order)).map(player=>player.id)
       const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
       if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
+      recalcPhase = 'атомарне збереження балів цього ГП'
       const {error}=await supabase.rpc('apply_stage_scores',{p_stage_id:currentStage.id,p_session_scores:scoreRows,p_newcomer_bonuses:bonus.bonuses,p_newcomer_minimum:bonus.minimum})
       if(error) throw error
-      await supabase.from('audit_log').insert({action:'recalculate_stage',actor:me?.name||user?.email||'Адміністратор',details:{stage:currentStage.key,stage_name:currentStage.name,report,newcomer_bonus_minimum:bonus.minimum,actor_name:me?.name||null,actor_email:user?.email||null,actor_user_id:user?.id||null}})
-      setCommitMsg(`✓ ${currentStage.name}: перераховано; звіт по гравцях збережено в журналі.`)
+      recalcPhase = 'запис журналу й підсумкового звіту'
+      const {error:auditError}=await supabase.from('audit_log').insert({action:'recalculate_stage',actor:me?.name||user?.email||'Адміністратор',details:{stage:currentStage.key,stage_name:currentStage.name,report,newcomer_bonus_minimum:bonus.minimum,actor_name:me?.name||null,actor_email:user?.email||null,actor_user_id:user?.id||null}})
+      if(auditError) console.error('Не вдалося записати звіт перерахунку в журнал:',auditError)
+      setStageRecalcReport({stageName:currentStage.name,report,newcomerBonusMinimum:bonus.minimum})
+      setCommitMsg(`✓ ${currentStage.name}: перераховано; нижче доступний звіт по кожній сесії та гравцю.`)
       loadFormData(players).then(setFormData)
-    } catch(error) { setCommitMsg(`⚠ Перерахунок скасовано: ${error.message||error}`) }
+    } catch(error) {
+      console.error(`Перерахунок ${currentStage.name}: помилка на етапі «${recalcPhase}»`,error)
+      setCommitMsg(`⚠ Перерахунок ${currentStage.name} скасовано на етапі «${recalcPhase}»: ${error.message||error}`)
+    }
     finally { setRecalculatingStage(false) }
   }
 
@@ -417,7 +431,7 @@ export default function MainPage() {
           <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
           <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
         </div>
-        <select className="stage-select" value={stageKey} onChange={e=>setStageKey(e.target.value)}>
+        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setStageKey(e.target.value)}}>
           <option value="">— Оберіть етап —</option>
           {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
@@ -425,7 +439,6 @@ export default function MainPage() {
             </option>
           ))}
         </select>
-        {isAdmin && currentStage && <button type="button" className="btn btn-ghost" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? '…' : '↻ ПЕРЕРАХУВАТИ ГП'}</button>}
         <div className="session-btns">
           {availableSessions.map(t => (
             <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>setSessionType(t)}>
@@ -450,7 +463,27 @@ export default function MainPage() {
             закр. {deadlineDate.toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
           </span>
         )}
+        {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={`Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`Перерахувати ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
       </div>
+
+      {stageRecalcReport && (
+        <section className="stage-recalc-report" aria-label={`Звіт перерахунку ${stageRecalcReport.stageName}`}>
+          <header>
+            <h3>ЗВІТ ПЕРЕРАХУНКУ · {stageRecalcReport.stageName}</h3>
+            <button type="button" className="btn btn-ghost" onClick={() => setStageRecalcReport(null)}>Закрити</button>
+          </header>
+          <p>Звір бали по кожній сесії з прогнозами й фактичними результатами. Повторний перерахунок цього ГП замінює попередні бали, не додає їх удруге.</p>
+          {stageRecalcReport.report.map((sessionReport,index) => (
+            <details className="stage-recalc-session" key={`${sessionReport.type}-${index}`} open>
+              <summary>{sessionReport.type==='qual'?'Кваліфікація':sessionReport.type==='sprint'?'Спринт':'Гонка'} · {sessionReport.scores.reduce((sum,row)=>sum+(Number(row.points)||0),0)} балів</summary>
+              <div className="stage-recalc-score-list">
+                {sessionReport.scores.map((row,rowIndex)=><div key={`${row.player}-${rowIndex}`}><span>{row.player}</span><strong>{row.points}</strong></div>)}
+              </div>
+            </details>
+          ))}
+          <div className="stage-recalc-bonus">Бонус новачка: мінімум за гонку — {stageRecalcReport.newcomerBonusMinimum ?? '—'} балів.</div>
+        </section>
+      )}
 
       {currentSession?.archive_preview && (
         <div className="archive-preview-banner" role="status">
@@ -519,9 +552,6 @@ export default function MainPage() {
                 ? Number(currentStage?.sort_order)<7 ? 'ПРОГНОЗ НА ПОУЛ' : 'ПРОГНОЗИ — КВАЛІФІКАЦІЯ'
                 : sessionType==='sprint' ? 'ПРОГНОЗИ — СПРИНТ' : 'ПРОГНОЗИ — ГОНКА'}
             </div>
-            {sessionType==='qual' && Number(currentStage?.sort_order)<7 && (
-              <span className="qual-rule-note">До Канади: обери одного пілота на поул · 1 бал</span>
-            )}
             {isAdmin && sessionType==='qual' && Number(currentStage?.sort_order)>=7 && (
               <button className="roulette-btn all" onClick={() => rollAllQual(players, qualAssign, stageKey, currentSession?.id, setQualAssign, stagePilotOptions, currentStage?.sort_order, qualSlotsByPlayer)}>
                 🎲 РАНДОМАЙЗЕР ВСІМ
