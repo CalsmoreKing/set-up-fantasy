@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 import { normalizeStageDriver, priorQualAssignments } from '../lib/roster'
-import { isOvertakeWinner } from '../lib/scoring'
+import { calcSprintPickPoints, isOvertakeWinner } from '../lib/scoring'
 
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
@@ -391,14 +391,9 @@ function getQualPts(pilot, predPos, results) {
   const pts = diff===0?6:diff===1?3:diff===2?1:0
   return pts > 0 ? pts : ''
 }
-function getSprintPts(i, pilot, results, stageOrder) {
-  if (!pilot || !results.length) return ''
-  const actual = results.indexOf(pilot)
-  if (actual === -1) return ''
-  const diff = Math.abs(i - actual)
-  if (actual >= 5) return ''
-  const pts = diff === 0 ? 11 - i : diff === 1 ? 1 : 0
-  return pts > 0 ? pts : ''
+function getSprintPts(i, pilot, results) {
+  const points = calcSprintPickPoints(i,pilot,results)
+  return points > 0 ? points : ''
 }
 
 function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, score, qPilots, driverOptions = PILOTS, stageKey, session }) {

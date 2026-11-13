@@ -81,19 +81,25 @@ export function calcQualAssignmentScore(assignment, results, stageOrder = 10) {
     }, { total: 0, breakdown: [] })
 }
 
+export function calcSprintPickPoints(predictedPosition, pilot, results) {
+  if (!pilot || !Array.isArray(results)) return 0
+  const actualPosition = results.slice(0,5).indexOf(pilot)
+  if (actualPosition < 0) return 0
+  const difference = Math.abs(Number(predictedPosition) - actualPosition)
+  return difference === 0 ? 5 : difference === 1 ? 2 : difference === 2 ? 1 : 0
+}
+
 export function calcSprintScore(preds, results) {
   // Sprint uses the same positional scale as the first five race slots,
   // limited to the actual sprint top five and with no sprint-specific bonuses.
-  const sprintResults = results.slice(0, 5)
+  const sprintResults = results.slice(0,5)
   const breakdown = []
   let total = 0
   for (let i = 0; i < 5; i++) {
     const predicted = preds[i]
     if (!predicted) continue
     const actualPos = sprintResults.indexOf(predicted)
-    if (actualPos === -1) continue
-    const diff = Math.abs(i - actualPos)
-    const points = diff === 0 ? 5 : diff === 1 ? 2 : diff === 2 ? 1 : 0
+    const points = calcSprintPickPoints(i,predicted,sprintResults)
     if (points > 0) {
       total += points
       breakdown.push({ label: `P${i + 1} ${predicted} → факт P${actualPos + 1}`, pts: points })
