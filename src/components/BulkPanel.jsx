@@ -111,7 +111,7 @@ export default function BulkPanel({ open, onClose, standalone }) {
       } else {
         // race or sprint
         for (const r of parsed) {
-          const maxPreds = importType === 'sprint' && Number(selectedSession?.stages?.sort_order) >= 10 ? 5 : 10
+          const maxPreds = importType === 'sprint' ? 5 : 10
           const preds = {}
           r.preds.slice(0, maxPreds).forEach((p, i) => { if (p) preds[i+1] = p })
           const { data: previous } = await supabase.from('forecasts').select('*').eq('session_id',sessionId).eq('player_id',r.player.id).maybeSingle()

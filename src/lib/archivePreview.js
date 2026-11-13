@@ -1,4 +1,5 @@
 import archivePreview from '../data/archivePreview.json'
+import { calcRaceScore, calcSprintScore, resultsList } from './scoring.js'
 
 export const ARCHIVE_PREVIEW = archivePreview
 
@@ -38,9 +39,15 @@ export function archiveQualifyingForSession(sessionId) {
 export function archiveScoresForStage(stageKey) {
   const scores = new Map()
   for (const row of archivePreview.forecasts.filter(item => item.stage_key === stageKey)) {
+    const session = archivePreview.sessions.find(item => item.id === row.session_id)
+    const predictions = Array.from({length:row.session_type === 'sprint' ? 5 : 10},(_,index)=>row.predictions?.[index+1] || '')
+    const results = resultsList(session?.results)
+    const score = row.session_type === 'sprint'
+      ? calcSprintScore(predictions,results).total
+      : calcRaceScore(predictions,row.fl_pick,row.ov_pick,results,session?.fl_pilot,session?.ov_pilot,session?.stage_order).total
     const value = scores.get(row.player_id) || { qual:0, sprint:0, race:0, total:0 }
-    value[row.session_type] = (value[row.session_type] || 0) + (Number(row.score) || 0)
-    value.total += Number(row.score) || 0
+    value[row.session_type] = (value[row.session_type] || 0) + score
+    value.total += score
     scores.set(row.player_id, value)
   }
   for (const row of archivePreview.qualifying_assignments.filter(item => item.stage_key === stageKey)) {

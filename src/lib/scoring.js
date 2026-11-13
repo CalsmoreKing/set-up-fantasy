@@ -9,7 +9,6 @@ export function isOvertakeWinner(pick, result) {
 
 export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv, stageOrder = 10) {
   const raceResults = results.slice(0, 10)
-  const legacyEra = Number(stageOrder) < 10 // Australia–Barcelona rules.
   const breakdown = []
   let total = 0
 
@@ -19,25 +18,18 @@ export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv, stageO
     const actualPos = raceResults.indexOf(predicted)
     if (actualPos === -1) continue
     const diff = Math.abs(i - actualPos)
-    const points = legacyEra
-      ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-      : (diff === 0 ? (i < 5 ? 5 : 6)
-        : diff === 1 ? (i < 5 ? 2 : 3)
-          : diff === 2 ? (i < 5 ? 1 : 2)
-            : diff === 3 && i >= 5 ? 1 : 0)
+    const points = diff === 0 ? (i < 5 ? 5 : 6)
+      : diff === 1 ? (i < 5 ? 2 : 3)
+        : diff === 2 ? (i < 5 ? 1 : 2)
+          : diff === 3 && i >= 5 ? 1 : 0
     if (points > 0) {
       total += points
       breakdown.push({ label: `P${i + 1} ${predicted} → факт P${actualPos + 1}`, pts: points })
     }
   }
 
-  if (legacyEra) {
-    if (preds[0] && preds[0] === raceResults[0]) { total += 1; breakdown.push({ label: '🏁 Переможець гонки', pts: 1 }) }
-    if (fl && fl === resultFl) { total += 1; breakdown.push({ label: '⚡ Швидке коло', pts: 1 }) }
-  } else {
-    if (fl && fl === resultFl) { total += 2; breakdown.push({ label: '⚡ Швидке коло', pts: 2 }) }
-    if (isOvertakeWinner(ov, resultOv)) { total += 4; breakdown.push({ label: '🚀 Прорив', pts: 4 }) }
-  }
+  if (fl && fl === resultFl) { total += 2; breakdown.push({ label: '⚡ Швидке коло', pts: 2 }) }
+  if (isOvertakeWinner(ov, resultOv)) { total += 4; breakdown.push({ label: '🚀 Прорив', pts: 4 }) }
 
   const predictedTop3 = preds.slice(0, 3).filter(Boolean)
   const actualTop3 = raceResults.slice(0, 3).filter(Boolean)
@@ -45,22 +37,18 @@ export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv, stageO
     && actualTop3.length === 3 && new Set(actualTop3).size === 3
     && predictedTop3.every(pilot => actualTop3.includes(pilot))
   if (top3Matches) {
-    const points = legacyEra ? 4 : 2
-    total += points
-    breakdown.push({ label: '🏆 Склад Топ-3', pts: points })
+    total += 2
+    breakdown.push({ label: '🏆 Склад Топ-3', pts: 2 })
   }
 
-  // The +2 top-five set bonus begins with Austria; older rounds only had the top-three set bonus.
-  if (!legacyEra) {
-    const predictedTop5 = preds.slice(0, 5).filter(Boolean)
-    const actualTop5 = raceResults.slice(0, 5).filter(Boolean)
-    const top5Matches = predictedTop5.length === 5 && new Set(predictedTop5).size === 5
-      && actualTop5.length === 5 && new Set(actualTop5).size === 5
-      && predictedTop5.every(pilot => actualTop5.includes(pilot))
-    if (top5Matches) {
-      total += 2
-      breakdown.push({ label: '🏆 Склад Топ-5', pts: 2 })
-    }
+  const predictedTop5 = preds.slice(0, 5).filter(Boolean)
+  const actualTop5 = raceResults.slice(0, 5).filter(Boolean)
+  const top5Matches = predictedTop5.length === 5 && new Set(predictedTop5).size === 5
+    && actualTop5.length === 5 && new Set(actualTop5).size === 5
+    && predictedTop5.every(pilot => actualTop5.includes(pilot))
+  if (top5Matches) {
+    total += 2
+    breakdown.push({ label: '🏆 Склад Топ-5', pts: 2 })
   }
 
   return { total, breakdown }
@@ -93,34 +81,22 @@ export function calcQualAssignmentScore(assignment, results, stageOrder = 10) {
     }, { total: 0, breakdown: [] })
 }
 
-export function calcSprintScore(preds, results, stageOrder = 10, fl = '', resultFl = '') {
-  const legacyEra = Number(stageOrder) < NEW_RULES_START_SORT_ORDER
+export function calcSprintScore(preds, results) {
+  // Sprint predictions/results are always the top five. Exact picks use the
+  // top-ten scale (P1 = 11, descending by predicted slot); ±1 earns one point.
   const breakdown = []
   let total = 0
-  const slots = legacyEra ? 10 : 5
-  for (let i = 0; i < slots; i++) {
+  for (let i = 0; i < 5; i++) {
     const predicted = preds[i]
     if (!predicted) continue
-    const actualPos = results.indexOf(predicted)
+    const actualPos = results.slice(0, 5).indexOf(predicted)
     if (actualPos === -1) continue
     const diff = Math.abs(i - actualPos)
-    const points = legacyEra
-      ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-      : (diff === 0 ? 3 : diff === 1 ? 2 : diff === 2 ? 1 : 0)
+    const points = diff === 0 ? 11 - i : diff === 1 ? 1 : 0
     if (points > 0) {
       total += points
       breakdown.push({ label: `P${i + 1} ${predicted} → факт P${actualPos + 1}`, pts: points })
     }
-  }
-  if (legacyEra) {
-    if (preds[0] && preds[0] === results[0]) { total += 1; breakdown.push({ label: '🏁 Переможець спринту', pts: 1 }) }
-    const predictedTop3 = preds.slice(0, 3).filter(Boolean)
-    const actualTop3 = results.slice(0, 3).filter(Boolean)
-    const top3Matches = predictedTop3.length === 3 && new Set(predictedTop3).size === 3
-      && actualTop3.length === 3 && new Set(actualTop3).size === 3
-      && predictedTop3.every(pilot => actualTop3.includes(pilot))
-    if (top3Matches) { total += 4; breakdown.push({ label: '🏆 Склад Топ-3', pts: 4 }) }
-    if (fl && fl === resultFl) { total += 1; breakdown.push({ label: '⚡ Швидке коло', pts: 1 }) }
   }
   return { total, breakdown }
 }
@@ -143,7 +119,7 @@ export function resultsList(results) {
     .filter(Boolean)
 }
 
-export const NEW_RULES_START_SORT_ORDER = 10 // Race/sprint rules begin at Austria.
+export const NEW_RULES_START_SORT_ORDER = 10 // Deprecated stage cutoff; race and sprint scoring now use one season-wide ruleset.
 export const QUAL_ROULETTE_START_SORT_ORDER = 7 // Roulette qualifying begins at Canada.
 
 function stageOrderOf(session, stageOrder) {
@@ -152,8 +128,8 @@ function stageOrderOf(session, stageOrder) {
 
 function archivedRuleVersion(session, stageOrder) {
   const order = stageOrderOf(session, stageOrder)
+  if (session?.type === 'sprint') return 'top-five-sprint'
   if (session?.type === 'qual' && Number.isFinite(order) && order < QUAL_ROULETTE_START_SORT_ORDER) return 'legacy-pole-only'
-  if (session?.type !== 'qual' && Number.isFinite(order) && order < NEW_RULES_START_SORT_ORDER) return 'legacy-australia-barcelona'
   return 'current'
 }
 
@@ -241,7 +217,7 @@ function calculateForecast(session, forecast, stageOrder, input) {
   const results = resultsList(session?.results)
   if (!results.length) return { score: Number(forecast?.score) || 0, breakdown: forecast?.score_breakdown || [], recalculated: false }
   const resolvedStageOrder = stageOrderOf(session, stageOrder)
-  const predictions = Array.from({ length: session.type === 'sprint' && Number(resolvedStageOrder) >= NEW_RULES_START_SORT_ORDER ? 5 : 10 }, (_, index) => input?.predictions?.[index + 1] || '')
+  const predictions = Array.from({ length: session.type === 'sprint' ? 5 : 10 }, (_, index) => input?.predictions?.[index + 1] || '')
   const result = session.type === 'sprint'
     ? calcSprintScore(predictions, results, resolvedStageOrder, input?.fl_pick || '', session.fl_pilot || '')
     : calcRaceScore(predictions, input?.fl_pick, input?.ov_pick, results, session.fl_pilot || '', session.ov_pilot || '', resolvedStageOrder)

@@ -3,7 +3,9 @@ import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
-import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments } from '../lib/roster'
+import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, newcomerPlayersForStage } from '../lib/roster'
+import { calculateNewcomerBonuses } from '../lib/standings'
+import { resultsList } from '../lib/scoring'
 import { archiveSessionsForStage, archiveForecastsForSession, archiveQualifyingForSession, ARCHIVE_PREVIEW } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
@@ -24,13 +26,14 @@ export default function MainPage() {
   const [loading,   setLoading]   = useState(true)
   const [commitMsg, setCommitMsg] = useState('')
   const [committing,setCommitting]= useState(false)
+  const [recalculatingStage,setRecalculatingStage] = useState(false)
 
   useEffect(() => {
     Promise.all([
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('players').select('*').order('name'),
     ]).then(([s, p]) => {
-      const stagesData = s.data || []
+      const stagesData = (s.data || [])
       const playersData = p.data || []
       setStages(stagesData)
       setPlayers(playersData)
@@ -280,7 +283,7 @@ export default function MainPage() {
         }
       } else if (sessionType === 'sprint') {
         for (const f of (forecasts_||[])) {
-          const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+          const sprintSlots = 5
           const preds = Array.from({length:sprintSlots}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
           const { total, breakdown } = calcSprintScore(preds, results, currentStage?.sort_order, normalizeStageDriver(f.fl_pick,stagePilotChanges), normalizedFlResult)
           updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
@@ -322,6 +325,68 @@ export default function MainPage() {
     }
   }
 
+  async function recalculateCurrentStage() {
+    if (!isAdmin || !currentStage || currentSession?.archive_preview) return
+    const { data:stageSessions, error:sessionError } = await supabase.from('sessions').select('*').eq('stage_id',currentStage.id)
+    if (sessionError) { setCommitMsg(`⚠ ${sessionError.message}`); return }
+    if (!stageSessions?.length || stageSessions.some(session=>!session.committed) || !stageSessions.some(session=>session.type==='race')) {
+      setCommitMsg('⚠ Для перерахунку потрібні збережені сесії ГП, і всі вони мають бути зараховані.')
+      return
+    }
+    if (!window.confirm(`Перерахувати ${currentStage.name}? Збережені бали буде замінено; це не змінить прогнози.`)) return
+    setRecalculatingStage(true)
+    try {
+      const ids = stageSessions.map(session=>session.id)
+      const [forecastResult,qualResult,changesResult] = await Promise.all([
+        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
+        supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',currentStage.id).eq('is_active',true),
+      ])
+      if (forecastResult.error) throw forecastResult.error
+      if (qualResult.error) throw qualResult.error
+      if (changesResult.error) throw changesResult.error
+      const changes=changesResult.data||[], forecasts_=forecastResult.data||[], assignments=qualResult.data||[]
+      const scoreRows=[], raceRows=[]
+      const report=stageSessions.map(session=>{
+        const resultObject=normalizeStageResults(session.results||{},changes),results=resultsList(resultObject)
+        const required=session.type==='qual'?(Number(currentStage.sort_order)<7?1:3):session.type==='sprint'?5:10
+        const positions=Object.keys(resultObject).map(Number).sort((a,b)=>a-b)
+        if (results.length<required||!positions.slice(0,required).every((position,index)=>position===index+1)) throw new Error(`${session.type.toUpperCase()}: немає ${required} послідовних результатів.`)
+        const fastLap=normalizeStageDriver(session.fl_pilot||'',changes)
+        const overtake=String(session.ov_pilot||'').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),changes)).filter(Boolean).join(', ')
+        if(session.type==='qual'){
+          const rows=assignments.filter(row=>row.session_id===session.id).map(row=>{
+            const normalized={...row,pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
+            const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order)
+            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+          })
+          scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
+          return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
+        }
+        const rows=forecasts_.filter(row=>row.session_id===session.id).map(row=>{
+          const size=session.type==='sprint'?5:10,predictions=Array.from({length:size},(_,i)=>normalizeStageDriver(row.predictions?.[i+1]||'',changes))
+          const calculated=session.type==='sprint'?calcSprintScore(predictions,results):calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,changes),normalizeStageDriver(row.ov_pick,changes),results,fastLap,overtake,currentStage.sort_order)
+          const scoredInput={predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,changes)}
+          if(session.type==='race') scoredInput.ov_pick=normalizeStageDriver(row.ov_pick,changes)
+          const scored={id:row.id,score:calculated.total,score_breakdown:calculated.breakdown,scored_input:scoredInput}
+          if(session.type==='race')raceRows.push({...row,...scored})
+          return {...scored,player_id:row.player_id}
+        })
+        scoreRows.push({session_id:session.id,forecast_scores:rows.map(({player_id,...row})=>row),qual_scores:[]})
+        return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
+      })
+      const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order)).map(player=>player.id)
+      const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
+      if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
+      const {error}=await supabase.rpc('apply_stage_scores',{p_stage_id:currentStage.id,p_session_scores:scoreRows,p_newcomer_bonuses:bonus.bonuses,p_newcomer_minimum:bonus.minimum})
+      if(error) throw error
+      await supabase.from('audit_log').insert({action:'recalculate_stage',actor:me?.name||user?.email||'Адміністратор',details:{stage:currentStage.key,stage_name:currentStage.name,report,newcomer_bonus_minimum:bonus.minimum,actor_name:me?.name||null,actor_email:user?.email||null,actor_user_id:user?.id||null}})
+      setCommitMsg(`✓ ${currentStage.name}: перераховано; звіт по гравцях збережено в журналі.`)
+      loadFormData(players).then(setFormData)
+    } catch(error) { setCommitMsg(`⚠ Перерахунок скасовано: ${error.message||error}`) }
+    finally { setRecalculatingStage(false) }
+  }
+
   const teamGroups = {}
   players.forEach(p => {
     if (!teamGroups[p.team]) teamGroups[p.team] = []
@@ -348,6 +413,7 @@ export default function MainPage() {
             </option>
           ))}
         </select>
+        {isAdmin && currentStage && <button type="button" className="btn btn-ghost" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? '…' : '↻ ПЕРЕРАХУВАТИ ГП'}</button>}
         <div className="session-btns">
           {availableSessions.map(t => (
             <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>setSessionType(t)}>
@@ -408,8 +474,8 @@ export default function MainPage() {
           {sessionType === 'sprint' && (
             <DragResults
               session={effectiveSession} isAdmin={isAdmin}
-              slotsCount={Number(currentStage?.sort_order) < 10 ? 10 : 5} showSpecials={Number(currentStage?.sort_order) < 10} podiumCount={3} isSprint title={`Результати спринту (Топ-${Number(currentStage?.sort_order) < 10 ? 10 : 5})`} driverOptions={stagePilotOptions}
-              onUpdate={(results, fl, ov) => saveResults(results, fl, ov)}
+              slotsCount={5} showSpecials={false} podiumCount={3} isSprint title="Результати спринту (Топ-5)" driverOptions={stagePilotOptions}
+              onUpdate={(results) => saveResults(results)}
             />
           )}
 
@@ -471,7 +537,7 @@ export default function MainPage() {
                 }
                 liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, resultsList, currentStage?.sort_order).total
               } else if (sessionType === 'sprint' && fc) {
-                const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+                const sprintSlots = 5
                 const preds = Array.from({length:sprintSlots}, (_,i) => fc.predictions?.[i+1]||'')
                 const { total } = calcSprintScore(preds, resultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
                 liveScores[p.id] = total

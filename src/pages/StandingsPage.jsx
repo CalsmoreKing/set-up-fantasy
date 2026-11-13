@@ -34,7 +34,7 @@ export default function StandingsPage() {
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('sessions').select('stage_id').eq('committed', true),
     ]).then(([p, s, cs]) => {
-      const stagesData = s.data || []
+      const stagesData = (s.data || [])
       const committedIds = new Set((cs.data||[]).map(x => x.stage_id))
       ARCHIVE_PREVIEW.sessions.forEach(session => committedIds.add(session.stage_id))
       setPlayers(p.data||[])
@@ -187,7 +187,7 @@ export default function StandingsPage() {
                 <tr key={p.id} className={rank<=3?`p${rank}`:''}>
                   <td><span className={`rank${rank<=3?` r${rank}`:''}`}>{rank}</span></td>
                   <td><RankArrow delta={p.last_rank_delta} /></td>
-                  <td><span className="player-name-plain">{p.name}</span></td>
+                  <td><a className="player-name-plain" href={`/profile?player=${encodeURIComponent(p.id)}`} style={{textDecoration:"none"}}>{p.name}</a></td>
                   <td><span className="team-badge" style={{borderColor:tc,color:tc}}>{code} · {p.team}</span></td>
                   <td>
                     <span className="score-total">{p.base_pts}</span>
@@ -266,7 +266,7 @@ export default function StandingsPage() {
                 const sc = stageScores[p.id] || {}
                 return (
                   <tr key={p.id}>
-                    <td><span className="player-name-plain">{p.name}</span></td>
+                    <td><a className="player-name-plain" href={`/profile?player=${encodeURIComponent(p.id)}`} style={{textDecoration:"none"}}>{p.name}</a></td>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
                     </td>

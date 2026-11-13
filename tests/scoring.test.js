@@ -33,12 +33,15 @@ test('race scoring strictly ignores actual results outside the top ten', () => {
   assert.equal(calcRaceScore(['Alonso', ...Array(9).fill('')], '', '', withLowerPlaces, '', '').total, 0)
 })
 
-test('sprint scores the top-five picks as 3 exact, 2 one place off, 1 two places off, and otherwise 0', () => {
+test('sprint always scores top-five picks on the top-ten scale, with no legacy bonuses', () => {
   const results = ['A','B','C','D','E','F','G']
-  const predictions = ['A','C','E','G','B']
-  const scored = calcSprintScore(predictions, results)
-  assert.equal(scored.total, 3 + 2 + 1 + 0 + 0)
-  assert.deepEqual(scored.breakdown.map(item => item.pts), [3,2,1])
+  const exact = calcSprintScore(['A','B','C','D','E'], results)
+  assert.equal(exact.total, 11 + 10 + 9 + 8 + 7)
+  assert.deepEqual(exact.breakdown.map(item => item.pts), [11,10,9,8,7])
+  const oneOff = calcSprintScore(['B','A','C','D','E'], results)
+  assert.equal(oneOff.total, 1 + 1 + 9 + 8 + 7)
+  assert.equal(calcSprintScore(['F','G','A','B','C'], results).total, 0)
+  assert.equal(calcSprintScore(['A','B','C','D','E','F'], results).total, exact.total)
 })
 
 test('all tied maximum breakthrough drivers qualify for the bonus', () => {
@@ -51,27 +54,26 @@ test('all tied maximum breakthrough drivers qualify for the bonus', () => {
   assert.equal(calcRaceScore(Array(10).fill(''), '', 'Piastri', [], '', winners).total, 4)
 })
 
-test('Australia–Barcelona race scoring gives exact rank points, one point for one-place errors, and the stated bonuses', () => {
+test('one season-wide race scoring rule applies to every stage', () => {
   const results = ['A','B','C','D','E','F','G','H','I','J']
   const exact = calcRaceScore(results, 'F', '', results, 'F', '', 9)
-  assert.equal(exact.total, 55 + 1 + 1 + 4) // 10..1, winner, fastest lap, exact top-three set.
-  assert.deepEqual(exact.breakdown.map(item => item.pts), [10,9,8,7,6,5,4,3,2,1,1,1,4])
+  assert.equal(exact.total, 55 + 2 + 2 + 2)
+  assert.deepEqual(exact.breakdown.map(item => item.pts), [5,5,5,5,5,6,6,6,6,6,2,2,2])
+  assert.deepEqual(calcRaceScore(results, 'F', '', results, 'F', '', 22), exact)
 
   const oneOff = ['B','A','C','D','E','F','G','H','I','J']
-  assert.equal(calcRaceScore(oneOff, '', '', results, '', '', 9).total, 42)
+  assert.equal(calcRaceScore(oneOff, '', '', results, '', '', 9).total, 53)
   const twoOff = ['C','B','A', ...results.slice(3)]
-  assert.equal(calcRaceScore(twoOff, '', '', results, '', '', 9).total, 41) // the exact P2 pick and remaining exact ranks score; top-three set bonus remains.
+  assert.equal(calcRaceScore(twoOff, '', '', results, '', '', 1).total, 51)
   const duplicatePrediction = ['A','A','C', ...Array(7).fill('')]
   assert.equal(calcRaceScore(duplicatePrediction, '', '', results, '', '', 9).breakdown.some(item => item.label === '🏆 Склад Топ-3'), false)
-  assert.equal(calcRaceScore(results, '', 'A', results, '', 'A', 9).total, 60) // no unlisted overtake bonus.
+  assert.equal(calcRaceScore(results, '', 'A', results, '', 'A', 1).total, 63)
 })
 
-test('Australia–Barcelona sprint uses the same ten-place scoring table', () => {
-  const results = ['A','B','C','D','E','F','G','H','I','J']
-  assert.equal(calcSprintScore(results, results, 9).total, 60)
-  assert.equal(calcSprintScore(['B','A','C','D','E','F','G','H','I','J'], results, 9).total, 42)
-  assert.equal(calcSprintScore(['C','B','A', ...results.slice(3)], results, 9).total, 41)
-  assert.equal(calcSprintScore(results, results, 9, 'F', 'F').total, 61)
+test('sprint scoring is consistent in archived and current rounds', () => {
+  const exact = ['A','B','C','D','E']
+  assert.equal(calcSprintScore(exact, exact, 9).total, 45)
+  assert.equal(calcSprintScore(exact, exact, 10).total, 45)
 })
 
 test('current race rules award two points for top-three and top-five sets in any order', () => {
@@ -94,19 +96,19 @@ test('audit recalculates the immutable scored forecast against current results a
   assert.equal(margoForecast.score, 50)
 })
 
-test('historical race audits recalculate with Australia–Barcelona bonuses', () => {
-  const session = { type:'race', stage_sort_order:9, results:{1:'A',2:'B',3:'C',4:'D',5:'E'} }
+test('historical race forecasts recalculate with the season-wide race rules', () => {
+  const session = { type:'race', stage_sort_order:1, results:{1:'A',2:'B',3:'C',4:'D',5:'E'} }
   const forecast = {
     score:0,
     predictions:{1:'C',2:'A',3:'B'},
     scored_input:{predictions:{1:'C',2:'A',3:'B'},fl_pick:'',ov_pick:''},
   }
-  const result = recalculateForecast(session, forecast, 9)
+  const result = recalculateForecast(session, forecast, 1)
   assert.equal(result.recalculated, true)
   assert.equal(result.verifiable, true)
-  assert.equal(result.ruleVersion, 'legacy-australia-barcelona')
-  assert.equal(result.score, 6) // two one-place hits plus 4 for the correctly guessed top-three set.
-  assert.equal(result.breakdown.some(item => item.label === '🏆 Склад Топ-5'), false)
+  assert.equal(result.ruleVersion, 'current')
+  assert.equal(result.score, 7)
+  assert.equal(result.breakdown.find(item => item.label === '🏆 Склад Топ-3')?.pts, 2)
 })
 
 test('legacy rows without scored snapshots retain stored scores and are marked unverifiable', () => {
@@ -118,15 +120,15 @@ test('legacy rows without scored snapshots retain stored scores and are marked u
   assert.equal(result.ruleVersion,'legacy-no-snapshot')
 })
 
-test('Belgium saved forecasts score under the current bonus rules while preserving the legacy bonus by stage', () => {
+test('race scoring no longer depends on a legacy stage cutoff', () => {
   const belgiumTopTen = ['Antonelli','Leclerc','Verstappen','Hamilton','Piastri','Hadjar','Norris','Bortoleto','Lindblad','Colapinto']
   const chak = ['Antonelli','Verstappen','Hamilton','Leclerc','Russell','Norris','Piastri','Lindblad','Bortoleto','Gasly']
   const kal = ['Antonelli','Verstappen','Leclerc','Hamilton','Russell','Norris','Piastri','Lindblad','Bortoleto','Lawson']
   assert.equal(calcRaceScore(chak, 'Hamilton', 'Hadjar', belgiumTopTen, 'Norris', 'Hadjar', 10).total, 25)
   assert.equal(calcRaceScore(kal, 'Hamilton', 'Norris', belgiumTopTen, 'Norris', 'Hadjar', 10).total, 27)
-  const legacy = calcRaceScore(kal, 'Hamilton', 'Norris', belgiumTopTen, 'Norris', 'Hadjar', 9)
-  assert.equal(legacy.breakdown.some(item => item.label === '🏆 Склад Топ-5'), false)
-  assert.equal(legacy.breakdown.some(item => item.label === '🚀 Прорив'), false)
+  const early = calcRaceScore(kal, 'Hamilton', 'Norris', belgiumTopTen, 'Norris', 'Hadjar', 1)
+  const late = calcRaceScore(kal, 'Hamilton', 'Norris', belgiumTopTen, 'Norris', 'Hadjar', 25)
+  assert.deepEqual(early,late)
 })
 
 test('saved breakdown conflicts preserve historical score instead of recalculating from a changed forecast', () => {

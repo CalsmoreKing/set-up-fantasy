@@ -82,14 +82,14 @@ export default function PlayerCard({
     const result = calcQualAssignmentScore(assignment, results, stageOrder)
     score = result.total; breakdown = result.breakdown
   } else if (sessionType === 'sprint') {
-    const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
+    const sprintSlots = 5
     const r = calcSprintScore(preds.slice(0,sprintSlots).map(pilot => normalizeStageDriver(pilot, pilotSubstitutions)), results, stageOrder, normalizeStageDriver(fl, pilotSubstitutions), normalizeStageDriver(flResult, pilotSubstitutions))
     score = r.total; breakdown = r.breakdown
   }
 
   // Fill count
   // Fill indicator — shows only when PREDICTION is entered, not just pilot assigned
-  const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
+  const sprintSlots = 5
   const fillCount = sessionType === 'qual'
     ? qPos.filter(p => p !== '' && p !== null && p !== undefined).length
     : sessionType === 'sprint'
@@ -240,15 +240,15 @@ export default function PlayerCard({
                 <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
-                <span className="pts-badge">{fl&&fl===flResult?(Number(stageOrder)<10?'1':'2'):''}</span>
+                <span className="pts-badge">{fl&&fl===flResult?'2':''}</span>
               </div>
-              {Number(stageOrder) >= 10 && <div className="special-group">
+              <div className="special-group">
                 <span className="spec-label">🚀OV</span>
                 <select className="pilot-select" value={ov} disabled={!canEdit} onChange={e=>{setOv(e.target.value);schedSave(preds,fl,e.target.value)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
                 <span className="pts-badge">{isOvertakeWinner(ov,ovResult)?'4':''}</span>
-              </div>}
+              </div>
             </div>
           </>
         )}
@@ -324,15 +324,7 @@ export default function PlayerCard({
                 </div>
               ))}
             </div>
-            {Number(stageOrder) < 10 && <div className="specials-bar">
-              <div className="special-group">
-                <span className="spec-label">⚡FL</span>
-                <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
-                  {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
-                </select>
-                <span className="pts-badge">{fl&&fl===flResult?'1':''}</span>
-              </div>
-            </div>}
+
           </>
         )}
         </>)}
@@ -364,9 +356,9 @@ function getPts(i, pilot, results, type, stageOrder) {
   const actual = results.indexOf(pilot)
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
-  const pts = Number(stageOrder) < 10
-    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-    : (i < 5 ? (diff===0?5:diff===1?2:diff===2?1:0) : (diff===0?6:diff===1?3:diff===2?2:diff===3?1:0))
+  const pts = actual > 9 ? 0 : i < 5
+    ? (diff===0?5:diff===1?2:diff===2?1:0)
+    : (diff===0?6:diff===1?3:diff===2?2:diff===3?1:0)
   return pts > 0 ? pts : ''
 }
 function getQualPts(pilot, predPos, results) {
@@ -382,9 +374,8 @@ function getSprintPts(i, pilot, results, stageOrder) {
   const actual = results.indexOf(pilot)
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
-  const pts = Number(stageOrder) < 10
-    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-    : (diff===0?3:diff===1?2:diff===2?1:0)
+  if (actual >= 5) return ''
+  const pts = diff === 0 ? 11 - i : diff === 1 ? 1 : 0
   return pts > 0 ? pts : ''
 }
 
@@ -545,7 +536,7 @@ export async function loadFormData(players) {
   forecasts?.forEach(f => {
     const bd = f.score_breakdown || []
     if (!stats[f.player_id]) return
-    // Count entries in breakdown as "predictions scored"; exact = pts at max tier (5 or 6 for race, 3 for sprint)
+    // Count positive breakdown entries; exact race and sprint picks all score at least five points.
     bd.forEach(b => {
       stats[f.player_id].total += 1
       if (b.pts >= 5) stats[f.player_id].exact += 1 // treat top-tier points as "exact"
