@@ -24,7 +24,7 @@ export default function AdminPage() {
   const [loading,   setLoading]   = useState(true)
   const [msg,       setMsg]       = useState('')
   const [recalculatingAll, setRecalculatingAll] = useState(false)
-  const [previewRecalculationReports, setPreviewRecalculationReports] = useState([])
+  const [previewRecalculationReports, setPreviewRecalculationReports] = useState(null)
 
   // New player / team forms
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -247,7 +247,7 @@ export default function AdminPage() {
     )
     if (!confirmed) return
     setRecalculatingAll(true)
-    setPreviewRecalculationReports([])
+    setPreviewRecalculationReports(null)
     setMsg(IS_PREVIEW_DEPLOYMENT ? '🧪 Рахую сухий прогін усіх доступних ГП…' : '⟳ Перераховую всі завершені ГП атомарно…')
     try {
       const stageIds = completedStages.map(stage => stage.id)
@@ -460,9 +460,9 @@ export default function AdminPage() {
       {tab === 'stages' && (
         <>
           <div className="section-label">Етапи · повний перерахунок</div>
-          <p className="team-created-note">Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.</p>
-          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін усіх ГП без запису в робочу базу' : 'Перерахувати всі доступні завершені ГП і замінити підсумки'} onClick={recalculateAllScores}>{IS_PREVIEW_DEPLOYMENT ? '🧪 СУХИЙ ПРОГІН УСІХ ГП' : '↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ'}</button>
-          {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports && (
+          <p className="team-created-note">{IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін перевіряє всі ГП із повністю зарахованими сесіями сезону й показує перераховані підсумки, не змінюючи робочу базу. ГП із незарахованими сесіями не включаються.' : 'Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.'}</p>
+          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін доступних зарахованих ГП сезону без запису в робочу базу' : 'Перерахувати всі доступні завершені ГП і замінити підсумки'} onClick={recalculateAllScores}>{IS_PREVIEW_DEPLOYMENT ? '🧪 СУХИЙ ПРОГІН ПЕРЕРАХУНКУ СЕЗОНУ' : '↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ'}</button>
+          {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports?.totals && (
             <div style={{margin:'8px 0 20px',padding:14,border:'1px solid var(--green)',borderRadius:6,background:'rgba(107,255,138,.04)'}}>
               <div className="section-label">🧪 Результат сухого прогону · база не змінена</div>
               <div style={{overflowX:'auto',marginBottom:18}}>
