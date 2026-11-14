@@ -8,6 +8,7 @@ import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
 import { resultsList } from '../lib/scoring'
 import { mergePreviewDraftRows, readPreviewDrafts } from '../lib/previewDrafts'
 import { calculateNewcomerBonuses } from '../lib/standings'
+import { buildStageExportSheets, downloadStageWorkbook } from '../lib/stageWorkbook'
 import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, loadManualReviewState, saveManualReviewState, manualReviewStepKey, summarizeManualReview } from '../lib/manualReview'
 
 export default function AdminPage() {
@@ -686,6 +687,7 @@ export default function AdminPage() {
     { key:'teams',     label:'КОМАНДИ' },
     { key:'qualifying', label:'КВАЛІФІКАЦІЇ' },
     { key:'reserves', label:'РЕЗЕРВІСТИ' },
+    { key:'export', label:'ЕКСПОРТ ТАБЛИЦЬ' },
     { key:'log',       label:'ЖУРНАЛ' },
   ]
 
@@ -755,6 +757,30 @@ export default function AdminPage() {
             })}
           </div>
         </>
+      )}
+
+      {tab === 'export' && (
+        <section>
+          <div className="section-label">Вивантаження таблиць етапів</div>
+          <p className="team-created-note">Завантажить один Excel-сумісний файл із окремим аркушем на кожен етап. У таблицях: ім’я, спринт, кваліфікація, гонка, бонус новачка та сума. Незараховані сесії залишаться порожніми; етапи без спринту матимуть прочерк у цьому стовпці.</p>
+          <button
+            type="button"
+            className="btn btn-red"
+            disabled={!stages.length || !players.length}
+            onClick={() => {
+              try {
+                const sheets = buildStageExportSheets(stages, players, sessions, forecasts, qualAssignments, newcomerBonuses)
+                const date = new Date().toISOString().slice(0, 10)
+                downloadStageWorkbook(sheets, `fantasy-etapy-2026-${date}.xml`)
+                setMsg(`✓ Файл із ${sheets.length} аркушами етапів завантажено.`)
+              } catch (error) {
+                setMsg(`⚠ Не вдалося створити файл: ${error.message || error}`)
+              }
+            }}
+          >
+            ⬇ ЗАВАНТАЖИТИ ВСІ ЕТАПИ В ОДНОМУ ФАЙЛІ
+          </button>
+        </section>
       )}
 
       {/* DEADLINES TAB */}
