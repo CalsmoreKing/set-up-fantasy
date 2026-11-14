@@ -356,7 +356,7 @@ export default function AdminPage() {
               pilot_2:normalizeStageDriver(row.pilot_2,changes),
               pilot_3:normalizeStageDriver(row.pilot_3,changes),
             }
-            const {total} = calcQualAssignmentScore(normalized,results,order)
+            const {total} = calcQualAssignmentScore(normalized,results,order,stage.key)
             return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:qualifyingScores})
@@ -473,7 +473,7 @@ export default function AdminPage() {
                 pilot_2:normalizeStageDriver(row.pilot_2,stageChanges),
                 pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
               }
-              const {total} = calcQualAssignmentScore(normalized,results,order)
+              const {total} = calcQualAssignmentScore(normalized,results,order,stage.key)
               return {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
             })
             scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})

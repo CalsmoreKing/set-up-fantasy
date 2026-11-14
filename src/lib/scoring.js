@@ -70,7 +70,9 @@ export function calcPolePickScore(pilot, results, submitted = false) {
   return { total: 1, breakdown: [{ label: `Поул: ${pilot}`, pts: 1 }] }
 }
 
-export function calcQualAssignmentScore(assignment, results, stageOrder = 10) {
+export function calcQualAssignmentScore(assignment, results, stageOrder = 10, stageKey = null) {
+  // Miami qualifying is explicitly excluded from the season score table.
+  if (stageKey === 'miami') return { total: 0, breakdown: [] }
   if (Number(stageOrder) < QUAL_ROULETTE_START_SORT_ORDER) {
     return calcPolePickScore(assignment?.pole_pick, results, Boolean(assignment?.pole_pick))
   }
@@ -253,7 +255,7 @@ export function recalculateQualAssignment(session, assignment, stageOrder, optio
   if (!input) return { score: savedScore, breakdown: [], recalculated: false, ruleVersion: 'legacy-no-snapshot', verifiable: false }
   const results = resultsList(session?.results)
   if (!results.length) return { score: savedScore, breakdown: [], recalculated: false, verifiable: false, ruleVersion:'no-results' }
-  const result = calcQualAssignmentScore(input, results, stageOrderOf(session, stageOrder))
+  const result = calcQualAssignmentScore(input, results, stageOrderOf(session, stageOrder), session?.stages?.key || session?.stage_key)
   const currentInput = {
     pilot_1:assignment.pilot_1, pred_pos_1:assignment.pred_pos_1,
     pilot_2:assignment.pilot_2, pred_pos_2:assignment.pred_pos_2,

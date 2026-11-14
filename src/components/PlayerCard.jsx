@@ -93,7 +93,7 @@ export default function PlayerCard({
       pilot_3:normalizeStageDriver(qPilots[2], pilotSubstitutions), pred_pos_3:parseInt(qPos[2]) || null,
       pole_pick:normalizeStageDriver(polePick, pilotSubstitutions),
     }
-    const result = calcQualAssignmentScore(assignment, results, stageOrder)
+    const result = calcQualAssignmentScore(assignment, results, stageOrder, stageKey)
     score = result.total; breakdown = result.breakdown
   } else if (sessionType === 'sprint') {
     const sprintSlots = 5

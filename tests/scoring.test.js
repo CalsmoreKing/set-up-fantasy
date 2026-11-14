@@ -226,6 +226,16 @@ test('qualifying uses roulette from Canada and one point for a correct pole pick
   )
   assert.equal(correctPole.score, 1)
   assert.equal(correctPole.breakdown[0].pts, 1)
+
+  const miamiPole = recalculateQualAssignment(
+    { ...session, stage_sort_order:6, stage_key:'miami', results:{1:'Antonelli',2:'Norris'} },
+    { ...assignment, pole_pick:'Antonelli', scored_input:{...assignment.scored_input,pole_pick:'Antonelli'} },
+    6,
+  )
+  assert.equal(miamiPole.recalculated, true)
+  assert.equal(miamiPole.score, 0)
+  assert.deepEqual(miamiPole.breakdown, [])
+
   assert.equal(hasQualifyingPrediction({pilot_1:'Russell',pred_pos_1:null}), false)
   assert.equal(hasQualifyingPrediction({pole_pick:'Russell'}), true)
 })

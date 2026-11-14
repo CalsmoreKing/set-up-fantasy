@@ -104,7 +104,7 @@ export function scoreManualReviewItem(item,input,substitutions = []) {
   const results=resultsList(normalizeStageResults(session?.results || {},substitutions))
   if (!item.row) return {score:0,breakdown:[],scoredInput:input}
   if (item.kind==='qual') {
-    const result=calcQualAssignmentScore(input,results,stageOrder)
+    const result=calcQualAssignmentScore(input,results,stageOrder,session?.stages?.key || session?.stage_key)
     return {score:result.total,breakdown:result.breakdown,scoredInput:input}
   }
   const predictions=Array.from({length:session.type==='sprint'?5:10},(_,index)=>input.predictions?.[index+1] || '')

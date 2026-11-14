@@ -315,7 +315,7 @@ export default function MainPage() {
             pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
             pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
           }
-          const { total, breakdown } = calcQualAssignmentScore(normalized, results, currentStage?.sort_order)
+          const { total, breakdown } = calcQualAssignmentScore(normalized, results, currentStage?.sort_order, currentStage?.key)
           updates.push({ id: qa.players?.id, delta: total-(Number(qa.score)||0) })
           qualScores.push({ id:qa.id, score:total })
           bdLog.push({ player: qa.players?.name, score: total, breakdown })
@@ -418,7 +418,7 @@ export default function MainPage() {
             const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
             recalcPhase = `КВАЛІФІКАЦІЯ: розрахунок прогнозу ${playerName}`
             const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
-            const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order)
+            const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order,currentStage.key)
             return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
@@ -635,7 +635,7 @@ export default function MainPage() {
                   pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
                   pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
                 }
-                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, currentResultsList, currentStage?.sort_order).total
+                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, currentResultsList, currentStage?.sort_order, currentStage?.key).total
               } else if (sessionType === 'sprint' && fc) {
                 const sprintSlots = 5
                 const preds = Array.from({length:sprintSlots}, (_,i) => fc.predictions?.[i+1]||'')
