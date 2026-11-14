@@ -1,4 +1,4 @@
-import { calcRaceScore, calcQualAssignmentScore, calcSprintScore, resultsList } from './scoring.js'
+import { calcRaceScore, calcQualAssignmentScore, calcSprintScore, resultsList, hasForecastSubmission, hasQualifyingPrediction } from './scoring.js'
 import { normalizeStageDriver, normalizeStageResults } from './roster.js'
 
 export const REVIEW_STORAGE_KEY = 'set-up-fantasy:manual-score-review:v1'
@@ -26,25 +26,27 @@ export function sessionSortOrder(session) {
   return [Number(session?.stages?.sort_order ?? session?.stage_sort_order ?? 0),typeOrder[session?.type] ?? 9,String(session?.committed_at || '')]
 }
 
-export function buildManualReviewQueue({playerId,sessions,forecasts,qualifications,eligibleBonusStageIds = []}) {
+export function buildManualReviewQueue({playerId,sessions,forecasts,qualifications}) {
   const forecastBySession = new Map((forecasts || []).filter(row=>row.player_id===playerId).map(row=>[row.session_id,row]))
   const qualBySession = new Map((qualifications || []).filter(row=>row.player_id===playerId).map(row=>[row.session_id,row]))
-  const bonusStages = new Set(eligibleBonusStageIds)
   return (sessions || [])
     .filter(session=>session.committed && ['qual','sprint','race'].includes(session.type))
     .sort((a,b)=>{
       const x=sessionSortOrder(a),y=sessionSortOrder(b)
       return x[0]-y[0] || x[1]-y[1] || x[2].localeCompare(y[2])
     })
-    .flatMap(session=>{
-      const row=session.type==='qual'?qualBySession.get(session.id):forecastBySession.get(session.id)
-      const bonusOnly=session.type==='race' && bonusStages.has(session.stage_id)
-      return row || bonusOnly ? [{
+    .map(session=>{
+      const candidate=session.type==='qual'?qualBySession.get(session.id):forecastBySession.get(session.id)
+      const submitted=session.type==='qual'?hasQualifyingPrediction(candidate):session.type==='sprint'
+        ? Object.values(candidate?.predictions || {}).some(Boolean)
+        : hasForecastSubmission(candidate)
+      const row=submitted?candidate:null
+      return {
         session,
-        row:row || null,
+        row,
         kind:session.type==='qual'?'qual':'forecast',
-        bonusOnly:!row && bonusOnly,
-      }] : []
+        missed:!submitted,
+      }
     })
 }
 
@@ -65,7 +67,7 @@ export function inputForReviewItem(item, substitutions = []) {
   ]))
   return {
     predictions,
-    fl_pick:normalizeStageDriver(row?.fl_pick || '',substitutions),
+    fl_pick:session.type==='race'?normalizeStageDriver(row?.fl_pick || '',substitutions):'',
     ov_pick:session.type==='race'?normalizeStageDriver(row?.ov_pick || '',substitutions):'',
   }
 }
