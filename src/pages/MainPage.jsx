@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
+import { supabase, IS_PREVIEW_DEPLOYMENT, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
-import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments } from '../lib/roster'
+import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, newcomerPlayersForStage } from '../lib/roster'
+import { calculateNewcomerBonuses } from '../lib/standings'
+import { resultsList } from '../lib/scoring'
+import { rememberPreviewDraft } from '../lib/previewDrafts'
 import { archiveSessionsForStage, archiveForecastsForSession, archiveQualifyingForSession, ARCHIVE_PREVIEW } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
@@ -24,13 +27,15 @@ export default function MainPage() {
   const [loading,   setLoading]   = useState(true)
   const [commitMsg, setCommitMsg] = useState('')
   const [committing,setCommitting]= useState(false)
+  const [recalculatingStage,setRecalculatingStage] = useState(false)
+  const [stageRecalcReport,setStageRecalcReport] = useState(null)
 
   useEffect(() => {
     Promise.all([
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('players').select('*').order('name'),
     ]).then(([s, p]) => {
-      const stagesData = s.data || []
+      const stagesData = (s.data || [])
       const playersData = p.data || []
       setStages(stagesData)
       setPlayers(playersData)
@@ -135,7 +140,10 @@ export default function MainPage() {
   const currentStageIndex = navigationStages.findIndex(stage => stage.key === stageKey)
   function moveStage(step) {
     const nextStage = navigationStages[currentStageIndex + step]
-    if (nextStage) setStageKey(nextStage.key)
+    if (nextStage) {
+      setStageRecalcReport(null)
+      setStageKey(nextStage.key)
+    }
   }
 
   // Deadline logic — session locks automatically when deadline_utc passes
@@ -182,7 +190,7 @@ export default function MainPage() {
   const isDouble       = DOUBLE_STAGES.has(stageKey)
 
   const normalizedResults = normalizeStageResults(currentSession?.results || {}, stagePilotChanges)
-  const resultsList = Object.entries(normalizedResults).sort(([a],[b]) => Number(a)-Number(b)).map(([,pilot]) => pilot)
+  const currentResultsList = Object.entries(normalizedResults).sort(([a],[b]) => Number(a)-Number(b)).map(([,pilot]) => pilot)
   const normalizedFlResult = normalizeStageDriver(currentSession?.fl_pilot || '', stagePilotChanges)
   const normalizedOvResult = String(currentSession?.ov_pilot || '').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(), stagePilotChanges)).filter(Boolean).join(', ')
   const effectiveSession = currentSession ? { ...currentSession, results:normalizedResults, fl_pilot:normalizedFlResult, ov_pilot:normalizedOvResult } : currentSession
@@ -206,6 +214,13 @@ export default function MainPage() {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     const predsObj = {}
     preds.forEach((p, i) => { if (p) predsObj[i+1] = p })
+    if (IS_PREVIEW_DEPLOYMENT) {
+      const draft = { ...(forecasts[playerId] || {}), id:forecasts[playerId]?.id || `preview-${currentSession.id}-${playerId}`, session_id:currentSession.id, player_id:playerId, predictions:predsObj, fl_pick:fl || '', ov_pick:ov || '', preview_draft:true }
+      setForecasts(prev => ({...prev,[playerId]:draft}))
+      rememberPreviewDraft('forecasts',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
+      return
+    }
     const { data, error } = await supabase.from('forecasts').upsert({
       session_id: currentSession.id,
       player_id:  playerId,
@@ -218,8 +233,33 @@ export default function MainPage() {
     if (data) setForecasts(prev => ({ ...prev, [playerId]: data }))
   }
 
+  async function savePolePick(playerId, pilot) {
+    if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    if (IS_PREVIEW_DEPLOYMENT) {
+      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pole_pick:pilot || '',preview_draft:true}
+      setQualAssign(prev => ({...prev,[playerId]:draft}))
+      rememberPreviewDraft('qual_assignments',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
+      return
+    }
+    const { data, error } = await supabase.from('qual_assignments').upsert({
+      session_id: currentSession.id,
+      player_id: playerId,
+      pole_pick: pilot || null,
+    }, { onConflict: 'session_id,player_id' }).select().single()
+    if (error) { setCommitMsg(`Не вдалося зберегти прогноз на поул: ${error.message}`); return }
+    setQualAssign(prev => ({ ...prev, [playerId]: data }))
+  }
+
   async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    if (IS_PREVIEW_DEPLOYMENT) {
+      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,preview_draft:true}
+      setQualAssign(prev => ({...prev,[playerId]:draft}))
+      rememberPreviewDraft('qual_assignments',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
+      return
+    }
     const { data, error } = await supabase.from('qual_assignments').upsert({
       session_id: currentSession.id, player_id: playerId,
       pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
@@ -269,6 +309,7 @@ export default function MainPage() {
         for (const qa of (qualData||[])) {
           const normalized = {
             ...qa,
+            pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
             pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
             pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
             pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
@@ -280,7 +321,7 @@ export default function MainPage() {
         }
       } else if (sessionType === 'sprint') {
         for (const f of (forecasts_||[])) {
-          const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+          const sprintSlots = 5
           const preds = Array.from({length:sprintSlots}, (_,i) => normalizeStageDriver(f.predictions?.[i+1]||'', stagePilotChanges))
           const { total, breakdown } = calcSprintScore(preds, results, currentStage?.sort_order, normalizeStageDriver(f.fl_pick,stagePilotChanges), normalizedFlResult)
           updates.push({ id: f.players?.id, delta: total-(Number(f.score)||0) })
@@ -322,6 +363,107 @@ export default function MainPage() {
     }
   }
 
+  async function recalculateCurrentStage() {
+    if (!isAdmin || !currentStage || currentSession?.archive_preview) return
+    const { data:stageSessions, error:sessionError } = await supabase.from('sessions').select('*').eq('stage_id',currentStage.id)
+    if (sessionError) { setCommitMsg(`⚠ ${sessionError.message}`); return }
+    if (!stageSessions?.length || stageSessions.some(session=>!session.committed) || !stageSessions.some(session=>session.type==='race')) {
+      setCommitMsg('⚠ Для перерахунку потрібні збережені сесії ГП, і всі вони мають бути зараховані.')
+      return
+    }
+    const actionMessage = IS_PREVIEW_DEPLOYMENT
+      ? `Виконати сухий прогін ${currentStage.name}? Перерахую бали локально для перевірки; робочу базу та прогнози не змінюватиму.`
+      : `Перерахувати ${currentStage.name}? Збережені бали буде замінено; це не змінить прогнози.`
+    if (!window.confirm(actionMessage)) return
+    setStageRecalcReport(null)
+    setRecalculatingStage(true)
+    let recalcPhase = 'завантаження прогнозів і реальних результатів'
+    try {
+      const ids = stageSessions.map(session=>session.id)
+      const [forecastResult,qualResult,changesResult] = await Promise.all([
+        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
+        supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',currentStage.id).eq('is_active',true),
+      ])
+      if (forecastResult.error) throw forecastResult.error
+      if (qualResult.error) throw qualResult.error
+      if (changesResult.error) throw changesResult.error
+      const historySessionsResult=await supabase.from('sessions').select('id,stage_id,type,committed,stages(sort_order)').eq('type','race').eq('committed',true)
+      if(historySessionsResult.error) throw historySessionsResult.error
+      const historySessionIds=(historySessionsResult.data||[]).map(session=>session.id)
+      const historyForecastResult=historySessionIds.length
+        ? await supabase.from('forecasts').select('id,player_id,session_id,predictions,fl_pick,ov_pick').in('session_id',historySessionIds)
+        : {data:[],error:null}
+      if(historyForecastResult.error) throw historyForecastResult.error
+      const changes=changesResult.data||[]
+      const mergePreviewRows=(saved,drafts)=>{
+        const rows=new Map((saved||[]).map(row=>[`${row.session_id}:${row.player_id}`,row]))
+        if(IS_PREVIEW_DEPLOYMENT) Object.values(drafts||{}).filter(row=>ids.includes(row.session_id)).forEach(row=>rows.set(`${row.session_id}:${row.player_id}`,{...rows.get(`${row.session_id}:${row.player_id}`),...row}))
+        return [...rows.values()]
+      }
+      const forecasts_=mergePreviewRows(forecastResult.data,forecasts), assignments=mergePreviewRows(qualResult.data,qualAssign)
+      const scoreRows=[], raceRows=[]
+      const report=stageSessions.map(session=>{
+        recalcPhase = `${session.type.toUpperCase()}: нормалізація результатів`
+        const resultObject=normalizeStageResults(session.results||{},changes),results=resultsList(resultObject)
+        const required=session.type==='qual'?(Number(currentStage.sort_order)<7?1:3):session.type==='sprint'?5:10
+        const positions=Object.keys(resultObject).map(Number).sort((a,b)=>a-b)
+        if (results.length<required||!positions.slice(0,required).every((position,index)=>position===index+1)) throw new Error(`${session.type.toUpperCase()}: немає ${required} послідовних результатів.`)
+        const fastLap=normalizeStageDriver(session.fl_pilot||'',changes)
+        const overtake=String(session.ov_pilot||'').split(/[,;|]/).map(p=>normalizeStageDriver(p.trim(),changes)).filter(Boolean).join(', ')
+        if(session.type==='qual'){
+          recalcPhase = 'КВАЛІФІКАЦІЯ: читання прогнозів'
+          const rows=assignments.filter(row=>row.session_id===session.id).map(row=>{
+            const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
+            recalcPhase = `КВАЛІФІКАЦІЯ: розрахунок прогнозу ${playerName}`
+            const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
+            const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order)
+            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+          })
+          scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
+          return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
+        }
+        recalcPhase = `${session.type.toUpperCase()}: читання прогнозів`
+        const rows=forecasts_.filter(row=>row.session_id===session.id).map(row=>{
+          const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
+          recalcPhase = `${session.type.toUpperCase()}: розрахунок прогнозу ${playerName}`
+          const size=session.type==='sprint'?5:10,predictions=Array.from({length:size},(_,i)=>normalizeStageDriver(row.predictions?.[i+1]||'',changes))
+          const calculated=session.type==='sprint'?calcSprintScore(predictions,results):calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,changes),normalizeStageDriver(row.ov_pick,changes),results,fastLap,overtake,currentStage.sort_order)
+          const scoredInput={predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,changes)}
+          if(session.type==='race') scoredInput.ov_pick=normalizeStageDriver(row.ov_pick,changes)
+          const scored={id:row.id,score:calculated.total,score_breakdown:calculated.breakdown,scored_input:scoredInput}
+          if(session.type==='race')raceRows.push({...row,...scored})
+          return {...scored,player_id:row.player_id}
+        })
+        scoreRows.push({session_id:session.id,forecast_scores:rows.map(({player_id,...row})=>row),qual_scores:[]})
+        return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
+      })
+      recalcPhase = 'БОНУС НОВАЧКА: перевірка мінімуму за гонку'
+      const historyForecasts=[...(historyForecastResult.data||[]).filter(row=>!raceRows.some(current=>current.id===row.id)),...raceRows]
+      const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order),historySessionsResult.data||[],historyForecasts).map(player=>player.id)
+      const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
+      if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
+      if (IS_PREVIEW_DEPLOYMENT) {
+        setStageRecalcReport({stageName:currentStage.name,report,newcomerBonusMinimum:bonus.minimum,dryRun:true})
+        setCommitMsg(`🧪 Сухий прогін ${currentStage.name} завершено. Бали розраховано для перевірки, але в базу не записано.`)
+        return
+      }
+      recalcPhase = 'атомарне збереження балів цього ГП'
+      const {error}=await supabase.rpc('apply_stage_scores',{p_stage_id:currentStage.id,p_session_scores:scoreRows,p_newcomer_bonuses:bonus.bonuses,p_newcomer_minimum:bonus.minimum})
+      if(error) throw error
+      recalcPhase = 'запис журналу й підсумкового звіту'
+      const {error:auditError}=await supabase.from('audit_log').insert({action:'recalculate_stage',actor:me?.name||user?.email||'Адміністратор',details:{stage:currentStage.key,stage_name:currentStage.name,report,newcomer_bonus_minimum:bonus.minimum,actor_name:me?.name||null,actor_email:user?.email||null,actor_user_id:user?.id||null}})
+      if(auditError) console.error('Не вдалося записати звіт перерахунку в журнал:',auditError)
+      setStageRecalcReport({stageName:currentStage.name,report,newcomerBonusMinimum:bonus.minimum})
+      setCommitMsg(`✓ ${currentStage.name}: перераховано; нижче доступний звіт по кожній сесії та гравцю.`)
+      loadFormData(players).then(setFormData)
+    } catch(error) {
+      console.error(`Перерахунок ${currentStage.name}: помилка на етапі «${recalcPhase}»`,error)
+      setCommitMsg(`⚠ Перерахунок ${currentStage.name} скасовано на етапі «${recalcPhase}»: ${error.message||error}`)
+    }
+    finally { setRecalculatingStage(false) }
+  }
+
   const teamGroups = {}
   players.forEach(p => {
     if (!teamGroups[p.team]) teamGroups[p.team] = []
@@ -340,7 +482,7 @@ export default function MainPage() {
           <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
           <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
         </div>
-        <select className="stage-select" value={stageKey} onChange={e=>setStageKey(e.target.value)}>
+        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setStageKey(e.target.value)}}>
           <option value="">— Оберіть етап —</option>
           {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
@@ -372,7 +514,27 @@ export default function MainPage() {
             закр. {deadlineDate.toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
           </span>
         )}
+        {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={IS_PREVIEW_DEPLOYMENT ? `Сухий прогін зарахованих сесій етапу ${currentStage.name}; без запису в базу` : `Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`${IS_PREVIEW_DEPLOYMENT?'Перевірити':'Перерахувати'} ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : IS_PREVIEW_DEPLOYMENT ? '🧪 ПЕРЕВІРИТИ ЦЕЙ ГП' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
       </div>
+
+      {stageRecalcReport && (
+        <section className="stage-recalc-report" aria-label={`Звіт перерахунку ${stageRecalcReport.stageName}`}>
+          <header>
+            <h3>ЗВІТ ПЕРЕРАХУНКУ · {stageRecalcReport.stageName}</h3>
+            <button type="button" className="btn btn-ghost" onClick={() => setStageRecalcReport(null)}>Закрити</button>
+          </header>
+          <p>{stageRecalcReport.dryRun ? 'Це сухий прогін у прев’ю: бали обчислено для звірки, робочу базу не змінено.' : 'Звір бали по кожній сесії з прогнозами й фактичними результатами. Повторний перерахунок цього ГП замінює попередні бали, не додає їх удруге.'}</p>
+          {stageRecalcReport.report.map((sessionReport,index) => (
+            <details className="stage-recalc-session" key={`${sessionReport.type}-${index}`} open>
+              <summary>{sessionReport.type==='qual'?'Кваліфікація':sessionReport.type==='sprint'?'Спринт':'Гонка'} · {sessionReport.scores.reduce((sum,row)=>sum+(Number(row.points)||0),0)} балів</summary>
+              <div className="stage-recalc-score-list">
+                {sessionReport.scores.map((row,rowIndex)=><div key={`${row.player}-${rowIndex}`}><span>{row.player}</span><strong>{row.points}</strong></div>)}
+              </div>
+            </details>
+          ))}
+          <div className="stage-recalc-bonus">Бонус новачка: мінімум за гонку — {stageRecalcReport.newcomerBonusMinimum ?? '—'} балів.</div>
+        </section>
+      )}
 
       {currentSession?.archive_preview && (
         <div className="archive-preview-banner" role="status">
@@ -408,8 +570,8 @@ export default function MainPage() {
           {sessionType === 'sprint' && (
             <DragResults
               session={effectiveSession} isAdmin={isAdmin}
-              slotsCount={Number(currentStage?.sort_order) < 10 ? 10 : 5} showSpecials={Number(currentStage?.sort_order) < 10} podiumCount={3} isSprint title={`Результати спринту (Топ-${Number(currentStage?.sort_order) < 10 ? 10 : 5})`} driverOptions={stagePilotOptions}
-              onUpdate={(results, fl, ov) => saveResults(results, fl, ov)}
+              slotsCount={5} showSpecials={false} podiumCount={3} isSprint title="Результати спринту (Топ-5)" driverOptions={stagePilotOptions}
+              onUpdate={(results) => saveResults(results)}
             />
           )}
 
@@ -437,9 +599,11 @@ export default function MainPage() {
           {/* Players grid */}
           <div className="toolbar">
             <div className="section-label" style={{margin:0,flex:1}}>
-              {sessionType==='qual'?'ПРОГНОЗИ — КВАЛІФІКАЦІЯ':sessionType==='sprint'?'ПРОГНОЗИ — СПРИНТ':'ПРОГНОЗИ — ГОНКА'}
+              {sessionType==='qual'
+                ? Number(currentStage?.sort_order)<7 ? 'ПРОГНОЗ НА ПОУЛ' : 'ПРОГНОЗИ — КВАЛІФІКАЦІЯ'
+                : sessionType==='sprint' ? 'ПРОГНОЗИ — СПРИНТ' : 'ПРОГНОЗИ — ГОНКА'}
             </div>
-            {isAdmin && sessionType==='qual' && (
+            {isAdmin && sessionType==='qual' && Number(currentStage?.sort_order)>=7 && (
               <button className="roulette-btn all" onClick={() => rollAllQual(players, qualAssign, stageKey, currentSession?.id, setQualAssign, stagePilotOptions, currentStage?.sort_order, qualSlotsByPlayer)}>
                 🎲 РАНДОМАЙЗЕР ВСІМ
               </button>
@@ -459,21 +623,22 @@ export default function MainPage() {
               const qa = qualAssign[p.id]
               if (sessionType === 'race' && fc) {
                 const preds = Array.from({length:10}, (_,i) => normalizeStageDriver(fc.predictions?.[i+1]||'', stagePilotChanges))
-                const { total } = calcRaceScore(preds, normalizeStageDriver(fc.fl_pick, stagePilotChanges), normalizeStageDriver(fc.ov_pick, stagePilotChanges), resultsList,
+                const { total } = calcRaceScore(preds, normalizeStageDriver(fc.fl_pick, stagePilotChanges), normalizeStageDriver(fc.ov_pick, stagePilotChanges), currentResultsList,
                   normalizedFlResult, normalizedOvResult, currentStage?.sort_order)
                 liveScores[p.id] = total
               } else if (sessionType === 'qual' && qa) {
                 const normalizedAssignment = {
                   ...qa,
+                  pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
                   pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
                   pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
                   pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
                 }
-                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, resultsList, currentStage?.sort_order).total
+                liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, currentResultsList, currentStage?.sort_order).total
               } else if (sessionType === 'sprint' && fc) {
-                const sprintSlots = Number(currentStage?.sort_order) < 10 ? 10 : 5
+                const sprintSlots = 5
                 const preds = Array.from({length:sprintSlots}, (_,i) => fc.predictions?.[i+1]||'')
-                const { total } = calcSprintScore(preds, resultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
+                const { total } = calcSprintScore(preds, currentResultsList, currentStage?.sort_order, normalizeStageDriver(fc.fl_pick,stagePilotChanges), normalizedFlResult)
                 liveScores[p.id] = total
               } else {
                 liveScores[p.id] = 0
@@ -513,7 +678,7 @@ export default function MainPage() {
                         session={currentSession}
                         forecast={canSeeForecast ? forecasts[p.id] : null}
                         qualAssign={canSeeForecast ? qualAssign[p.id] : null}
-                        results={resultsList}
+                        results={currentResultsList}
                         flResult={normalizedFlResult}
                         ovResult={normalizedOvResult}
                         isMe={me?.id === p.id}
@@ -529,6 +694,7 @@ export default function MainPage() {
                         forecastHidden={!canSeeForecast}
                         onSaveForecast={(preds, fl, ov) => saveForecast(p.id, preds, fl, ov)}
                         onSaveQual={(pilots, positions) => saveQualAssign(p.id, pilots, positions)}
+                        onSavePolePick={pilot => savePolePick(p.id, pilot)}
                         teamSiblingId={siblingId}
                         formData={formData}
                         liveScore={isLiveMode ? liveScores[p.id] : undefined}
@@ -547,6 +713,7 @@ export default function MainPage() {
 }
 
 async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssign, pilotPool = PILOTS, stageOrder, slotCounts = {}) {
+  if (Number(stageOrder) < 7) { alert('До Канади кваліфікаційний прогноз — лише вибір поула; рулетка починається з Канади.'); return }
   if (!sessionId) { alert('Спочатку оберіть сесію'); return }
   const { USED_PILOTS } = await import('../lib/supabase')
   const { data: allAssignData } = await supabase

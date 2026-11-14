@@ -3,6 +3,8 @@ export const AUDIT_ACTION_LABELS = {
   bulk_qual_forecast: 'Масовий імпорт кваліфікації',
   commit_session: 'Зарахування балів',
   recalculate_session: 'Перерахунок балів',
+  recalculate_stage: 'Перерахунок етапу · звіт по гравцях',
+  manual_player_total: 'Ручне коригування підсумку гравця',
   edit_player: 'Зміна даних гравця',
   add_player: 'Додавання гравця',
   delete_player: 'Видалення гравця',
@@ -38,6 +40,8 @@ export function auditSummary(row, playerNameById = {}) {
     case 'bulk_qual_forecast': return `${d.player || 'Гравець'}: ${d.stage_name || 'етап'} · прогноз кваліфікації${d.pilot ? ` · ${d.pilot}` : ''}${d.pos ? ` · P${d.pos}` : ''}`
     case 'edit_player': return `${targetName || 'Гравець'}: змінено ${fieldLabels[d.field] || d.field || 'дані'}${d.value !== undefined ? `: ${d.old_value ?? '—'} → ${d.value}` : ''}`
     case 'add_player': return `Додано гравця ${d.player_name || '—'}${d.team ? ` до команди ${d.team}` : ''}`
+    case 'manual_player_total': return `${targetName || 'Гравець'}: ${d.previous_total ?? '—'} → ${d.total ?? '—'} балів (ручне коригування)`
+    case 'recalculate_stage': return `${d.stage_name || d.stage || 'Етап'} · збережений звіт для ${Array.isArray(d.report) ? d.report.reduce((sum, session) => sum + (session.scores?.length || 0), 0) : 0} результатів гравців`
     case 'delete_player': return `Видалено гравця ${targetName || '—'}`
     case 'unlink_account': return `Відв’язано акаунт ${targetName || 'гравця'}`
     case 'commit_session':

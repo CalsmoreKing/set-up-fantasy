@@ -27,7 +27,7 @@ export default function PodiumCalendar({ open, onClose }) {
       const firstError = stagesResult.error || sessionsResult.error || playersResult.error
       if (firstError) throw firstError
 
-      const stages = stagesResult.data || []
+      const stages = (stagesResult.data || [])
       const stageByKey = new Map(stages.map(stage => [stage.key, stage]))
       const databaseSessions = sessionsResult.data || []
       const databaseStageTypes = new Set(databaseSessions.map(session => `${session.stage_id}:${session.type}`))

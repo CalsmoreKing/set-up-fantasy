@@ -3,18 +3,19 @@ import { createPortal } from 'react-dom'
 import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 import { normalizeStageDriver, priorQualAssignments } from '../lib/roster'
-import { isOvertakeWinner } from '../lib/scoring'
+import { calcSprintPickPoints, isOvertakeWinner } from '../lib/scoring'
 
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
-  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, teamSiblingId,
-  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1
+  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, onSavePolePick, teamSiblingId,
+  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1,
+  editorOnly = false, saveDelay = 600
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const pilotOptions = ['', ...driverOptions]
   const slotCount = Math.max(0, Math.min(3, Number(qualSlotCount) || 0))
-  const [open, setOpen]   = useState(false)
+  const [open, setOpen]   = useState(editorOnly)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
 
@@ -29,6 +30,8 @@ export default function PlayerCard({
   const [ov,    setOv]      = useState(forecast?.ov_pick || '')
   const [qPilots, setQPilots] = useState([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
   const [qPos,    setQPos]    = useState([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+  const [polePick, setPolePick] = useState(qualAssign?.pole_pick || '')
+  const legacyPoleOnly = Number(stageOrder) < 7
 
   // Sync from DB
   useEffect(() => {
@@ -39,6 +42,7 @@ export default function PlayerCard({
   useEffect(() => {
     setQPilots([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
     setQPos([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+    setPolePick(qualAssign?.pole_pick || '')
   }, [qualAssign])
 
   // Body height animation
@@ -46,18 +50,26 @@ export default function PlayerCard({
     if (bodyRef.current) {
       bodyRef.current.style.maxHeight = open ? bodyRef.current.scrollHeight + 'px' : '0'
     }
-  }, [open, preds, fl, ov, qPilots, qPos])
+  }, [open, preds, fl, ov, qPilots, qPos, polePick])
 
-  // Debounced save
+  useEffect(() => {
+    if (editorOnly) setOpen(true)
+  }, [editorOnly])
+
+  // Debounced save for the player page; the admin review can opt into immediate persistence.
   function schedSave(newPreds, newFl, newOv) {
     clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => onSaveForecast(newPreds, newFl, newOv), 600)
+    if (saveDelay <= 0) {
+      onSaveForecast?.(newPreds, newFl, newOv)
+      return
+    }
+    saveTimer.current = setTimeout(() => onSaveForecast?.(newPreds, newFl, newOv), saveDelay)
   }
 
   // Forecast (race/sprint predictions + qual position guess) — own player or admin
-  const canEdit = (isMe || isAdmin) && !isLocked
-  // Qual PILOT assignment (roulette, manual set, remove) — ADMIN ONLY
-  const canEditQualPilot = isAdmin && !isLocked
+  const canEdit = !session?.archive_preview && (isAdmin || (isMe && !isLocked))
+  // Admins can edit committed predictions directly, but archived previews stay read-only.
+  const canEditQualPilot = !session?.archive_preview && isAdmin
 
   function setP(i, v) {
     const n = [...preds]; n[i] = v; setPreds(n)
@@ -78,20 +90,21 @@ export default function PlayerCard({
       pilot_1:normalizeStageDriver(qPilots[0], pilotSubstitutions), pred_pos_1:parseInt(qPos[0]) || null,
       pilot_2:normalizeStageDriver(qPilots[1], pilotSubstitutions), pred_pos_2:parseInt(qPos[1]) || null,
       pilot_3:normalizeStageDriver(qPilots[2], pilotSubstitutions), pred_pos_3:parseInt(qPos[2]) || null,
+      pole_pick:normalizeStageDriver(polePick, pilotSubstitutions),
     }
     const result = calcQualAssignmentScore(assignment, results, stageOrder)
     score = result.total; breakdown = result.breakdown
   } else if (sessionType === 'sprint') {
-    const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
+    const sprintSlots = 5
     const r = calcSprintScore(preds.slice(0,sprintSlots).map(pilot => normalizeStageDriver(pilot, pilotSubstitutions)), results, stageOrder, normalizeStageDriver(fl, pilotSubstitutions), normalizeStageDriver(flResult, pilotSubstitutions))
     score = r.total; breakdown = r.breakdown
   }
 
   // Fill count
   // Fill indicator — shows only when PREDICTION is entered, not just pilot assigned
-  const sprintSlots = Number(stageOrder) < 10 ? 10 : 5
+  const sprintSlots = 5
   const fillCount = sessionType === 'qual'
-    ? qPos.filter(p => p !== '' && p !== null && p !== undefined).length
+    ? legacyPoleOnly ? (polePick ? 1 : 0) : qPos.filter(p => p !== '' && p !== null && p !== undefined).length
     : sessionType === 'sprint'
     ? preds.slice(0,sprintSlots).filter(Boolean).length
     : preds.filter(Boolean).length
@@ -162,8 +175,8 @@ export default function PlayerCard({
   }
 
   return (
-    <div className="player-card" id={`player-card-${player.id}`}>
-      <div
+    <div className={`player-card${editorOnly?' player-card-editor-only':''}`} id={`player-card-${player.id}`}>
+      {!editorOnly && <div
         className="card-header"
         style={{
           borderLeft: `4px solid ${teamColor}`,
@@ -199,7 +212,7 @@ export default function PlayerCard({
           <span className="live-score">{score}<small>pts</small></span>
           <span className={`collapse-icon${open?' open':''}`}>▼</span>
         </div>
-      </div>
+      </div>}
 
       <div
         className={`card-body${open?'':' collapsed'}`}
@@ -240,15 +253,15 @@ export default function PlayerCard({
                 <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
-                <span className="pts-badge">{fl&&fl===flResult?(Number(stageOrder)<10?'1':'2'):''}</span>
+                <span className="pts-badge">{fl&&fl===flResult?'2':''}</span>
               </div>
-              {Number(stageOrder) >= 10 && <div className="special-group">
+              <div className="special-group">
                 <span className="spec-label">🚀OV</span>
                 <select className="pilot-select" value={ov} disabled={!canEdit} onChange={e=>{setOv(e.target.value);schedSave(preds,fl,e.target.value)}}>
                   {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
                 </select>
                 <span className="pts-badge">{isOvertakeWinner(ov,ovResult)?'4':''}</span>
-              </div>}
+              </div>
             </div>
           </>
         )}
@@ -256,7 +269,25 @@ export default function PlayerCard({
         {/* QUAL */}
         {sessionType === 'qual' && (
           <div style={{padding:'10px 12px'}}>
-            {Array.from({length: slotCount}, (_,i)=>i).map(idx => (
+            {legacyPoleOnly ? (
+              <div className="qual-pilot-row pole-pick-row">
+                <span className="spec-label">ПОУЛ</span>
+                <select
+                  className="pilot-select"
+                  value={polePick}
+                  disabled={!canEdit}
+                  onChange={event => {
+                    const value = event.target.value
+                    setPolePick(value)
+                    onSavePolePick?.(value)
+                  }}
+                >
+                  <option value="">Обери пілота на поул…</option>
+                  {driverOptions.map(pilot => <option key={pilot} value={pilot}>{pilot}</option>)}
+                </select>
+                <span className="pts-badge">{polePick && polePick === results[0] ? '1' : ''}</span>
+              </div>
+            ) : Array.from({length: slotCount}, (_,i)=>i).map(idx => (
               <div className="qual-pilot-row" key={idx}>
                 {qPilots[idx] ? (
                   <>
@@ -324,15 +355,7 @@ export default function PlayerCard({
                 </div>
               ))}
             </div>
-            {Number(stageOrder) < 10 && <div className="specials-bar">
-              <div className="special-group">
-                <span className="spec-label">⚡FL</span>
-                <select className="pilot-select" value={fl} disabled={!canEdit} onChange={e=>{setFl(e.target.value);schedSave(preds,e.target.value,ov)}}>
-                  {pilotOptions.map(p=><option key={p} value={p}>{p||'—'}</option>)}
-                </select>
-                <span className="pts-badge">{fl&&fl===flResult?'1':''}</span>
-              </div>
-            </div>}
+
           </>
         )}
         </>)}
@@ -364,9 +387,9 @@ function getPts(i, pilot, results, type, stageOrder) {
   const actual = results.indexOf(pilot)
   if (actual === -1) return ''
   const diff = Math.abs(i - actual)
-  const pts = Number(stageOrder) < 10
-    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-    : (i < 5 ? (diff===0?5:diff===1?2:diff===2?1:0) : (diff===0?6:diff===1?3:diff===2?2:diff===3?1:0))
+  const pts = actual > 9 ? 0 : i < 5
+    ? (diff===0?5:diff===1?2:diff===2?1:0)
+    : (diff===0?6:diff===1?3:diff===2?2:diff===3?1:0)
   return pts > 0 ? pts : ''
 }
 function getQualPts(pilot, predPos, results) {
@@ -377,15 +400,9 @@ function getQualPts(pilot, predPos, results) {
   const pts = diff===0?6:diff===1?3:diff===2?1:0
   return pts > 0 ? pts : ''
 }
-function getSprintPts(i, pilot, results, stageOrder) {
-  if (!pilot || !results.length) return ''
-  const actual = results.indexOf(pilot)
-  if (actual === -1) return ''
-  const diff = Math.abs(i - actual)
-  const pts = Number(stageOrder) < 10
-    ? (diff === 0 ? 10 - i : diff === 1 ? 1 : 0)
-    : (diff===0?3:diff===1?2:diff===2?1:0)
-  return pts > 0 ? pts : ''
+function getSprintPts(i, pilot, results) {
+  const points = calcSprintPickPoints(i,pilot,results)
+  return points > 0 ? points : ''
 }
 
 function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, score, qPilots, driverOptions = PILOTS, stageKey, session }) {
@@ -545,7 +562,7 @@ export async function loadFormData(players) {
   forecasts?.forEach(f => {
     const bd = f.score_breakdown || []
     if (!stats[f.player_id]) return
-    // Count entries in breakdown as "predictions scored"; exact = pts at max tier (5 or 6 for race, 3 for sprint)
+    // Count positive breakdown entries; exact race and sprint picks all score at least five points.
     bd.forEach(b => {
       stats[f.player_id].total += 1
       if (b.pts >= 5) stats[f.player_id].exact += 1 // treat top-tier points as "exact"

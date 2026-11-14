@@ -2,6 +2,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useState } from 'react'
 import BulkPanel from './BulkPanel'
+import { IS_PREVIEW_DEPLOYMENT } from '../lib/supabase'
 
 export default function Layout() {
   const { player, signOut, isAdmin } = useAuth()
@@ -45,6 +46,8 @@ export default function Layout() {
           <button className="nav-btn" onClick={signOut}>ВИЙТИ</button>
         </nav>
       </header>
+
+      {IS_PREVIEW_DEPLOYMENT && <div className="preview-safety-banner" role="status"><strong>ПРЕВ’Ю · БЕЗПЕЧНИЙ РЕЖИМ</strong><span>Ця версія читає дані робочої бази, але всі записи в базу заблоковано. Редагування прогнозів тут лише локальне, а перерахунок — сухий прогін без збереження.</span></div>}
 
       <Outlet />
 

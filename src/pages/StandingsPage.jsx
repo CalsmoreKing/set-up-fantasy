@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
@@ -15,6 +16,7 @@ function RankArrow({ delta }) {
 }
 
 export default function StandingsPage() {
+  const navigate = useNavigate()
   const { isAdmin } = useAuth()
   const [players,         setPlayers]         = useState([])
   const [stages,          setStages]          = useState([])
@@ -34,7 +36,7 @@ export default function StandingsPage() {
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('sessions').select('stage_id').eq('committed', true),
     ]).then(([p, s, cs]) => {
-      const stagesData = s.data || []
+      const stagesData = (s.data || [])
       const committedIds = new Set((cs.data||[]).map(x => x.stage_id))
       ARCHIVE_PREVIEW.sessions.forEach(session => committedIds.add(session.stage_id))
       setPlayers(p.data||[])
@@ -70,7 +72,7 @@ export default function StandingsPage() {
           if (!session.committed) continue
           if (session.type === 'qual') {
             const { data: assignments, error } = await supabase.from('qual_assignments')
-              .select('player_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .select('player_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
               .eq('session_id', session.id)
             if (error) throw error
             ;(assignments || []).forEach(assignment => {
@@ -187,7 +189,7 @@ export default function StandingsPage() {
                 <tr key={p.id} className={rank<=3?`p${rank}`:''}>
                   <td><span className={`rank${rank<=3?` r${rank}`:''}`}>{rank}</span></td>
                   <td><RankArrow delta={p.last_rank_delta} /></td>
-                  <td><span className="player-name-plain">{p.name}</span></td>
+                  <td><button type="button" className="player-name-action" onClick={() => navigate(`/profile?player=${encodeURIComponent(p.id)}`)}>{p.name}</button></td>
                   <td><span className="team-badge" style={{borderColor:tc,color:tc}}>{code} · {p.team}</span></td>
                   <td>
                     <span className="score-total">{p.base_pts}</span>
@@ -266,7 +268,7 @@ export default function StandingsPage() {
                 const sc = stageScores[p.id] || {}
                 return (
                   <tr key={p.id}>
-                    <td><span className="player-name-plain">{p.name}</span></td>
+                    <td><button type="button" className="player-name-action" onClick={() => navigate(`/profile?player=${encodeURIComponent(p.id)}`)}>{p.name}</button></td>
                     <td style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:sc.qual?'var(--text)':'var(--muted)'}}>
                       {sc.qual ?? '—'}
                     </td>

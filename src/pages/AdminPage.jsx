@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react'
-import { supabase, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
-import { normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage } from '../lib/roster'
+import { useState, useEffect, useRef } from 'react'
+import { supabase, IS_PREVIEW_DEPLOYMENT, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
+import PlayerCard from '../components/PlayerCard'
+import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage, priorQualAssignments } from '../lib/roster'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
 import { resultsList } from '../lib/scoring'
+import { mergePreviewDraftRows, readPreviewDrafts } from '../lib/previewDrafts'
 import { calculateNewcomerBonuses } from '../lib/standings'
+import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, isManualReviewMismatch, loadManualReviewState, saveManualReviewState } from '../lib/manualReview'
 
 export default function AdminPage() {
   const { isAdmin, user, player: adminPlayer } = useAuth()
@@ -17,6 +20,16 @@ export default function AdminPage() {
   const [logs,      setLogs]      = useState([])
   const [pilotChanges, setPilotChanges] = useState([])
   const [qualAssignments, setQualAssignments] = useState([])
+  const [forecasts, setForecasts] = useState([])
+  const [newcomerBonuses, setNewcomerBonuses] = useState([])
+  const [absenceReviews, setAbsenceReviews] = useState([])
+  const [manualReviewState, setManualReviewState] = useState(()=>loadManualReviewState())
+  const [reviewPlayerId, setReviewPlayerId] = useState('')
+  const [reviewIndex, setReviewIndex] = useState(0)
+  const [reviewInput, setReviewInput] = useState(null)
+  const reviewInputRef = useRef(null)
+  const reviewSaveCount = useRef(0)
+  const [reviewSaving, setReviewSaving] = useState(false)
   const [subStageId, setSubStageId] = useState('')
   const [subTeam, setSubTeam] = useState('')
   const [subOutgoing, setSubOutgoing] = useState('')
@@ -24,6 +37,7 @@ export default function AdminPage() {
   const [loading,   setLoading]   = useState(true)
   const [msg,       setMsg]       = useState('')
   const [recalculatingAll, setRecalculatingAll] = useState(false)
+  const [previewRecalculationReports, setPreviewRecalculationReports] = useState(null)
 
   // New player / team forms
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -39,17 +53,39 @@ export default function AdminPage() {
     Promise.all([
       supabase.from('stages').select('*').order('sort_order'),
       supabase.from('players').select('*').order('name'),
-      supabase.from('sessions').select('*, stages(name,flag,sort_order,key)').order('created_at', {ascending:false}),
+      supabase.from('sessions').select('*, stages(name,flag,sort_order,key)').order('committed_at', {ascending:false}),
       supabase.from('audit_log').select('*').order('created_at', {ascending:false}).limit(80),
       supabase.from('stage_pilot_substitutions').select('*,stages(name,key,flag)').order('created_at', {ascending:false}),
-      supabase.from('qual_assignments').select('player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))'),
-    ]).then(([s,p,se,l,sub,qa]) => {
-      setStages(s.data||[])
-      setPlayers(p.data||[])
+      supabase.from('qual_assignments').select('*,sessions(*,stages(name,flag,sort_order,key))'),
+      supabase.from('forecasts').select('*,sessions(*,stages(name,flag,sort_order,key))'),
+      supabase.from('stage_newcomer_bonuses').select('*'),
+      supabase.from('audit_log').select('id,details,created_at').eq('action','manual_review_absence_approved'),
+    ]).then(([s,p,se,l,sub,qa,fc,nb,ar]) => {
+      const loadErrors = [
+        s.error && `етапи: ${s.error.message}`,
+        p.error && `гравці: ${p.error.message}`,
+        se.error && `сесії: ${se.error.message}`,
+        l.error && `журнал: ${l.error.message}`,
+        sub.error && `заміни пілотів: ${sub.error.message}`,
+        qa.error && `кваліфікації: ${qa.error.message}`,
+        fc.error && `прогнози: ${fc.error.message}`,
+        nb.error && `бонуси новачків: ${nb.error.message}`,
+        ar.error && `статуси пропущених сесій: ${ar.error.message}`,
+      ].filter(Boolean)
+      if (loadErrors.length) setMsg(`⚠ Не вдалося завантажити частину даних адмінки — ${loadErrors.join('; ')}`)
+      const savedReview=IS_PREVIEW_DEPLOYMENT?loadManualReviewState():{}
+      const localRows=savedReview.rows || {}
+      setStages((s.data||[]))
+      setPlayers((p.data||[]).map(player=>({...player,...(savedReview.totals?.[player.id]!=null?{base_pts:savedReview.totals[player.id]}:{})})))
       setSessions(se.data||[])
       setLogs(l.data||[])
       setPilotChanges(sub.data || [])
-      setQualAssignments(qa.data || [])
+      setQualAssignments((qa.data || []).map(row=>({...row,...(localRows[`qual:${row.id}`]||{})})))
+      setForecasts((fc.data || []).map(row=>({...row,...(localRows[`forecast:${row.id}`]||{})})))
+      const localBonuses=savedReview.bonuses || {}
+      setNewcomerBonuses([...((nb.data||[]).filter(row=>!Object.hasOwn(localBonuses,row.stage_id))),...Object.entries(localBonuses).flatMap(([stageId,value])=>(value.bonuses||[]).map(bonus=>({...bonus,stage_id:stageId,source_minimum:value.minimum})) )])
+      setAbsenceReviews(ar.data || [])
+      setManualReviewState(savedReview)
       // collect distinct teams not in TEAM_META (custom-added)
       const teamsInDb = [...new Set((p.data||[]).map(x=>x.team))]
       setCustomTeams(teamsInDb.filter(t => !TEAM_META[t]))
@@ -58,11 +94,233 @@ export default function AdminPage() {
   }
   useEffect(() => { loadAll() }, [])
 
+  function persistManualReviewState(nextState) {
+    setManualReviewState(nextState)
+    if(IS_PREVIEW_DEPLOYMENT) saveManualReviewState(nextState)
+  }
+
+  function reviewQueueFor(playerId) {
+    return buildManualReviewQueue({playerId,sessions,forecasts,qualifications:qualAssignments})
+  }
+
+  function setReviewDraft(input) {
+    reviewInputRef.current=input
+    setReviewInput(input)
+  }
+
+  function markReviewSaveStarted() {
+    reviewSaveCount.current+=1
+    setReviewSaving(true)
+  }
+
+  function markReviewSaveFinished() {
+    reviewSaveCount.current=Math.max(0,reviewSaveCount.current-1)
+    setReviewSaving(reviewSaveCount.current>0)
+  }
+
+  async function persistReviewedForecast(item,predictions,flPick,ovPick) {
+    const predictionsObject=Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot))
+    const update={predictions:predictionsObject,fl_pick:flPick||'',ov_pick:ovPick||'',updated_at:new Date().toISOString(),manual_reviewed_at:null}
+    setReviewDraft({predictions:Object.fromEntries(Array.from({length:item.session.type==='sprint'?5:10},(_,index)=>[index+1,predictions[index]||''])),fl_pick:flPick||'',ov_pick:ovPick||''})
+    markReviewSaveStarted()
+    try {
+      if(IS_PREVIEW_DEPLOYMENT) {
+        const key=`forecast:${item.row.id}`
+        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
+      } else {
+        const {error}=await supabase.from('forecasts').update(update).eq('id',item.row.id)
+        if(error) throw error
+      }
+      setForecasts(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
+    } catch(error) { setMsg(`⚠ Не вдалося зберегти прогноз у картці перевірки: ${error.message||error}`) }
+    finally { markReviewSaveFinished() }
+  }
+
+  async function persistReviewedQual(item,pilots,positions) {
+    const update={pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,manual_reviewed_at:null}
+    setReviewDraft({...reviewInputRef.current,...update})
+    markReviewSaveStarted()
+    try {
+      if(IS_PREVIEW_DEPLOYMENT) {
+        const key=`qual:${item.row.id}`
+        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
+      } else {
+        const {error}=await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
+        if(error) throw error
+      }
+      setQualAssignments(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
+    } catch(error) { setMsg(`⚠ Не вдалося зберегти кваліфікацію у картці перевірки: ${error.message||error}`) }
+    finally { markReviewSaveFinished() }
+  }
+
+  async function persistReviewedPole(item,pilot) {
+    const update={pole_pick:pilot||'',manual_reviewed_at:null}
+    setReviewDraft({...reviewInputRef.current,pole_pick:pilot||''})
+    markReviewSaveStarted()
+    try {
+      if(IS_PREVIEW_DEPLOYMENT) {
+        const key=`qual:${item.row.id}`
+        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
+      } else {
+        const {error}=await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
+        if(error) throw error
+      }
+      setQualAssignments(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
+    } catch(error) { setMsg(`⚠ Не вдалося зберегти вибір поула: ${error.message||error}`) }
+    finally { markReviewSaveFinished() }
+  }
+
+  function reviewAutoResult(item,input) {
+    const changes=pilotChanges.filter(change=>change.stage_id===item.session.stage_id && change.is_active)
+    return scoreManualReviewItem(item,input,changes)
+  }
+
+  function isReviewItemApproved(item,playerId=reviewPlayerId) {
+    if(item.row) return Boolean(item.row.manual_reviewed_at)
+    const key=`${playerId}:${item.session.id}`
+    return Boolean(manualReviewState.absences?.[key]) || absenceReviews.some(entry=>entry.details?.player_id===playerId && entry.details?.session_id===item.session.id)
+  }
+
+  function manualReviewMismatch(item,playerId) {
+    if(item.row?.manual_reviewed_at && isManualReviewMismatch(item.row.score,reviewAutoResult(item,inputForReviewItem(item,pilotChanges.filter(change=>change.stage_id===item.session.stage_id&&change.is_active))).score)) return true
+    if(item.missed && item.session.type==='race' && isReviewItemApproved(item,playerId)) {
+      const bonus=newcomerBonusPreview(item.session,playerId)
+      if(bonus.ready) return isManualReviewMismatch(bonus.recorded||0,bonus.points||0)
+    }
+    return false
+  }
+
+  function newcomerBonusPreview(session,playerId=reviewPlayerId) {
+    const stageSessions=sessions.filter(row=>row.stage_id===session.stage_id)
+    const race=stageSessions.find(row=>row.type==='race')
+    if(!race || stageSessions.some(row=>!row.committed)) return {ready:false,minimum:null,points:null,recorded:null,eligible:false}
+    const raceRows=forecasts.filter(row=>row.session_id===race.id)
+    const order=Number(race.stages?.sort_order || session.stages?.sort_order)
+    const eligible=newcomerPlayersForStage(players,order,sessions,forecasts).some(player=>player.id===playerId)
+    const result=calculateNewcomerBonuses(players,stageSessions,raceRows,[],newcomerPlayersForStage(players,order,sessions,forecasts).map(player=>player.id))
+    const recorded=newcomerBonuses.find(row=>row.stage_id===race.stage_id&&row.player_id===playerId)?.points ?? null
+    return {ready:result.ready,minimum:result.minimum,points:result.bonuses.find(row=>row.player_id===playerId)?.points ?? null,recorded,eligible}
+  }
+
+  function openPlayerReview(playerId, preferredSessionId=null) {
+    const queue=reviewQueueFor(playerId)
+    const mismatchIndex=queue.findIndex(item=>item.session.id===preferredSessionId)
+    const firstUnreviewed=queue.findIndex(item=>!isReviewItemApproved(item,playerId))
+    const initialIndex=mismatchIndex>=0?mismatchIndex:firstUnreviewed>=0?firstUnreviewed:queue.length
+    setReviewPlayerId(playerId)
+    setReviewIndex(initialIndex)
+    setReviewDraft(initialIndex<queue.length?inputForReviewItem(queue[initialIndex],pilotChanges.filter(change=>change.stage_id===queue[initialIndex].session.stage_id && change.is_active)):null)
+  }
+
+  async function approveReviewStep() {
+    const queue=reviewQueueFor(reviewPlayerId)
+    const item=queue[reviewIndex]
+    const currentInput=reviewInputRef.current || reviewInput
+    if(!item || !currentInput || reviewSaveCount.current>0) return
+    setReviewSaving(true)
+    try {
+      const changes=pilotChanges.filter(change=>change.stage_id===item.session.stage_id && change.is_active)
+      const scored=scoreManualReviewItem(item,currentInput,changes)
+      const timestamp=new Date().toISOString()
+      let stepMessage
+      if(item.missed) {
+        const absenceKey=`${reviewPlayerId}:${item.session.id}`
+        const bonus=item.session.type==='race'?newcomerBonusPreview(item.session,reviewPlayerId):null
+        if(IS_PREVIEW_DEPLOYMENT) {
+          persistManualReviewState({...manualReviewState,absences:{...(manualReviewState.absences||{}),[absenceKey]:true}})
+        } else {
+          const error=await log('manual_review_absence_approved',{player_id:reviewPlayerId,player_name:players.find(player=>player.id===reviewPlayerId)?.name,stage_id:item.session.stage_id,stage_name:item.session.stages?.name,session_id:item.session.id,session_type:item.session.type,newcomer_bonus_points:bonus?.recorded ?? bonus?.points ?? 0})
+          if(error) throw error
+          setAbsenceReviews(prev=>[{details:{player_id:reviewPlayerId,session_id:item.session.id}},...prev])
+        }
+        stepMessage=`${item.session.stages?.name || ''}: пропущен ${item.session.type.toUpperCase()} підтверджено.${item.session.type==='race'&&bonus?.ready?` Бонус новачка: ${bonus.recorded!=null?`зараховано +${bonus.recorded}`:bonus.points!=null?`очікує нарахування +${bonus.points}`:'не передбачений'}.`:''}`
+      } else {
+        const update=item.kind==='qual'
+          ? {...currentInput,score:scored.score,scored_input:scored.scoredInput,manual_reviewed_at:timestamp}
+          : {...currentInput,score:scored.score,score_breakdown:scored.breakdown,scored_input:scored.scoredInput,manual_reviewed_at:timestamp}
+        if(!IS_PREVIEW_DEPLOYMENT) {
+          const response=item.kind==='qual'
+            ? await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
+            : await supabase.from('forecasts').update(update).eq('id',item.row.id)
+          if(response.error) throw response.error
+        } else {
+          const rowKey=`${item.kind==='qual'?'qual':'forecast'}:${item.row.id}`
+          persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[rowKey]:update}})
+        }
+        setForecasts(prev=>prev.map(row=>item.kind==='forecast'&&row.id===item.row.id?{...row,...update}:row))
+        setQualAssignments(prev=>prev.map(row=>item.kind==='qual'&&row.id===item.row.id?{...row,...update}:row))
+        if(!IS_PREVIEW_DEPLOYMENT) await log('manual_review_step_approved',{player_id:reviewPlayerId,player_name:players.find(player=>player.id===reviewPlayerId)?.name,stage_id:item.session.stage_id,stage_name:item.session.stages?.name,session_id:item.session.id,session_type:item.session.type,score:scored.score})
+        stepMessage=`${item.session.stages?.name || item.session.type}: затверджено ${scored.score} балів.`
+      }
+      const nextIndex=reviewIndex+1
+      setMsg(`✓ ${stepMessage}${IS_PREVIEW_DEPLOYMENT?' Зміни збережені лише локально в preview.':''}`)
+      if(nextIndex<queue.length) {
+        setReviewIndex(nextIndex)
+        setReviewDraft(inputForReviewItem(queue[nextIndex],pilotChanges.filter(change=>change.stage_id===queue[nextIndex].session.stage_id && change.is_active)))
+      } else {
+        setReviewDraft(null)
+      }
+    } catch(error) { setMsg(`⚠ Не вдалося зберегти перевірку: ${error.message || error}`) }
+    finally { setReviewSaving(reviewSaveCount.current>0) }
+  }
+
+  async function applyReviewNewcomerBonus(item) {
+    if(!item || item.session.type!=='race') return
+    const stageSessions=sessions.filter(session=>session.stage_id===item.session.stage_id)
+    if(!stageSessions.length || stageSessions.some(session=>!session.committed)) { setMsg('⚠ Бонус новачка можна нарахувати після затвердження всіх сесій етапу.');return }
+    try {
+      const race=stageSessions.find(session=>session.type==='race')
+      const raceRows=forecasts.filter(row=>row.session_id===race.id)
+      const order=Number(race.stages?.sort_order || item.session.stages?.sort_order)
+      const eligible=newcomerPlayersForStage(players,order,sessions,forecasts)
+      if(!eligible.some(player=>player.id===reviewPlayerId)) throw new Error('Це не пропущений етап до першого прогнозу гравця; бонус за пропуск посеред сезону не нараховується.')
+      const result=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible.map(player=>player.id))
+      if(!result.ready) throw new Error('Не вдалося визначити мінімум за гонку. Перевір, що всі прогнози на гонку вже мають нараховані бали.')
+      if(IS_PREVIEW_DEPLOYMENT) {
+        const bonuses={...(manualReviewState.bonuses||{}),[race.stage_id]:{bonuses:result.bonuses,minimum:result.minimum}}
+        persistManualReviewState({...manualReviewState,bonuses})
+        setNewcomerBonuses(prev=>[...prev.filter(row=>row.stage_id!==race.stage_id),...result.bonuses.map(bonus=>({...bonus,stage_id:race.stage_id,source_minimum:result.minimum}))])
+      } else {
+        const {error}=await supabase.rpc('apply_stage_newcomer_bonuses',{p_stage_id:race.stage_id,p_bonuses:result.bonuses,p_source_minimum:result.minimum})
+        if(error) throw error
+        loadAll()
+      }
+      setMsg(`✓ Бонус новачка оновлено автоматично: мінімум гонки ${result.minimum} балів.${IS_PREVIEW_DEPLOYMENT?' Збережено лише в локальному preview-сховищі.':''}`)
+    } catch(error) { setMsg(`⚠ Не вдалося нарахувати бонус: ${error.message || error}`) }
+  }
+
+  async function finalizePlayerReview(playerId) {
+    const queue=reviewQueueFor(playerId)
+    if(queue.some(item=>!isReviewItemApproved(item,playerId))) { setMsg('⚠ Спершу послідовно підтвердь кожну сесію, зокрема пропущені етапи.');return }
+    const forecastPoints=queue.filter(item=>item.kind==='forecast').reduce((sum,item)=>sum+(Number(item.row?.score)||0),0)
+    const qualificationPoints=queue.filter(item=>item.kind==='qual').reduce((sum,item)=>sum+(Number(item.row?.score)||0),0)
+    const bonusPoints=await supabase.from('stage_newcomer_bonuses').select('points').eq('player_id',playerId)
+    if(bonusPoints.error) { setMsg(`⚠ Не вдалося завантажити бонуси: ${bonusPoints.error.message}`);return }
+    const replacedStages=IS_PREVIEW_DEPLOYMENT?new Set(Object.keys(manualReviewState.bonuses||{})):new Set()
+    const bonusRows=IS_PREVIEW_DEPLOYMENT
+      ? [...(bonusPoints.data||[]).filter(row=>!replacedStages.has(row.stage_id)),...Object.entries(manualReviewState.bonuses||{}).flatMap(([stageId,value])=>(value.bonuses||[]).filter(row=>row.player_id===playerId).map(row=>({...row,stage_id:stageId})))]
+      : (bonusPoints.data||[])
+    const bonusTotal=bonusRows.reduce((sum,row)=>sum+(Number(row.points)||0),0)
+    const total=forecastPoints+qualificationPoints+bonusTotal
+    if(!IS_PREVIEW_DEPLOYMENT) {
+      const {error}=await supabase.from('players').update({base_pts:total}).eq('id',playerId)
+      if(error) { setMsg(`⚠ Не вдалося затвердити підсумок: ${error.message}`);return }
+      await log('manual_review_total_approved',{player_id:playerId,total,forecast_points:forecastPoints,qualification_points:qualificationPoints,newcomer_bonus_points:bonusTotal})
+    } else {
+      persistManualReviewState({...manualReviewState,totals:{...(manualReviewState.totals||{}),[playerId]:total}})
+    }
+    setPlayers(prev=>prev.map(player=>player.id===playerId?{...player,base_pts:total}:player))
+    setReviewPlayerId('')
+    setReviewDraft(null)
+    setMsg(`✓ Підсумок ${total} балів затверджено з нуля.${IS_PREVIEW_DEPLOYMENT?' Збережено лише в локальному preview-сховищі; робочу базу не змінено.':''}`)
+  }
+
   async function log(action, details = {}) {
     const actor = adminPlayer?.name || user?.email || 'Адміністратор'
     const enrichedDetails = { ...details, actor_name: adminPlayer?.name || null, actor_email: user?.email || null, actor_user_id: user?.id || null }
     const { error } = await supabase.from('audit_log').insert({ action, actor, details: enrichedDetails })
     if (error) console.error('Audit log insert failed:', error.message)
+    return error
   }
 
   // ── STAGES ──
@@ -151,7 +409,7 @@ export default function AdminPage() {
       const ids = stageSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id', ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
         supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -165,7 +423,7 @@ export default function AdminPage() {
         if (!['qual','race','sprint'].includes(session.type)) throw new Error(`Непідтримуваний тип сесії: ${session.type}`)
         const resultsObject = normalizeStageResults(session.results || {}, changes)
         const results = resultsList(resultsObject)
-        const requiredResults = session.type==='qual' ? (order<7 ? 1 : 3) : session.type==='sprint' ? (order<10 ? 10 : 5) : 10
+        const requiredResults = session.type==='qual' ? (order<7 ? 1 : 3) : session.type==='sprint' ? 5 : 10
         const positions = Object.keys(resultsObject).map(Number).sort((a,b)=>a-b)
         const contiguous = positions.length >= requiredResults && positions.slice(0,requiredResults).every((position,index)=>position===index+1)
         if (results.length < requiredResults || !contiguous) throw new Error(`${session.type.toUpperCase()}: є ${results.length} з ${requiredResults} потрібних реальних позицій; бали не змінено.`)
@@ -174,17 +432,18 @@ export default function AdminPage() {
         if (session.type === 'qual') {
           const qualifyingScores = (qualResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
             const normalized = {...row,
+              pole_pick:normalizeStageDriver(row.pole_pick,changes),
               pilot_1:normalizeStageDriver(row.pilot_1,changes),
               pilot_2:normalizeStageDriver(row.pilot_2,changes),
               pilot_3:normalizeStageDriver(row.pilot_3,changes),
             }
             const {total} = calcQualAssignmentScore(normalized,results,order)
-            return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:qualifyingScores})
         } else {
           const rows = (forecastResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
-            const slotCount = session.type==='sprint' && order<10 ? 10 : session.type==='sprint' ? 5 : 10
+            const slotCount = session.type==='sprint' ? 5 : 10
             const predictions = Array.from({length:slotCount},(_,index)=>normalizeStageDriver(row.predictions?.[index+1] || '',changes))
             const result = session.type==='sprint'
               ? calcSprintScore(predictions,results,order,normalizeStageDriver(row.fl_pick,changes),fastLap)
@@ -198,7 +457,7 @@ export default function AdminPage() {
           scoreRows.push({session_id:session.id,forecast_scores:rows,qual_scores:[]})
         }
       }
-      const eligible = newcomerPlayersForStage(players,order).map(player=>player.id)
+      const eligible = newcomerPlayersForStage(players,order,sessions,forecasts).map(player=>player.id)
       const raceResult = calculateNewcomerBonuses(players,stageSessions,rescoredForecasts,[],eligible)
       if (!raceResult.ready) throw new Error('Не вдалося безпечно визначити рахунок гонки для бонусу новачка.')
       const {error} = await supabase.rpc('apply_stage_scores',{
@@ -208,7 +467,13 @@ export default function AdminPage() {
         p_newcomer_minimum:raceResult.minimum,
       })
       if (error) throw error
-      setMsg(`✓ ${stage.name}: бали перезаписано; бонус новачка за гонку — ${raceResult.minimum ?? 'немає учасників з прогнозом'}`)
+      const playerNames = Object.fromEntries(players.map(player => [player.id, player.name]))
+      const sessionReport = stageSessions.map(session => ({
+        type:session.type,
+        scores:[...(scoreRows.find(row => row.session_id === session.id)?.forecast_scores || []).map(row => ({player:playerNames[forecastResult.data.find(f => f.id === row.id)?.player_id] || '—',points:row.score})), ...(scoreRows.find(row => row.session_id === session.id)?.qual_scores || []).map(row => ({player:playerNames[qualResult.data.find(q => q.id === row.id)?.player_id] || '—',points:row.score}))],
+      }))
+      await log('recalculate_stage', {stage:stage.key,stage_name:stage.name,report:sessionReport,newcomer_bonus_minimum:raceResult.minimum})
+      setMsg(`✓ ${stage.name}: бали перезаписано; звіт по гравцях збережено в журналі.`)
       loadAll()
     } catch (error) {
       const message = String(error.message || error)
@@ -233,28 +498,36 @@ export default function AdminPage() {
       const rows = sessions.filter(session => session.stage_id === stage.id)
       return rows.length && !rows.some(session => session.committed)
     }).length
-    const confirmed = window.confirm(
-      `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки гравців буде замінено сумою заново розрахованих прогнозів, кваліфікацій та бонусів. Архівні/невідомі залишки буде прибрано. ${notCommitted} ГП без зарахованих сесій будуть пропущені.`
+    const confirmed = window.confirm(IS_PREVIEW_DEPLOYMENT
+      ? `Виконати сухий прогін ${completedStages.length} ГП? Перерахую кожну сесію для перевірки й покажу нові підсумки. Робочу базу не зміню.`
+      : `Повністю перерахувати ${completedStages.length} ГП? Усі підсумки буде замінено сумою заново розрахованих прогнозів, кваліфікацій і перевірених бонусів. ${notCommitted} ГП без зарахованих сесій буде пропущено.`
     )
     if (!confirmed) return
     setRecalculatingAll(true)
-    setMsg('⟳ Перераховую всі завершені ГП атомарно…')
+    setPreviewRecalculationReports(null)
+    setMsg(IS_PREVIEW_DEPLOYMENT ? '🧪 Рахую сухий прогін усіх доступних ГП…' : '⟳ Перераховую всі завершені ГП атомарно…')
     try {
       const stageIds = completedStages.map(stage => stage.id)
       const eventSessions = sessions.filter(session => stageIds.includes(session.stage_id))
       const sessionIds = eventSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
-        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('forecasts').select('id,player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,scored_input,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
         supabase.from('stage_pilot_substitutions').select('*').in('stage_id',stageIds).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
       if (qualResult.error) throw qualResult.error
       if (changesResult.error) throw changesResult.error
-      const allForecasts = forecastResult.data || []
-      const allQualifying = qualResult.data || []
+      const previewDrafts = IS_PREVIEW_DEPLOYMENT ? readPreviewDrafts() : null
+      const allForecasts = IS_PREVIEW_DEPLOYMENT
+        ? mergePreviewDraftRows(forecastResult.data,previewDrafts.forecasts)
+        : forecastResult.data || []
+      const allQualifying = IS_PREVIEW_DEPLOYMENT
+        ? mergePreviewDraftRows(qualResult.data,previewDrafts.qual_assignments)
+        : qualResult.data || []
       const changes = changesResult.data || []
       const payload = []
+      const recalculationReports = []
 
       for (const stage of completedStages) {
         const stageSessions = eventSessions.filter(session => session.stage_id === stage.id)
@@ -266,7 +539,7 @@ export default function AdminPage() {
           if (!['qual','race','sprint'].includes(session.type)) throw new Error(`${stage.name}: непідтримуваний тип сесії ${session.type}`)
           const resultObject = normalizeStageResults(session.results || {}, stageChanges)
           const results = resultsList(resultObject)
-          const requiredResults = session.type === 'qual' ? (order < 7 ? 1 : 3) : session.type === 'sprint' && order < 10 ? 10 : session.type === 'sprint' ? 5 : 10
+          const requiredResults = session.type === 'qual' ? (order < 7 ? 1 : 3) : session.type === 'sprint' ? 5 : 10
           const positions = Object.keys(resultObject).map(Number).sort((a,b)=>a-b)
           if (results.length < requiredResults || !positions.slice(0,requiredResults).every((position,index)=>position === index+1)) {
             throw new Error(`${stage.name} ${session.type.toUpperCase()}: немає ${requiredResults} послідовних реальних результатів; база не змінена.`)
@@ -276,37 +549,101 @@ export default function AdminPage() {
           if (session.type === 'qual') {
             const rows = allQualifying.filter(row => row.session_id === session.id).map(row => {
               const normalized = {...row,
+                pole_pick:normalizeStageDriver(row.pole_pick,stageChanges),
                 pilot_1:normalizeStageDriver(row.pilot_1,stageChanges),
                 pilot_2:normalizeStageDriver(row.pilot_2,stageChanges),
                 pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
               }
               const {total} = calcQualAssignmentScore(normalized,results,order)
-              return {id:row.id,score:total,scored_input:{pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+              return {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
             })
             scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})
             continue
           }
           const rows = allForecasts.filter(row => row.session_id === session.id).map(row => {
-            const slots = session.type === 'sprint' ? (order < 10 ? 10 : 5) : 10
+            const slots = session.type === 'sprint' ? 5 : 10
             const predictions = Array.from({length:slots},(_,index)=>normalizeStageDriver(row.predictions?.[index+1] || '',stageChanges))
             const result = session.type === 'sprint'
               ? calcSprintScore(predictions,results,order,normalizeStageDriver(row.fl_pick,stageChanges),fastLap)
               : calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,stageChanges),normalizeStageDriver(row.ov_pick,stageChanges),results,fastLap,overtake,order)
-            const scored = {id:row.id,score:result.total,score_breakdown:result.breakdown}
+            const scoredInput = {predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,stageChanges)}
+            if (session.type === 'race') scoredInput.ov_pick=normalizeStageDriver(row.ov_pick,stageChanges)
+            const scored = {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:result.total,score_breakdown:result.breakdown,scored_input:scoredInput}
             if (session.type === 'race') rescoredRaceForecasts.push({...row,...scored})
             return scored
           })
           scoreRows.push({session_id:session.id,forecast_scores:rows,qual_scores:[]})
         }
-        const eligible = newcomerPlayersForStage(players,order).map(player=>player.id)
+        const eligible = newcomerPlayersForStage(players,order,sessions,forecasts).map(player=>player.id)
         const raceBonus = calculateNewcomerBonuses(players,stageSessions,rescoredRaceForecasts,[],eligible)
         if (!raceBonus.ready) throw new Error(`${stage.name}: не вдалося безпечно перерахувати бонус новачка за гонку.`)
-        payload.push({stage_id:stage.id,session_scores:scoreRows,newcomer_bonuses:raceBonus.bonuses,newcomer_minimum:raceBonus.minimum})
+        const playerNameById = Object.fromEntries(players.map(player => [player.id, player.name]))
+        const report = stageSessions.map(session => {
+          const rows = scoreRows.find(row => row.session_id === session.id)
+          return {
+            type:session.type,
+            scores:[...(rows?.forecast_scores || []).map(row => ({player:playerNameById[row.player_id] || '—',previous:row.previous_score,points:row.score,hasSavedInput:row.has_saved_input,previewDraft:Boolean(allForecasts.find(item=>item.id===row.id)?.preview_draft)})), ...(rows?.qual_scores || []).map(row => ({player:playerNameById[row.player_id] || '—',previous:row.previous_score,points:row.score,hasSavedInput:row.has_saved_input,previewDraft:Boolean(allQualifying.find(item=>item.id===row.id)?.preview_draft)}))],
+          }
+        })
+        const sessionsWithoutSnapshots = report.reduce((count,sessionReport)=>count + sessionReport.scores.filter(score=>!score.hasSavedInput).length,0)
+        recalculationReports.push({stage:stage.key,stage_name:stage.name,report,newcomer_bonus_minimum:raceBonus.minimum,sessionsWithoutSnapshots})
+        payload.push({
+          stage_id:stage.id,
+          session_scores:scoreRows.map(sessionRow=>({
+            session_id:sessionRow.session_id,
+            forecast_scores:sessionRow.forecast_scores.map(({id,score,score_breakdown,scored_input})=>({id,score,score_breakdown,scored_input})),
+            qual_scores:sessionRow.qual_scores.map(({id,score,scored_input})=>({id,score,scored_input})),
+          })),
+          newcomer_bonuses:raceBonus.bonuses,
+          newcomer_minimum:raceBonus.minimum,
+        })
+      }
+
+      const projectedTotals = Object.fromEntries(players.map(player => [player.id,0]))
+      const forecastPlayerById = Object.fromEntries(allForecasts.map(row => [row.id,row.player_id]))
+      const qualPlayerById = Object.fromEntries(allQualifying.map(row => [row.id,row.player_id]))
+      payload.forEach(stagePayload => {
+        stagePayload.session_scores.forEach(sessionPayload => {
+          sessionPayload.forecast_scores.forEach(row => {
+            const playerId = forecastPlayerById[row.id]
+            if (playerId) projectedTotals[playerId] = (projectedTotals[playerId]||0) + (Number(row.score)||0)
+          })
+          sessionPayload.qual_scores.forEach(row => {
+            const playerId = qualPlayerById[row.id]
+            if (playerId) projectedTotals[playerId] = (projectedTotals[playerId]||0) + (Number(row.score)||0)
+          })
+        })
+        stagePayload.newcomer_bonuses.forEach(row => {
+          projectedTotals[row.player_id] = (projectedTotals[row.player_id]||0) + (Number(row.points)||0)
+        })
+      })
+      const previewText = players.map(player => `${player.name}: ${Number(player.base_pts)||0} → ${projectedTotals[player.id]||0} (${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)>=0?'+':''}${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)})`).join('\n')
+      const missingScoredInputs = recalculationReports.reduce((count,stage)=>count+stage.sessionsWithoutSnapshots,0)
+      const mismatchedTotals = players.filter(player => (projectedTotals[player.id]||0)!==(Number(player.base_pts)||0))
+      if (!IS_PREVIEW_DEPLOYMENT && (missingScoredInputs || mismatchedTotals.length)) {
+        const mismatchNames = mismatchedTotals.map(player=>player.name).join(', ')
+        throw new Error(`Офіційний перерахунок заблоковано: ${missingScoredInputs} прогнозів не мають історичного знімка; підсумки не збігаються для ${mismatchNames || '—'}. Спершу звірте сухий прогін і вихідні дані.`)
+      }
+      const confirmationText = IS_PREVIEW_DEPLOYMENT
+        ? `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nБали за всіма сесіями буде лише пораховано й показано для звірки. Запис у робочу базу заблокований.`
+        : `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки, перераховані за результатами сесій. Підтвердити атомарний перезапис?`
+      if (!window.confirm(confirmationText)) {
+        setMsg('Сухий прогін завершено; базу не змінено.')
+        return
+      }
+      if (IS_PREVIEW_DEPLOYMENT) {
+        setPreviewRecalculationReports({
+          stages:recalculationReports,
+          totals:players.map(player => ({name:player.name,base:Number(player.base_pts)||0,projected:projectedTotals[player.id]||0})).sort((a,b)=>b.projected-a.projected),
+        })
+        setMsg(`🧪 Сухий прогін завершено: перевірено ${payload.length} ГП. Підсумки й бали по кожній сесії показані нижче; база не змінена.`)
+        return
       }
 
       const {data,error} = await supabase.rpc('recalculate_all_stage_scores',{p_stages:payload})
       if (error) throw error
-      setMsg(`✓ Перераховано ${payload.length} ГП; підсумки гравців замінено лише на суму даних і правил.`)
+      for (const report of recalculationReports) await log('recalculate_stage', report)
+      setMsg(`✓ Перераховано ${payload.length} ГП; підсумки оновлено, звіти по гравцях збережено в журналі.`)
       loadAll()
     } catch (error) {
       setMsg(`⚠ Повний перерахунок скасовано — жодні бали не змінено: ${error.message || error}`)
@@ -371,10 +708,25 @@ export default function AdminPage() {
 
   if (loading) return <main><div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2,padding:20}}>ЗАВАНТАЖЕННЯ...</div></main>
 
+  const activeReviewQueue=reviewPlayerId?reviewQueueFor(reviewPlayerId):[]
+  const activeReviewItem=activeReviewQueue[reviewIndex] || null
+  const activeReviewPlayer=players.find(player=>player.id===reviewPlayerId)
+  const activeReviewScore=activeReviewItem&&reviewInput?reviewAutoResult(activeReviewItem,reviewInput):null
+  const activeReviewBonus=activeReviewItem?.session.type==='race'?newcomerBonusPreview(activeReviewItem.session,reviewPlayerId):null
+  const activeReviewChanges=activeReviewItem?pilotChanges.filter(change=>change.stage_id===activeReviewItem.session.stage_id&&change.is_active):[]
+  const activeReviewStageOrder=Number(activeReviewItem?.session.stages?.sort_order)
+  const activeReviewPilots=[...new Set([...buildStagePilotPool(activeReviewChanges),...resultsList(normalizeStageResults(activeReviewItem?.session.results||{},activeReviewChanges)),...activeReviewChanges.map(change=>change.incoming_driver),...Object.values(reviewInput?.predictions||{}),reviewInput?.fl_pick,reviewInput?.ov_pick].filter(Boolean))]
+  const activeReviewQualHistory=activeReviewItem?priorQualAssignments(qualAssignments,activeReviewItem.session.id,activeReviewStageOrder):[]
+  const activeReviewAllQualAssignments=Object.fromEntries([...activeReviewQualHistory.map((row,index)=>[`history_${index}`,row]),...qualAssignments.filter(row=>row.session_id===activeReviewItem?.session.id).map(row=>[row.id,row])])
+  const activeReviewQualUsed=new Set(USED_PILOTS[activeReviewPlayer?.name]||[])
+  activeReviewQualHistory.filter(row=>row.player_id===activeReviewPlayer?.id).forEach(row=>[row.pilot_1,row.pilot_2,row.pilot_3].filter(Boolean).forEach(pilot=>activeReviewQualUsed.add(pilot)))
+  const activeReviewQualSlots=activeReviewItem&&activeReviewPlayer?qualifyingSlotsForStage(activeReviewPilots.filter(pilot=>!activeReviewQualUsed.has(pilot)).length,activeReviewStageOrder):1
+
   const tabs = [
     { key:'stages',    label:'ЕТАПИ' },
     { key:'deadlines', label:'ДЕДЛАЙНИ' },
     { key:'users',     label:'ГРАВЦІ' },
+    { key:'review',    label:'ПЕРЕВІРКА ПРОГНОЗІВ' },
     { key:'teams',     label:'КОМАНДИ' },
     { key:'substitutions', label:'ПІЛОТИ' },
     { key:'log',       label:'ЖУРНАЛ' },
@@ -403,8 +755,32 @@ export default function AdminPage() {
       {tab === 'stages' && (
         <>
           <div className="section-label">Етапи · повний перерахунок</div>
-          <p className="team-created-note">Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.</p>
-          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} onClick={recalculateAllScores}>↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ</button>
+          <p className="team-created-note">{IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін перевіряє всі ГП із повністю зарахованими сесіями сезону й показує перераховані підсумки, не змінюючи робочу базу. ГП із незарахованими сесіями не включаються.' : 'Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.'}</p>
+          <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін доступних зарахованих ГП сезону без запису в робочу базу' : 'Перерахувати всі доступні завершені ГП і замінити підсумки'} onClick={recalculateAllScores}>{IS_PREVIEW_DEPLOYMENT ? '🧪 СУХИЙ ПРОГІН ПЕРЕРАХУНКУ СЕЗОНУ' : '↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ'}</button>
+          {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports?.totals && (
+            <div style={{margin:'8px 0 20px',padding:14,border:'1px solid var(--green)',borderRadius:6,background:'rgba(107,255,138,.04)'}}>
+              <div className="section-label">🧪 Результат сухого прогону · база не змінена</div>
+              <p className="team-created-note">У звіті для кожного прогнозу показані збережені бали та новий розрахунок. «Немає знімка» означає, що система не має незмінної копії прогнозу, за яким раніше нарахували бали; такі історичні різниці не можна вважати поясненими лише сухим прогоном. Чернетки з поточного preview позначено окремо.</p>
+              <div style={{overflowX:'auto',marginBottom:18}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr><th style={{textAlign:'left',padding:7}}>Гравець</th><th style={{textAlign:'right',padding:7}}>Було</th><th style={{textAlign:'right',padding:7}}>За прогнозами</th><th style={{textAlign:'right',padding:7}}>Різниця</th></tr></thead>
+                  <tbody>{previewRecalculationReports.totals.map(row => <tr key={row.name}>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)'}}>{row.name}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right'}}>{row.base}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right'}}>{row.projected}</td>
+                    <td style={{padding:7,borderTop:'1px solid var(--border)',textAlign:'right',color:row.projected-row.base<0?'var(--red)':'var(--green)'}}>{row.projected-row.base>0?'+':''}{row.projected-row.base}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+              {previewRecalculationReports.stages.map(stage => <details key={stage.stage} style={{marginTop:8}}>
+                <summary style={{cursor:'pointer',fontFamily:'Orbitron,sans-serif',fontSize:11}}>{stage.stage_name} · бонус новачка: {stage.newcomer_bonus_minimum} очок · без знімка: {stage.sessionsWithoutSnapshots} прогнозів</summary>
+                {stage.report.map((session,index) => <div key={`${session.type}-${index}`} style={{margin:'10px 0 14px',fontSize:12}}>
+                  <strong>{session.type.toUpperCase()}</strong>
+                  {session.scores.length ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'4px 12px',marginTop:6}}>{session.scores.map((score,i) => <span key={`${score.player}-${i}`}>{score.player}: {score.previous} → <b>{score.points}</b> ({score.points-score.previous>0?'+':''}{score.points-score.previous}) · {score.hasSavedInput?'є знімок':'немає знімка'}{score.previewDraft?' · preview-чернетка':''}</span>)}</div> : <div style={{color:'var(--muted)',marginTop:5}}>Немає прогнозів для підрахунку.</div>}
+                </div>)}
+              </details>)}
+            </div>
+          )}
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {stages.map(stage => {
               const stageSessions = sessions.filter(session => session.stage_id===stage.id)
@@ -412,7 +788,7 @@ export default function AdminPage() {
               return <div key={stage.id} className="admin-stage-row">
                 <span className="admin-stage-name">{stage.flag} {stage.name}</span>
                 <span className="admin-stage-order">#{stage.sort_order}</span>
-                <button className="btn btn-ghost admin-recalc-btn" disabled={!ready} title={ready ? 'Перерахувати всі сесії ГП і замінити старі бали' : 'Потрібні сесії гонки та зараховані всі сесії ГП'} onClick={()=>recalculateStage(stage)}>
+                <button className="btn btn-ghost admin-recalc-btn" disabled={IS_PREVIEW_DEPLOYMENT || !ready} title={IS_PREVIEW_DEPLOYMENT ? 'Зміни бази заблоковано в прев’ю; скористайся сухим прогоном на сторінці прогнозів' : ready ? 'Перерахувати всі сесії ГП і замінити старі бали' : 'Потрібні сесії гонки та зараховані всі сесії ГП'} onClick={()=>recalculateStage(stage)}>
                   ↻ ПЕРЕРАХУВАТИ ГП
                 </button>
                 <button className={`btn ${stage.is_locked ? 'btn-ghost' : 'btn-red'}`} style={{padding:'6px 12px',fontSize:9}} onClick={() => toggleStageLock(stage)}>
@@ -427,6 +803,37 @@ export default function AdminPage() {
       {/* DEADLINES TAB */}
       {tab === 'deadlines' && (
         <DeadlinesTab sessions={sessions} setSessions={setSessions} setMsg={setMsg} />
+      )}
+
+      {tab === 'review' && (
+        <section>
+          <div className="section-label">Ручна звірка · гравці за командами</div>
+          <p className="team-created-note">Відкрий гравця, щоб пройти затверджені сесії послідовно від початку сезону. Жовтий індикатор веде до першої конкретної розбіжності. Підсумок буде складено з нуля після завершення всіх перевірок.{IS_PREVIEW_DEPLOYMENT?' У preview зміни зберігаються лише в локальному сховищі браузера; базу даних не змінюємо.':''}</p>
+          <div style={{display:'grid',gap:18}}>
+            {[...new Set(players.map(player=>player.team || 'Без команди'))].sort((a,b)=>a.localeCompare(b)).map(team=> (
+              <div key={team}>
+                <div className="section-label" style={{marginBottom:6}}>{team}</div>
+                <div className="admin-review-grid">
+                  {players.filter(player=>(player.team || 'Без команди')===team).map(player=>{
+                    const queue=reviewQueueFor(player.id)
+                    const mismatches=queue.filter(item=>manualReviewMismatch(item,player.id))
+                    const complete=queue.length>0 && queue.every(item=>isReviewItemApproved(item,player.id))
+                    const mismatch=mismatches[0]
+                    const state=mismatch?'РОЗБІЖНІСТЬ':complete?'ЗВІРЕНО':`ПЕРЕВІРЕНО ${queue.filter(item=>isReviewItemApproved(item,player.id)).length}/${queue.length}`
+                    const color=mismatch?'#f4c542':complete?'var(--green)':'var(--muted)'
+                    const teamColor=TEAM_META[player.team]?.color || '#888'
+                    const credited=Number(player.base_pts)||0
+                    return <button key={player.id} className="admin-review-player-card" style={{'--team-color':teamColor}} onClick={()=>openPlayerReview(player.id,mismatch?.session.id || null)}>
+                      <span className="admin-review-card-header"><span className="player-name-tag">{player.name}</span><span className="team-chip">{player.team}</span></span>
+                      <span className="admin-review-card-state" style={{color}}><i style={{background:color}}/>{state}{mismatch?` · ${mismatch.session.stages?.name || ''} / ${mismatch.session.type.toUpperCase()}`:''}</span>
+                      <span className="admin-review-card-points">{credited}<small> балів</small></span>
+                    </button>
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* USERS — full edit capability */}
@@ -444,7 +851,7 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addPlayer}>+ ДОДАТИ</button>
           </div>
 
-          <div className="section-label">Гравці та доступ · бали змінюються лише перерахунком результатів</div>
+          <div className="section-label">Гравці та доступ · підсумкові бали формуються перерахунком результатів</div>
           <div style={{overflowX:'auto'}}>
           <table className="standings" style={{marginBottom:0,minWidth:750}}>
             <thead>
@@ -474,7 +881,7 @@ export default function AdminPage() {
                       {allTeamOptions.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </td>
-                  <td style={{fontFamily:'Orbitron,sans-serif',fontSize:11}}>{p.base_pts ?? 0}</td>
+                  <td aria-label={`Підсумкові бали ${p.name}`} style={{width:78,color:'var(--gold)',fontFamily:'Orbitron,sans-serif',fontSize:11,padding:'5px 6px'}}>{Number(p.base_pts) || 0}</td>
                   <td style={{fontSize:11}}>
                     {p.auth_user_id ? (
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -619,9 +1026,80 @@ export default function AdminPage() {
           </div>
         </>
       )}
+
+      {reviewPlayerId && (
+        <div role="dialog" aria-modal="true" aria-label={`Ручна перевірка прогнозів ${activeReviewPlayer?.name || ''}`} style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.78)',display:'flex',alignItems:'center',justifyContent:'center',padding:14}}>
+          <div style={{width:'min(760px,100%)',maxHeight:'92vh',overflowY:'auto',background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:18,boxShadow:'0 18px 70px rgba(0,0,0,.6)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
+              <div><div className="section-label">РУЧНА ПЕРЕВІРКА</div><h2 style={{margin:'4px 0 12px',fontSize:20}}>{activeReviewPlayer?.name}</h2></div>
+              <button aria-label="Закрити" className="btn btn-ghost" onClick={()=>{setReviewPlayerId('');setReviewDraft(null)}}>✕</button>
+            </div>
+            {activeReviewItem && reviewInput ? <>
+              <div style={{padding:'10px 12px',marginBottom:12,border:'1px solid var(--border)',borderRadius:5,background:'rgba(255,255,255,.025)'}}>
+                <b>{activeReviewItem.session.stages?.flag} {activeReviewItem.session.stages?.name}</b><span style={{color:'var(--muted)'}}> · {String(activeReviewItem.session.type).toUpperCase()} · крок {reviewIndex+1} з {activeReviewQueue.length}</span>
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Фактичний результат: {resultsList(normalizeStageResults(activeReviewItem.session.results || {},activeReviewChanges)).join(' · ') || 'результат не внесено'}</div>
+              </div>
+              {activeReviewItem.missed ? (
+                <div className="manual-review-missed">
+                  Для цієї сесії прогнозу немає. Підтверди відсутність, щоб продовжити звірку.
+                  {activeReviewItem.session.type==='race' && <div className="manual-review-bonus">
+                    {activeReviewBonus?.ready
+                      ? <>Мінімум очок за гонку цього ГП: <b>{activeReviewBonus.minimum}</b>. {' '}
+                        <button className="btn btn-ghost" disabled={reviewSaving||!activeReviewBonus.eligible||activeReviewBonus.recorded!=null||activeReviewBonus.points==null} onClick={()=>applyReviewNewcomerBonus(activeReviewItem)}>
+                          🎁 БОНУС НОВАЧКА{activeReviewBonus.recorded!=null?` · ВЖЕ +${activeReviewBonus.recorded}`:activeReviewBonus.points!=null?` +${activeReviewBonus.points}`:''}
+                        </button>{' '}
+                        {activeReviewBonus.recorded!=null?'Бонус за цей етап уже записаний.':activeReviewBonus.eligible?'Це ГП до першого прогнозу гравця.':'Це пропуск після початку участі, тому за правилом ліги бонусу немає.'}</>
+                      : <><button className="btn btn-ghost" disabled>🎁 БОНУС НОВАЧКА</button> Бонус стане доступний після зарахування всіх сесій ГП і наявності балів за прогнози гонки.</>}
+                  </div>}
+                </div>
+              ) : <PlayerCard
+                key={`${activeReviewItem.session.id}:${reviewPlayerId}`}
+                player={activeReviewPlayer}
+                teamColor={TEAM_META[activeReviewPlayer?.team]?.color || '#888'}
+                sessionType={activeReviewItem.session.type}
+                session={activeReviewItem.session}
+                forecast={activeReviewItem.kind==='forecast'?activeReviewItem.row:null}
+                qualAssign={activeReviewItem.kind==='qual'?activeReviewItem.row:null}
+                results={resultsList(normalizeStageResults(activeReviewItem.session.results||{},activeReviewChanges))}
+                flResult={normalizeStageDriver(activeReviewItem.session.fl_pilot||'',activeReviewChanges)}
+                ovResult={String(activeReviewItem.session.ov_pilot||'').split(/[,;|]/).map(value=>normalizeStageDriver(value.trim(),activeReviewChanges)).filter(Boolean).join(', ')}
+                isAdmin
+                isLocked={false}
+                stageKey={activeReviewItem.session.stages?.key}
+                stageOrder={activeReviewStageOrder}
+                allQualAssign={activeReviewAllQualAssignments}
+                driverOptions={activeReviewPilots}
+                pilotSubstitutions={activeReviewChanges}
+                forecastHidden={false}
+                qualSlotCount={activeReviewQualSlots}
+                editorOnly
+                saveDelay={0}
+                onSaveForecast={(predictions,fl,ov)=>persistReviewedForecast(activeReviewItem,predictions,fl,ov)}
+                onSaveQual={(pilots,positions)=>persistReviewedQual(activeReviewItem,pilots,positions)}
+                onSavePolePick={pilot=>persistReviewedPole(activeReviewItem,pilot)}
+              />}
+              {activeReviewItem.session.type==='race'&&!activeReviewItem.missed&&activeReviewBonus?.ready&&<div className="manual-review-bonus">Бонуси гонки визначено за найменшим прогнозним рахунком: {activeReviewBonus.minimum ?? '—'} балів. {activeReviewBonus.recorded!=null?`Гравцю вже зараховано +${activeReviewBonus.recorded}.`:activeReviewBonus.points!=null?`Для гравця передбачено +${activeReviewBonus.points}.`:'Цей гравець не отримує бонусу за цю гонку.'}</div>}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginTop:15,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                <b>{activeReviewItem.missed?'Прогноз відсутній · 0 балів':`Бали для затвердження: ${activeReviewScore?.score ?? '—'}`}</b>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <button className="btn btn-red" disabled={reviewSaving} onClick={approveReviewStep}>{reviewSaving?'ЗБЕРЕЖЕННЯ…':activeReviewItem.missed?'ПІДТВЕРДИТИ ВІДСУТНІСТЬ І ДАЛІ':'ЗАТВЕРДИТИ Й ДАЛІ'}</button>
+                </div>
+              </div>
+            </> : activeReviewQueue.length>0 && activeReviewQueue.every(item=>isReviewItemApproved(item,reviewPlayerId)) ? <>
+              <p className="team-created-note">Усі {activeReviewQueue.length} кроків — включно з пропущеними сесіями — підтверджено. Підсумок буде складено лише з зарахованих прогнозів, кваліфікацій і бонусів.</p>
+              <button className="btn btn-red" onClick={()=>finalizePlayerReview(reviewPlayerId)}>ЗАТВЕРДИТИ СУМУ З НУЛЯ І ЗАВЕРШИТИ</button>
+            </> : <>
+              <p className="team-created-note">Для цього гравця немає завершених прогнозів для ручної перевірки.</p>
+              <button className="btn btn-ghost" onClick={()=>setReviewPlayerId('')}>Закрити</button>
+            </>}
+          </div>
+        </div>
+      )}
     </main>
   )
 }
+
+const reviewInputStyle={display:'block',width:'100%',boxSizing:'border-box',marginTop:4,padding:'8px 9px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:4,color:'var(--text)',fontSize:12}
 
 function canRecalculateAll(stages,sessions) {
   const started = (stages || []).filter(stage => (sessions || []).some(session => session.stage_id === stage.id && session.committed))
@@ -660,7 +1138,7 @@ function DeadlinesTab({ sessions, setSessions, setMsg }) {
     supabase.from('sessions')
       .select('id, type, is_locked, committed, deadline_utc, stages(name, flag, sort_order, key)')
       .order('sort_order', { referencedTable: 'stages' })
-      .then(({ data }) => setAllSessions(data || []))
+      .then(({ data }) => setAllSessions((data || [])))
   }, [])
 
   async function updateDeadline(sessionId, newDeadlineLocal) {

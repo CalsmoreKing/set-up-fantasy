@@ -175,6 +175,20 @@ main { position: relative; z-index: 2; padding: 16px; max-width: 960px; margin: 
 }
 .stage-select:focus { border-color: var(--red); }
 .session-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.stage-recalc-btn { margin-left: auto; }
+.preview-safety-banner { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; margin: 10px 16px; padding:10px 12px; border:1px solid rgba(255,190,70,.55); border-radius:3px; background:rgba(255,190,70,.08); color:#ffe0a3; font-size:11px; line-height:1.5; }
+.preview-safety-banner strong { font:700 9px 'Orbitron',sans-serif; letter-spacing:1px; color:#ffbe46; }
+.admin-edit-mode-banner { margin: 0 0 12px; padding: 10px 12px; border: 1px solid rgba(225,6,0,.45); border-radius: 3px; background: rgba(225,6,0,.08); color: var(--text); font-size: 11px; line-height: 1.5; }
+.stage-recalc-report { margin: 0 0 16px; padding: 14px; border: 1px solid rgba(255,215,0,.28); border-radius: 4px; background: rgba(255,215,0,.035); }
+.stage-recalc-report > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stage-recalc-report h3 { margin: 0; color: var(--gold); font: 700 11px 'Orbitron', sans-serif; letter-spacing: 1px; }
+.stage-recalc-report > p { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.stage-recalc-session { border-top: 1px solid var(--border); padding: 9px 0; }
+.stage-recalc-session summary { color: var(--text); cursor: pointer; font: 600 10px 'Orbitron', sans-serif; letter-spacing: .5px; }
+.stage-recalc-score-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap: 4px 12px; padding: 9px 0 0; }
+.stage-recalc-score-list > div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.stage-recalc-score-list strong { color: var(--gold); font-family: 'Orbitron',sans-serif; }
+.stage-recalc-bonus { margin-top: 8px; color: var(--muted); font-size: 10px; }
 .session-btn {
   background: none; border: 1px solid var(--border); color: var(--muted);
   font-family: 'Orbitron', sans-serif; font-size: 9px; letter-spacing: 1px;
@@ -300,6 +314,7 @@ select.stage-select option {
    QUAL INPUTS
    ───────────────────────────────────────── */
 .qual-pilot-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.pole-pick-row .pilot-select { flex: 1; min-width: 180px; }
 .pilot-tag {
   font-size: 11px; font-weight: 600; color: var(--text);
   background: #0d0d0d; border: 1px solid var(--border);
@@ -408,8 +423,10 @@ select.stage-select option {
 
 .rank { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 14px; color: var(--muted); }
 .rank.r1 { color: var(--gold); } .rank.r2 { color: var(--silver); } .rank.r3 { color: var(--bronze); }
-/* Plain player name — no underline, no hover effect */
-.player-name-plain { font-weight: 600; }
+/* Use a real button, not a browser-styled anchor, for profile navigation from the standings. */
+.player-name-action { appearance:none; -webkit-appearance:none; display:inline; margin:0; padding:0; border:0; background:transparent; color:var(--text); font:inherit; font-weight:600; text-align:left; cursor:pointer; }
+.player-name-action:hover { color:var(--text); text-decoration:none; }
+.player-name-action:focus-visible { outline:2px solid var(--red); outline-offset:2px; border-radius:1px; }
 .team-badge { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 2px; font-weight: 600; border: 1px solid; white-space: nowrap; }
 .score-add { font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700; color: var(--red); }
 .score-total { font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 900; color: var(--gold); }
@@ -949,3 +966,20 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .overtake-picker-option input{accent-color:var(--red);margin:0}
 .overtake-picker-apply{width:100%;margin-top:7px;padding:9px 10px;border:0;border-radius:5px;background:var(--red);color:#fff;font:700 9px 'Orbitron',sans-serif;letter-spacing:.8px;cursor:pointer}
 .overtake-picker-apply:hover{filter:brightness(1.12)}
+
+/* Manual forecast review cards mirror the forecasts player-card layout. */
+.admin-review-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.admin-review-player-card{position:relative;min-width:0;min-height:106px;padding:0 12px 28px;text-align:left;color:var(--text);background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--team-color,#888);border-radius:4px;overflow:hidden;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:border-color .2s,box-shadow .2s,transform .2s}
+.admin-review-player-card:hover{border-color:color-mix(in srgb,var(--team-color,#888) 62%,var(--border));box-shadow:0 4px 16px rgba(0,0,0,.5);transform:translateY(-1px)}
+.admin-review-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:46px;margin:0 -12px 10px;padding:8px 11px;background:linear-gradient(100deg,color-mix(in srgb,var(--team-color,#1a1a1a) 14%,#111) 0%,#111 70%);border-bottom:1px solid var(--border)}
+.admin-review-card-header .player-name-tag{font-size:11px}
+.admin-review-card-state{display:flex;align-items:center;gap:6px;min-width:0;font:700 8px 'Orbitron',sans-serif;letter-spacing:.65px;line-height:1.5}
+.admin-review-card-state i{width:7px;height:7px;flex:0 0 auto;border-radius:50%;box-shadow:0 0 7px currentColor}
+.admin-review-card-points{position:absolute;right:12px;bottom:9px;color:var(--gold);font:900 14px 'Orbitron',sans-serif;letter-spacing:1px}
+.admin-review-card-points small{color:var(--muted);font-family:inherit;font-size:9px;font-weight:500;letter-spacing:0}
+.manual-review-forecast-list{display:flex;flex-direction:column;gap:5px;max-width:460px;margin:12px auto}
+.manual-review-forecast-row{display:grid;grid-template-columns:38px minmax(0,1fr) 38px;align-items:center;gap:8px;padding:6px 9px;background:var(--card);border:1px solid var(--border);border-left:3px solid var(--red);border-radius:3px}
+.manual-review-forecast-row .pilot-select{width:100%;min-width:0}
+.manual-review-missed{padding:14px;border:1px dashed rgba(255,255,255,.18);border-radius:5px;color:var(--muted);background:rgba(255,255,255,.02);font-size:12px;line-height:1.6}
+.manual-review-bonus{margin-top:10px;padding:10px 12px;border:1px solid rgba(255,190,70,.28);border-radius:5px;background:rgba(255,190,70,.055);font-size:11px;color:#ffd27d;line-height:1.5}
+@media(max-width:650px){.admin-review-grid{grid-template-columns:1fr}.admin-review-player-card{min-height:98px}.manual-review-forecast-list{max-width:none}}

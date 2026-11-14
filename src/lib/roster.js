@@ -158,11 +158,40 @@ export function qualifyingSlotsForStage(availableCount, stageOrder, maxPerStage 
   return Object.hasOwn(plan, order) ? plan[order] : 1
 }
 
-// These two profiles first entered the game before Madrid (order 16); earlier GPs qualify for newcomer awards.
-export const NEWCOMER_FIRST_STAGE_ORDER = Object.freeze({ 'Педрі':16, 'Хексі':16 })
+// Verified first race in which each late-joining player submitted a forecast.
+// When session/forecast history is available, newcomerPlayersForStage derives this dynamically;
+// this map remains a fallback for isolated stage previews without the full season history.
+export const NEWCOMER_FIRST_STAGE_ORDER = Object.freeze({
+  'Анастасія':3,
+  'Ярік':3,
+  'Андрій':6,
+  'Валентин':6,
+  'Стас':6,
+  'Андрії':7,
+  'Кітасу':8,
+  'Даня':8,
+  'Педрі':16,
+  'Хексі':16,
+})
 
-export function newcomerPlayersForStage(players, stageOrder) {
+export function newcomerFirstStageOrderByPlayer(players, sessions, forecasts) {
+  const firstOrder = new Map((players || []).map(player => [player.id, Number(NEWCOMER_FIRST_STAGE_ORDER[player.name]) || Infinity]))
+  if (!Array.isArray(sessions) || !Array.isArray(forecasts)) return firstOrder
+  const bySession = new Map((sessions || []).map(session => [session.id, session]))
+  for (const forecast of forecasts || []) {
+    const session = bySession.get(forecast.session_id)
+    const order = Number(session?.stages?.sort_order ?? session?.stage_sort_order)
+    const submitted = Object.values(forecast.predictions || {}).some(Boolean)
+    if (!session?.committed || session.type !== 'race' || !Number.isFinite(order) || !submitted) continue
+    const previous = firstOrder.get(forecast.player_id) ?? Infinity
+    if (order < previous) firstOrder.set(forecast.player_id, order)
+  }
+  return firstOrder
+}
+
+export function newcomerPlayersForStage(players, stageOrder, sessions, forecasts) {
   const order = Number(stageOrder)
   if (!Number.isFinite(order)) return []
-  return (players || []).filter(player => Number(NEWCOMER_FIRST_STAGE_ORDER[player.name]) > order)
+  const firstOrders = newcomerFirstStageOrderByPlayer(players, sessions, forecasts)
+  return (players || []).filter(player => (firstOrders.get(player.id) ?? Infinity) > order)
 }
