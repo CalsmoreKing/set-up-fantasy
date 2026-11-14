@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage } from '../src/lib/roster.js'
+import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, newcomerPlayersForStage, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage } from '../src/lib/roster.js'
 
 test('legacy pilot seeds follow the current profile and deduplicate resolved qualifying corrections', () => {
   assert.deepEqual(USED_PILOTS['Даня'], ['Stroll','Sainz'])
@@ -65,6 +65,27 @@ test('catch-up qualifying slots are allocated across Vegas, Qatar, and UAE, capp
   assert.deepEqual(qualifyingPlanForAvailable(6), {23:2,24:2,25:2})
   assert.deepEqual(qualifyingPlanForAvailable(7), {23:2,24:3,25:2})
   assert.deepEqual(qualifyingPlanForAvailable(0), {23:0,24:0,25:0})
+})
+
+test('newcomer bonuses cover every GP before a late entrant’s first race, but not a mid-season absence', () => {
+  const players=[{id:'andriy',name:'Андрій'},{id:'danya',name:'Даня'},{id:'regular',name:'Калсмор'},{id:'future',name:'Новий гравець'}]
+  const sessions=[
+    {id:'aus',type:'race',committed:true,stages:{sort_order:1}},
+    {id:'china',type:'race',committed:true,stages:{sort_order:2}},
+    {id:'miami',type:'race',committed:true,stages:{sort_order:6}},
+    {id:'monaco',type:'race',committed:true,stages:{sort_order:8}},
+    {id:'later',type:'race',committed:true,stages:{sort_order:10}},
+  ]
+  const forecasts=[
+    {player_id:'andriy',session_id:'miami',predictions:{1:'A'}},
+    {player_id:'danya',session_id:'monaco',predictions:{1:'A'}},
+    {player_id:'regular',session_id:'aus',predictions:{1:'A'}},
+    {player_id:'future',session_id:'later',predictions:{1:'A'}},
+  ]
+  assert.deepEqual(newcomerPlayersForStage(players,2,sessions,forecasts).map(player=>player.id).sort(),['andriy','danya','future'])
+  assert.deepEqual(newcomerPlayersForStage(players,6,sessions,forecasts).map(player=>player.id).sort(),['danya','future'])
+  assert.deepEqual(newcomerPlayersForStage(players,8,sessions,forecasts).map(player=>player.id),['future'])
+  assert.deepEqual(newcomerPlayersForStage(players,9,sessions,forecasts).map(player=>player.id),['future'])
 })
 
 test('event replacement normalizes saved picks and real result names only for that event', () => {

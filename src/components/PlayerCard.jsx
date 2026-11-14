@@ -9,12 +9,13 @@ export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
   stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, onSavePolePick, teamSiblingId,
-  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1
+  forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1,
+  editorOnly = false, saveDelay = 600
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const pilotOptions = ['', ...driverOptions]
   const slotCount = Math.max(0, Math.min(3, Number(qualSlotCount) || 0))
-  const [open, setOpen]   = useState(false)
+  const [open, setOpen]   = useState(editorOnly)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
 
@@ -51,10 +52,18 @@ export default function PlayerCard({
     }
   }, [open, preds, fl, ov, qPilots, qPos, polePick])
 
-  // Debounced save
+  useEffect(() => {
+    if (editorOnly) setOpen(true)
+  }, [editorOnly])
+
+  // Debounced save for the player page; the admin review can opt into immediate persistence.
   function schedSave(newPreds, newFl, newOv) {
     clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => onSaveForecast(newPreds, newFl, newOv), 600)
+    if (saveDelay <= 0) {
+      onSaveForecast?.(newPreds, newFl, newOv)
+      return
+    }
+    saveTimer.current = setTimeout(() => onSaveForecast?.(newPreds, newFl, newOv), saveDelay)
   }
 
   // Forecast (race/sprint predictions + qual position guess) — own player or admin
@@ -166,8 +175,8 @@ export default function PlayerCard({
   }
 
   return (
-    <div className="player-card" id={`player-card-${player.id}`}>
-      <div
+    <div className={`player-card${editorOnly?' player-card-editor-only':''}`} id={`player-card-${player.id}`}>
+      {!editorOnly && <div
         className="card-header"
         style={{
           borderLeft: `4px solid ${teamColor}`,
@@ -203,7 +212,7 @@ export default function PlayerCard({
           <span className="live-score">{score}<small>pts</small></span>
           <span className={`collapse-icon${open?' open':''}`}>▼</span>
         </div>
-      </div>
+      </div>}
 
       <div
         className={`card-body${open?'':' collapsed'}`}

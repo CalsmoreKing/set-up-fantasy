@@ -388,6 +388,13 @@ export default function MainPage() {
       if (forecastResult.error) throw forecastResult.error
       if (qualResult.error) throw qualResult.error
       if (changesResult.error) throw changesResult.error
+      const historySessionsResult=await supabase.from('sessions').select('id,stage_id,type,committed,stages(sort_order)').eq('type','race').eq('committed',true)
+      if(historySessionsResult.error) throw historySessionsResult.error
+      const historySessionIds=(historySessionsResult.data||[]).map(session=>session.id)
+      const historyForecastResult=historySessionIds.length
+        ? await supabase.from('forecasts').select('id,player_id,session_id,predictions,fl_pick,ov_pick').in('session_id',historySessionIds)
+        : {data:[],error:null}
+      if(historyForecastResult.error) throw historyForecastResult.error
       const changes=changesResult.data||[]
       const mergePreviewRows=(saved,drafts)=>{
         const rows=new Map((saved||[]).map(row=>[`${row.session_id}:${row.player_id}`,row]))
@@ -432,7 +439,8 @@ export default function MainPage() {
         return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
       })
       recalcPhase = 'БОНУС НОВАЧКА: перевірка мінімуму за гонку'
-      const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order)).map(player=>player.id)
+      const historyForecasts=[...(historyForecastResult.data||[]).filter(row=>!raceRows.some(current=>current.id===row.id)),...raceRows]
+      const eligible=newcomerPlayersForStage(players,Number(currentStage.sort_order),historySessionsResult.data||[],historyForecasts).map(player=>player.id)
       const bonus=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible)
       if(!bonus.ready) throw new Error('Не вдалося визначити бонус новачка за гонку.')
       if (IS_PREVIEW_DEPLOYMENT) {
