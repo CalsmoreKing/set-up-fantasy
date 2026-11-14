@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { supabase, TEAM_META } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { rankPlayers } from '../lib/standings'
-import { canonicalStoredScore } from '../lib/scoring'
 
 export default function ProfilePage() {
   const { player: currentPlayer } = useAuth()
@@ -12,7 +11,7 @@ export default function ProfilePage() {
   const [roster, setRoster] = useState([])
   const [seasonRank, setSeasonRank] = useState(null)
   const [seasonTotal, setSeasonTotal] = useState(0)
-  const [scoreSplit, setScoreSplit] = useState({ active:0, newcomer:0 })
+  const [scoreSplit, setScoreSplit] = useState({ newcomer:0 })
   const [schemaReady, setSchemaReady] = useState(true)
   const [bannerBusy, setBannerBusy] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
@@ -33,16 +32,13 @@ export default function ProfilePage() {
     ])
 
     const sessions = sessionsRes.data || []
-    const sessionIds = sessions.map(s => s.id)
-    let forecasts = [], qualifying = [], bonuses = []
-    if (sessionIds.length) {
-      const [f,q] = await Promise.all([
-        supabase.from('forecasts').select('player_id,session_id,score,score_breakdown,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
-      ])
-      forecasts = f.data || []
-      qualifying = q.data || []
+    const raceSessionIds = sessions.filter(session => session.type === 'race').map(session => session.id)
+    let forecasts = []
+    if (raceSessionIds.length) {
+      const forecastsResult = await supabase.from('forecasts').select('player_id,session_id,score').in('session_id',raceSessionIds)
+      forecasts = forecastsResult.data || []
     }
+    let bonuses = []
     const stages = (stagesRes.data || [])
     const allPlayers = playersRes.data || []
     setRoster(allPlayers)
@@ -68,11 +64,8 @@ export default function ProfilePage() {
     }
     setPosterRows(rows)
     setSeasonTotal(rows.reduce((sum, row) => sum + row.score, 0))
-    const activeSessionIds = new Set(sessions.filter(session=>session.committed).map(session=>session.id))
-    const activePoints = forecasts.filter(row => row.player_id===viewedPlayer.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
-      + qualifying.filter(row => row.player_id===viewedPlayer.id && activeSessionIds.has(row.session_id)).reduce((sum,row)=>sum+canonicalStoredScore(row),0)
     const newcomerPoints = bonuses.reduce((sum,row)=>sum+(Number(row.points)||0),0)
-    setScoreSplit({ active:activePoints, newcomer:newcomerPoints })
+    setScoreSplit({ newcomer:newcomerPoints })
     setLoading(false)
   }
 
@@ -130,7 +123,6 @@ export default function ProfilePage() {
       <ProfileMetric label="МІСЦЕ В СЕЗОНІ" value={seasonRank ? `#${seasonRank}` : '—'} />
       <ProfileMetric label="КОМАНДА / НАПАРНИК" value={`${TEAM_META[profilePlayer?.team]?.code || ''} · ${teammate?.name || '—'}`} />
       <ProfileMetric label="ЗАГАЛЬНІ ОЧКИ" value={profilePlayer?.base_pts ?? 0} />
-      <ProfileMetric label="АКТИВНИЙ СЕЗОН" value={scoreSplit.active} />
       <ProfileMetric label="БОНУС НОВАЧКА" value={scoreSplit.newcomer} />
       <ProfileMetric label="ГОНКОВІ ОЧКИ" value={seasonTotal} />
       <ProfileMetric label="ЕТАПІВ З РЕЗУЛЬТАТОМ" value={posterRows.length} />

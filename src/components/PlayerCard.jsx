@@ -58,9 +58,9 @@ export default function PlayerCard({
   }
 
   // Forecast (race/sprint predictions + qual position guess) — own player or admin
-  const canEdit = (isMe || isAdmin) && !isLocked
-  // Qual PILOT assignment (roulette, manual set, remove) — ADMIN ONLY
-  const canEditQualPilot = isAdmin && !isLocked
+  const canEdit = !session?.archive_preview && (isAdmin || (isMe && !isLocked))
+  // Admins can edit committed predictions directly, but archived previews stay read-only.
+  const canEditQualPilot = !session?.archive_preview && isAdmin
 
   function setP(i, v) {
     const n = [...preds]; n[i] = v; setPreds(n)

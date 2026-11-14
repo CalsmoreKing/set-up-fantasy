@@ -33,19 +33,19 @@ test('race scoring strictly ignores actual results outside the top ten', () => {
   assert.equal(calcRaceScore(['Alonso', ...Array(9).fill('')], '', '', withLowerPlaces, '', '').total, 0)
 })
 
-test('sprint uses the general P1-P5 race scale, scores only the actual top five, and has no bonuses', () => {
+test('all sprints use 6/3/1 points, accept only five forecast slots, and score only the actual top five', () => {
   const results = ['A','B','C','D','E','F','G']
   const exact = calcSprintScore(['A','B','C','D','E'], results)
-  assert.equal(exact.total, 5 * 5)
-  assert.deepEqual(exact.breakdown.map(item => item.pts), [5,5,5,5,5])
-  assert.equal(calcSprintPickPoints(0,'A',results),5)
-  assert.equal(calcSprintPickPoints(0,'B',results),2)
+  assert.equal(exact.total, 5 * 6)
+  assert.deepEqual(exact.breakdown.map(item => item.pts), [6,6,6,6,6])
+  assert.equal(calcSprintPickPoints(0,'A',results),6)
+  assert.equal(calcSprintPickPoints(0,'B',results),3)
   assert.equal(calcSprintPickPoints(0,'C',results),1)
   assert.equal(calcSprintPickPoints(0,'F',results),0)
   const oneOff = calcSprintScore(['B','A','C','D','E'], results)
-  assert.equal(oneOff.total, 2 + 2 + 5 + 5 + 5)
+  assert.equal(oneOff.total, 3 + 3 + 6 + 6 + 6)
   const twoOff = calcSprintScore(['C','B','A','D','E'], results)
-  assert.equal(twoOff.total, 1 + 5 + 1 + 5 + 5)
+  assert.equal(twoOff.total, 1 + 6 + 1 + 6 + 6)
   assert.equal(calcSprintScore(['F','G','','',''], results).total, 0)
   assert.equal(calcSprintScore(['A','B','C','D','E','F'], results).total, exact.total)
 })
@@ -78,8 +78,8 @@ test('one season-wide race scoring rule applies to every stage', () => {
 
 test('the same general sprint scale applies in archived and current rounds', () => {
   const exact = ['A','B','C','D','E']
-  assert.equal(calcSprintScore(exact, exact, 1).total, 25)
-  assert.equal(calcSprintScore(exact, exact, 25).total, 25)
+  assert.equal(calcSprintScore(exact, exact, 1).total, 30)
+  assert.equal(calcSprintScore(exact, exact, 25).total, 30)
 })
 
 test('прогноз Валентина на гонку Каталонії дає 23 бали за спільними правилами гонки', () => {

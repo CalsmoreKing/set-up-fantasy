@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
 import { resultsList } from '../lib/scoring'
+import { mergePreviewDraftRows, readPreviewDrafts } from '../lib/previewDrafts'
 import { calculateNewcomerBonuses } from '../lib/standings'
 
 export default function AdminPage() {
@@ -263,15 +264,20 @@ export default function AdminPage() {
       const eventSessions = sessions.filter(session => stageIds.includes(session.stage_id))
       const sessionIds = eventSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
-        supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('forecasts').select('id,player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select('id,player_id,session_id,score,scored_input,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
         supabase.from('stage_pilot_substitutions').select('*').in('stage_id',stageIds).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
       if (qualResult.error) throw qualResult.error
       if (changesResult.error) throw changesResult.error
-      const allForecasts = forecastResult.data || []
-      const allQualifying = qualResult.data || []
+      const previewDrafts = IS_PREVIEW_DEPLOYMENT ? readPreviewDrafts() : null
+      const allForecasts = IS_PREVIEW_DEPLOYMENT
+        ? mergePreviewDraftRows(forecastResult.data,previewDrafts.forecasts)
+        : forecastResult.data || []
+      const allQualifying = IS_PREVIEW_DEPLOYMENT
+        ? mergePreviewDraftRows(qualResult.data,previewDrafts.qual_assignments)
+        : qualResult.data || []
       const changes = changesResult.data || []
       const payload = []
       const recalculationReports = []
@@ -302,7 +308,7 @@ export default function AdminPage() {
                 pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
               }
               const {total} = calcQualAssignmentScore(normalized,results,order)
-              return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+              return {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
             })
             scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})
             continue
@@ -313,7 +319,9 @@ export default function AdminPage() {
             const result = session.type === 'sprint'
               ? calcSprintScore(predictions,results,order,normalizeStageDriver(row.fl_pick,stageChanges),fastLap)
               : calcRaceScore(predictions,normalizeStageDriver(row.fl_pick,stageChanges),normalizeStageDriver(row.ov_pick,stageChanges),results,fastLap,overtake,order)
-            const scored = {id:row.id,score:result.total,score_breakdown:result.breakdown}
+            const scoredInput = {predictions:Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot)),fl_pick:normalizeStageDriver(row.fl_pick,stageChanges)}
+            if (session.type === 'race') scoredInput.ov_pick=normalizeStageDriver(row.ov_pick,stageChanges)
+            const scored = {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:result.total,score_breakdown:result.breakdown,scored_input:scoredInput}
             if (session.type === 'race') rescoredRaceForecasts.push({...row,...scored})
             return scored
           })
@@ -327,11 +335,21 @@ export default function AdminPage() {
           const rows = scoreRows.find(row => row.session_id === session.id)
           return {
             type:session.type,
-            scores:[...(rows?.forecast_scores || []).map(row => ({player:playerNameById[allForecasts.find(forecast => forecast.id === row.id)?.player_id] || '—',points:row.score})), ...(rows?.qual_scores || []).map(row => ({player:playerNameById[allQualifying.find(assignment => assignment.id === row.id)?.player_id] || '—',points:row.score}))],
+            scores:[...(rows?.forecast_scores || []).map(row => ({player:playerNameById[row.player_id] || '—',previous:row.previous_score,points:row.score,hasSavedInput:row.has_saved_input,previewDraft:Boolean(allForecasts.find(item=>item.id===row.id)?.preview_draft)})), ...(rows?.qual_scores || []).map(row => ({player:playerNameById[row.player_id] || '—',previous:row.previous_score,points:row.score,hasSavedInput:row.has_saved_input,previewDraft:Boolean(allQualifying.find(item=>item.id===row.id)?.preview_draft)}))],
           }
         })
-        recalculationReports.push({stage:stage.key,stage_name:stage.name,report,newcomer_bonus_minimum:raceBonus.minimum})
-        payload.push({stage_id:stage.id,session_scores:scoreRows,newcomer_bonuses:raceBonus.bonuses,newcomer_minimum:raceBonus.minimum})
+        const sessionsWithoutSnapshots = report.reduce((count,sessionReport)=>count + sessionReport.scores.filter(score=>!score.hasSavedInput).length,0)
+        recalculationReports.push({stage:stage.key,stage_name:stage.name,report,newcomer_bonus_minimum:raceBonus.minimum,sessionsWithoutSnapshots})
+        payload.push({
+          stage_id:stage.id,
+          session_scores:scoreRows.map(sessionRow=>({
+            session_id:sessionRow.session_id,
+            forecast_scores:sessionRow.forecast_scores.map(({id,score,score_breakdown,scored_input})=>({id,score,score_breakdown,scored_input})),
+            qual_scores:sessionRow.qual_scores.map(({id,score,scored_input})=>({id,score,scored_input})),
+          })),
+          newcomer_bonuses:raceBonus.bonuses,
+          newcomer_minimum:raceBonus.minimum,
+        })
       }
 
       const projectedTotals = Object.fromEntries(players.map(player => [player.id,0]))
@@ -353,6 +371,12 @@ export default function AdminPage() {
         })
       })
       const previewText = players.map(player => `${player.name}: ${Number(player.base_pts)||0} → ${projectedTotals[player.id]||0} (${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)>=0?'+':''}${(projectedTotals[player.id]||0)-(Number(player.base_pts)||0)})`).join('\n')
+      const missingScoredInputs = recalculationReports.reduce((count,stage)=>count+stage.sessionsWithoutSnapshots,0)
+      const mismatchedTotals = players.filter(player => (projectedTotals[player.id]||0)!==(Number(player.base_pts)||0))
+      if (!IS_PREVIEW_DEPLOYMENT && (missingScoredInputs || mismatchedTotals.length)) {
+        const mismatchNames = mismatchedTotals.map(player=>player.name).join(', ')
+        throw new Error(`Офіційний перерахунок заблоковано: ${missingScoredInputs} прогнозів не мають історичного знімка; підсумки не збігаються для ${mismatchNames || '—'}. Спершу звірте сухий прогін і вихідні дані.`)
+      }
       const confirmationText = IS_PREVIEW_DEPLOYMENT
         ? `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nБали за всіма сесіями буде лише пораховано й показано для звірки. Запис у робочу базу заблокований.`
         : `СУХИЙ ПРОГІН · ${payload.length} ГП\n\n${previewText}\n\nЦе нові підсумки, перераховані за результатами сесій. Підтвердити атомарний перезапис?`
@@ -474,6 +498,7 @@ export default function AdminPage() {
           {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports?.totals && (
             <div style={{margin:'8px 0 20px',padding:14,border:'1px solid var(--green)',borderRadius:6,background:'rgba(107,255,138,.04)'}}>
               <div className="section-label">🧪 Результат сухого прогону · база не змінена</div>
+              <p className="team-created-note">У звіті для кожного прогнозу показані збережені бали та новий розрахунок. «Немає знімка» означає, що система не має незмінної копії прогнозу, за яким раніше нарахували бали; такі історичні різниці не можна вважати поясненими лише сухим прогоном. Чернетки з поточного preview позначено окремо.</p>
               <div style={{overflowX:'auto',marginBottom:18}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                   <thead><tr><th style={{textAlign:'left',padding:7}}>Гравець</th><th style={{textAlign:'right',padding:7}}>Було</th><th style={{textAlign:'right',padding:7}}>За прогнозами</th><th style={{textAlign:'right',padding:7}}>Різниця</th></tr></thead>
@@ -486,10 +511,10 @@ export default function AdminPage() {
                 </table>
               </div>
               {previewRecalculationReports.stages.map(stage => <details key={stage.stage} style={{marginTop:8}}>
-                <summary style={{cursor:'pointer',fontFamily:'Orbitron,sans-serif',fontSize:11}}>{stage.stage_name} · бонус новачка: {stage.newcomer_bonus_minimum} очок</summary>
+                <summary style={{cursor:'pointer',fontFamily:'Orbitron,sans-serif',fontSize:11}}>{stage.stage_name} · бонус новачка: {stage.newcomer_bonus_minimum} очок · без знімка: {stage.sessionsWithoutSnapshots} прогнозів</summary>
                 {stage.report.map((session,index) => <div key={`${session.type}-${index}`} style={{margin:'10px 0 14px',fontSize:12}}>
                   <strong>{session.type.toUpperCase()}</strong>
-                  {session.scores.length ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:'4px 12px',marginTop:6}}>{session.scores.map((score,i) => <span key={`${score.player}-${i}`}>{score.player}: <b>{score.points}</b></span>)}</div> : <div style={{color:'var(--muted)',marginTop:5}}>Немає прогнозів для підрахунку.</div>}
+                  {session.scores.length ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'4px 12px',marginTop:6}}>{session.scores.map((score,i) => <span key={`${score.player}-${i}`}>{score.player}: {score.previous} → <b>{score.points}</b> ({score.points-score.previous>0?'+':''}{score.points-score.previous}) · {score.hasSavedInput?'є знімок':'немає знімка'}{score.previewDraft?' · preview-чернетка':''}</span>)}</div> : <div style={{color:'var(--muted)',marginTop:5}}>Немає прогнозів для підрахунку.</div>}
                 </div>)}
               </details>)}
             </div>

@@ -6,6 +6,7 @@ import DragResults from '../components/DragResults'
 import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, newcomerPlayersForStage } from '../lib/roster'
 import { calculateNewcomerBonuses } from '../lib/standings'
 import { resultsList } from '../lib/scoring'
+import { rememberPreviewDraft } from '../lib/previewDrafts'
 import { archiveSessionsForStage, archiveForecastsForSession, archiveQualifyingForSession, ARCHIVE_PREVIEW } from '../lib/archivePreview'
 
 const TEAM_COLORS = Object.fromEntries(Object.entries(TEAM_META).map(([k,v]) => [k, v.color]))
@@ -28,7 +29,6 @@ export default function MainPage() {
   const [committing,setCommitting]= useState(false)
   const [recalculatingStage,setRecalculatingStage] = useState(false)
   const [stageRecalcReport,setStageRecalcReport] = useState(null)
-  const [adminForecastEditMode,setAdminForecastEditMode] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -142,7 +142,6 @@ export default function MainPage() {
     const nextStage = navigationStages[currentStageIndex + step]
     if (nextStage) {
       setStageRecalcReport(null)
-      setAdminForecastEditMode(false)
       setStageKey(nextStage.key)
     }
   }
@@ -218,7 +217,8 @@ export default function MainPage() {
     if (IS_PREVIEW_DEPLOYMENT) {
       const draft = { ...(forecasts[playerId] || {}), id:forecasts[playerId]?.id || `preview-${currentSession.id}-${playerId}`, session_id:currentSession.id, player_id:playerId, predictions:predsObj, fl_pick:fl || '', ov_pick:ov || '', preview_draft:true }
       setForecasts(prev => ({...prev,[playerId]:draft}))
-      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      rememberPreviewDraft('forecasts',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
       return
     }
     const { data, error } = await supabase.from('forecasts').upsert({
@@ -236,8 +236,10 @@ export default function MainPage() {
   async function savePolePick(playerId, pilot) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     if (IS_PREVIEW_DEPLOYMENT) {
-      setQualAssign(prev => ({...prev,[playerId]:{...(prev[playerId]||{}),id:prev[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pole_pick:pilot || '',preview_draft:true}}))
-      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pole_pick:pilot || '',preview_draft:true}
+      setQualAssign(prev => ({...prev,[playerId]:draft}))
+      rememberPreviewDraft('qual_assignments',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
       return
     }
     const { data, error } = await supabase.from('qual_assignments').upsert({
@@ -252,8 +254,10 @@ export default function MainPage() {
   async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
     if (IS_PREVIEW_DEPLOYMENT) {
-      setQualAssign(prev => ({...prev,[playerId]:{...(prev[playerId]||{}),id:prev[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,preview_draft:true}}))
-      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; робочу базу не змінено.')
+      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,preview_draft:true}
+      setQualAssign(prev => ({...prev,[playerId]:draft}))
+      rememberPreviewDraft('qual_assignments',draft)
+      setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
       return
     }
     const { data, error } = await supabase.from('qual_assignments').upsert({
@@ -470,7 +474,7 @@ export default function MainPage() {
           <button type="button" aria-label="Попередній етап" disabled={currentStageIndex <= 0} onClick={() => moveStage(-1)}>▲</button>
           <button type="button" aria-label="Наступний етап" disabled={currentStageIndex < 0 || currentStageIndex >= navigationStages.length - 1} onClick={() => moveStage(1)}>▼</button>
         </div>
-        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setAdminForecastEditMode(false);setStageKey(e.target.value)}}>
+        <select className="stage-select" value={stageKey} onChange={e=>{setStageRecalcReport(null);setStageKey(e.target.value)}}>
           <option value="">— Оберіть етап —</option>
           {navigationStages.map(s => (
             <option key={s.key} value={s.key}>
@@ -480,7 +484,7 @@ export default function MainPage() {
         </select>
         <div className="session-btns">
           {availableSessions.map(t => (
-            <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>{setAdminForecastEditMode(false);setSessionType(t)}}>
+            <button key={t} className={`session-btn${sessionType===t?' active':''}`} onClick={()=>setSessionType(t)}>
               {t==='qual'?'КВАЛІФІКАЦІЯ':t==='sprint'?'СПРИНТ':'ГОНКА'}
             </button>
           ))}
@@ -502,18 +506,8 @@ export default function MainPage() {
             закр. {deadlineDate.toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
           </span>
         )}
-        {isAdmin && currentSession && !currentSession.archive_preview && <button type="button" className={`btn ${adminForecastEditMode?'btn-red':'btn-ghost'}`} aria-pressed={adminForecastEditMode} onClick={() => {
-          if (adminForecastEditMode) setAdminForecastEditMode(false)
-          else if (window.confirm(`Увімкнути редагування прогнозів гравців для ${currentStage?.name} · ${sessionType.toUpperCase()}? Це дозволить змінювати навіть зараховані/заблоковані прогнози. Після змін треба окремо перерахувати ГП.`)) setAdminForecastEditMode(true)
-        }} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{adminForecastEditMode ? '🔒 ВИМКНУТИ РЕДАГУВАННЯ' : '✎ РЕДАГУВАТИ ПРОГНОЗИ'}</button>}
         {isAdmin && currentStage && <button type="button" className="btn btn-ghost stage-recalc-btn" onClick={recalculateCurrentStage} disabled={recalculatingStage || !currentSession || Boolean(currentSession.archive_preview)} title={IS_PREVIEW_DEPLOYMENT ? `Сухий прогін зарахованих сесій етапу ${currentStage.name}; без запису в базу` : `Перерахувати всі зараховані сесії етапу ${currentStage.name}`} aria-label={`${IS_PREVIEW_DEPLOYMENT?'Перевірити':'Перерахувати'} ГП ${currentStage.name}`} style={{fontSize:9,padding:'7px 9px',whiteSpace:'nowrap'}}>{recalculatingStage ? 'Перераховую…' : IS_PREVIEW_DEPLOYMENT ? '🧪 ПЕРЕВІРИТИ ЦЕЙ ГП' : '↻ ПЕРЕРАХУВАТИ ЦЕЙ ГП'}</button>}
       </div>
-
-      {adminForecastEditMode && (
-        <div className="admin-edit-mode-banner" role="status">
-          Адмін-редагування увімкнено для {currentStage?.name} · {sessionType.toUpperCase()}. Зміни збережуться в прогнозах; бали оновляться лише після перерахунку ГП.
-        </div>
-      )}
 
       {stageRecalcReport && (
         <section className="stage-recalc-report" aria-label={`Звіт перерахунку ${stageRecalcReport.stageName}`}>
@@ -681,7 +675,7 @@ export default function MainPage() {
                         ovResult={normalizedOvResult}
                         isMe={me?.id === p.id}
                         isAdmin={isAdmin}
-                        isLocked={isLocked && !adminForecastEditMode}
+                        isLocked={isLocked}
                         isDouble={isDouble}
                         qualSlotCount={qualSlotsByPlayer[p.id] ?? (isDouble ? 2 : 1)}
                         stageKey={stageKey}
