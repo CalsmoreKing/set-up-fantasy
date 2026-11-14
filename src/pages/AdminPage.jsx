@@ -771,7 +771,7 @@ export default function AdminPage() {
               try {
                 const sheets = buildStageExportSheets(stages, players, sessions, forecasts, qualAssignments, newcomerBonuses)
                 const date = new Date().toISOString().slice(0, 10)
-                downloadStageWorkbook(sheets, `fantasy-etapy-2026-${date}.xml`)
+                downloadStageWorkbook(sheets, `fantasy-etapy-2026-${date}.xlsx`)
                 setMsg(`✓ Файл із ${sheets.length} аркушами етапів завантажено.`)
               } catch (error) {
                 setMsg(`⚠ Не вдалося створити файл: ${error.message || error}`)
