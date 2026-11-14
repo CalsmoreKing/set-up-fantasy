@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, newcomerPlayersForStage, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage } from '../src/lib/roster.js'
+import { applyStagePilotSubstitutions, buildStagePilotPool, normalizeStageDriver, normalizeStageResults, priorQualAssignments, teammatePilotsAssignedForSession, newcomerPlayersForStage, PILOTS_2026_ORDER, RESERVE_PILOTS_2026, TEAM_RESERVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage } from '../src/lib/roster.js'
 
 test('legacy pilot seeds follow the current profile and deduplicate resolved qualifying corrections', () => {
   assert.deepEqual(USED_PILOTS['Даня'], ['Stroll','Sainz'])
@@ -16,6 +16,17 @@ test('stage-scoped reserve changes replace or deactivate a driver without mutati
   ]
   assert.deepEqual(applyStagePilotSubstitutions(base, changes), ['Reserve'])
   assert.deepEqual(base, ['Driver A','Driver B','Reserve'])
+})
+
+test('qualifying roulette only blocks duplicate pilots already assigned to a teammate at this GP',()=>{
+  const assignments={
+    teammate:{player_id:'teammate',session_id:'gp',pilot_1:'Driver A',pilot_2:'Driver B'},
+    otherTeam:{player_id:'other',session_id:'gp',pilot_1:'Driver C'},
+    previous:{player_id:'teammate',session_id:'old-gp',pilot_1:'Driver D'},
+    self:{player_id:'self',session_id:'gp',pilot_1:'Driver E'},
+  }
+  const taken=teammatePilotsAssignedForSession(assignments,'self','Team X',{teammate:'Team X',other:'Team Y',self:'Team X'},'gp')
+  assert.deepEqual([...taken].sort(),['Driver A','Driver B'])
 })
 
 test('qualifying history ignores current and future allocations', () => {

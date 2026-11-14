@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, isManualReviewMismatch, sessionSortOrder } from './manualReview.js'
+import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, isManualReviewMismatch, sessionSortOrder, summarizeManualReview, manualReviewStepKey } from './manualReview.js'
 
 test('manual review queue follows event order and includes only committed player entries',()=>{
   const sessions=[
@@ -20,16 +20,31 @@ test('manual review queue follows event order and includes only committed player
   assert.deepEqual(sessionSortOrder(sessions[4]).slice(0,2),[1,0])
 })
 
-test('manual review input keeps five sprint positions and calculates top-five 6/3/1 scoring',()=>{
+test('manual review input keeps five sprint positions and calculates top-five 3/2/1 scoring',()=>{
   const item={kind:'forecast',session:{id:'s',type:'sprint',results:['A','B','C','D','E'],stages:{sort_order:1}},row:{predictions:{1:'B',2:'A',3:'C',4:'D',5:'E',6:'ignored'},fl_pick:'A'}}
   const input=inputForReviewItem(item)
   assert.equal(Object.keys(input.predictions).length,5)
   assert.equal(input.fl_pick,'')
   assert.deepEqual(input.predictions,{1:'B',2:'A',3:'C',4:'D',5:'E'})
   const scored=scoreManualReviewItem(item,input)
-  assert.equal(scored.score,24)
-  assert.equal(isManualReviewMismatch(24,scored.score),false)
-  assert.equal(isManualReviewMismatch(27,scored.score),true)
+  assert.equal(scored.score,13)
+  assert.equal(isManualReviewMismatch(13,scored.score),false)
+  assert.equal(isManualReviewMismatch(16,scored.score),true)
+})
+
+test('manual review is a calculator: totals include checked steps and locally selected bonus once, without counting unchecked steps',()=>{
+  const queue=[{session:{id:'race-a'}},{session:{id:'race-b'}}]
+  const steps={
+    [manualReviewStepKey('p','race-a')]:{checked:true,score:17,bonusPoints:5},
+    [manualReviewStepKey('p','race-b')]:{checked:false,score:90,bonusPoints:30},
+  }
+  assert.deepEqual(summarizeManualReview(queue,'p',steps,100),{
+    manualTotal:22,officialTotal:100,difference:-78,checkedCount:1,totalSteps:2,complete:false,matches:false,
+  })
+  steps[manualReviewStepKey('p','race-b')].checked=true
+  assert.deepEqual(summarizeManualReview(queue,'p',steps,112),{
+    manualTotal:142,officialTotal:112,difference:30,checkedCount:2,totalSteps:2,complete:true,matches:false,
+  })
 })
 
 test('qualifying manual editor carries player picks and their submitted positions',()=>{

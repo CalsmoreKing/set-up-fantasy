@@ -2,19 +2,20 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
-import { normalizeStageDriver, priorQualAssignments } from '../lib/roster'
+import { normalizeStageDriver, priorQualAssignments, teammatePilotsAssignedForSession } from '../lib/roster'
 import { calcSprintPickPoints, isOvertakeWinner } from '../lib/scoring'
 
 export default function PlayerCard({
   player, teamColor, sessionType, session, forecast, qualAssign,
   results, flResult, ovResult, isMe, isAdmin, isLocked, isDouble,
-  stageKey, stageOrder = 10, allQualAssign, onSaveForecast, onSaveQual, onSavePolePick, teamSiblingId,
+  stageKey, stageOrder = 10, allQualAssign, allQualPlayerTeams = {}, onSaveForecast, onSaveQual, onSavePolePick, teamSiblingId,
   forecastHidden, liveScore, liveRank, formData, driverOptions = PILOTS, pilotSubstitutions = [], qualSlotCount = 1,
   editorOnly = false, saveDelay = 600
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const pilotOptions = ['', ...driverOptions]
   const slotCount = Math.max(0, Math.min(3, Number(qualSlotCount) || 0))
+  const sameTeamTakenQualPilots=teammatePilotsAssignedForSession(allQualAssign,player.id,player.team,allQualPlayerTeams,session?.id)
   const [open, setOpen]   = useState(editorOnly)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -127,16 +128,9 @@ export default function PlayerCard({
   }
 
   async function rollPilot(idx) {
-    const taken = new Set(
-      Object.values(allQualAssign || {})
-        .filter(a => a.player_id !== player.id && a.session_id === session?.id)
-        .map(a => idx===0 ? a.pilot_1 : idx===1 ? a.pilot_2 : a.pilot_3)
-        .filter(Boolean)
-    )
-    const available = getAvailable().filter(p => !taken.has(p))
-    const pool = available.length ? available : getAvailable()
-    if (!pool.length) { alert(`${player.name}: немає доступних пілотів!`); return }
-    const pilot = pool[Math.floor(Math.random() * pool.length)]
+    const available = getAvailable().filter(p => !sameTeamTakenQualPilots.has(p))
+    if (!available.length) { alert(`${player.name}: немає доступних пілотів для цієї команди на цей ГП!`); return }
+    const pilot = available[Math.floor(Math.random() * available.length)]
     const nPilots = [...qPilots]; nPilots[idx] = pilot
     setQPilots(nPilots)
     const nPos = [...qPos]; nPos[idx] = ''
@@ -328,7 +322,7 @@ export default function PlayerCard({
                           }}
                         >
                           <option value="">вручну...</option>
-                          {driverOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                          {driverOptions.filter(p=>!sameTeamTakenQualPilots.has(p)).map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </>
                     ) : (
@@ -556,16 +550,17 @@ export async function loadFormData(players) {
 
   const { data: forecasts } = await supabase
     .from('forecasts')
-    .select('player_id, predictions, score_breakdown')
+    .select('player_id, predictions, score_breakdown, sessions(type)')
     .not('score_breakdown', 'is', null)
 
   forecasts?.forEach(f => {
     const bd = f.score_breakdown || []
     if (!stats[f.player_id]) return
-    // Count positive breakdown entries; exact race and sprint picks all score at least five points.
+    // Exact position scores are race 5/6 pts and sprint 3 pts; ignore bonuses.
     bd.forEach(b => {
       stats[f.player_id].total += 1
-      if (b.pts >= 5) stats[f.player_id].exact += 1 // treat top-tier points as "exact"
+      const isPositionPick=/^P\d+\s/.test(String(b.label||''))
+      if (isPositionPick && (f.sessions?.type==='sprint' ? Number(b.pts)===3 : Number(b.pts)>=5)) stats[f.player_id].exact += 1
     })
   })
 

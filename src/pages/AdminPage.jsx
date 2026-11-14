@@ -8,7 +8,7 @@ import { auditActionLabel, auditActorLabel, auditSummary } from '../lib/audit'
 import { resultsList } from '../lib/scoring'
 import { mergePreviewDraftRows, readPreviewDrafts } from '../lib/previewDrafts'
 import { calculateNewcomerBonuses } from '../lib/standings'
-import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, isManualReviewMismatch, loadManualReviewState, saveManualReviewState } from '../lib/manualReview'
+import { buildManualReviewQueue, inputForReviewItem, scoreManualReviewItem, loadManualReviewState, saveManualReviewState, manualReviewStepKey, summarizeManualReview } from '../lib/manualReview'
 
 export default function AdminPage() {
   const { isAdmin, user, player: adminPlayer } = useAuth()
@@ -22,14 +22,13 @@ export default function AdminPage() {
   const [qualAssignments, setQualAssignments] = useState([])
   const [forecasts, setForecasts] = useState([])
   const [newcomerBonuses, setNewcomerBonuses] = useState([])
-  const [absenceReviews, setAbsenceReviews] = useState([])
   const [manualReviewState, setManualReviewState] = useState(()=>loadManualReviewState())
+  const [manualAudit, setManualAudit] = useState({})
+  const [reviewDrafts, setReviewDrafts] = useState({})
   const [reviewPlayerId, setReviewPlayerId] = useState('')
   const [reviewIndex, setReviewIndex] = useState(0)
   const [reviewInput, setReviewInput] = useState(null)
   const reviewInputRef = useRef(null)
-  const reviewSaveCount = useRef(0)
-  const [reviewSaving, setReviewSaving] = useState(false)
   const [subStageId, setSubStageId] = useState('')
   const [subTeam, setSubTeam] = useState('')
   const [subOutgoing, setSubOutgoing] = useState('')
@@ -59,8 +58,7 @@ export default function AdminPage() {
       supabase.from('qual_assignments').select('*,sessions(*,stages(name,flag,sort_order,key))'),
       supabase.from('forecasts').select('*,sessions(*,stages(name,flag,sort_order,key))'),
       supabase.from('stage_newcomer_bonuses').select('*'),
-      supabase.from('audit_log').select('id,details,created_at').eq('action','manual_review_absence_approved'),
-    ]).then(([s,p,se,l,sub,qa,fc,nb,ar]) => {
+    ]).then(([s,p,se,l,sub,qa,fc,nb]) => {
       const loadErrors = [
         s.error && `етапи: ${s.error.message}`,
         p.error && `гравці: ${p.error.message}`,
@@ -70,7 +68,6 @@ export default function AdminPage() {
         qa.error && `кваліфікації: ${qa.error.message}`,
         fc.error && `прогнози: ${fc.error.message}`,
         nb.error && `бонуси новачків: ${nb.error.message}`,
-        ar.error && `статуси пропущених сесій: ${ar.error.message}`,
       ].filter(Boolean)
       if (loadErrors.length) setMsg(`⚠ Не вдалося завантажити частину даних адмінки — ${loadErrors.join('; ')}`)
       const savedReview=IS_PREVIEW_DEPLOYMENT?loadManualReviewState():{}
@@ -84,7 +81,6 @@ export default function AdminPage() {
       setForecasts((fc.data || []).map(row=>({...row,...(localRows[`forecast:${row.id}`]||{})})))
       const localBonuses=savedReview.bonuses || {}
       setNewcomerBonuses([...((nb.data||[]).filter(row=>!Object.hasOwn(localBonuses,row.stage_id))),...Object.entries(localBonuses).flatMap(([stageId,value])=>(value.bonuses||[]).map(bonus=>({...bonus,stage_id:stageId,source_minimum:value.minimum})) )])
-      setAbsenceReviews(ar.data || [])
       setManualReviewState(savedReview)
       // collect distinct teams not in TEAM_META (custom-added)
       const teamsInDb = [...new Set((p.data||[]).map(x=>x.team))]
@@ -108,66 +104,39 @@ export default function AdminPage() {
     setReviewInput(input)
   }
 
-  function markReviewSaveStarted() {
-    reviewSaveCount.current+=1
-    setReviewSaving(true)
+  function reviewStepKey(item,playerId=reviewPlayerId) {
+    return manualReviewStepKey(playerId,item.session.id)
   }
 
-  function markReviewSaveFinished() {
-    reviewSaveCount.current=Math.max(0,reviewSaveCount.current-1)
-    setReviewSaving(reviewSaveCount.current>0)
+  function setReviewItemInput(item,input) {
+    const key=reviewStepKey(item)
+    reviewInputRef.current=input
+    setReviewInput(input)
+    setReviewDrafts(previous=>({...previous,[key]:input}))
+    setManualAudit(previous=>({...previous,[key]:{...previous[key],checked:false,input}}))
   }
 
-  async function persistReviewedForecast(item,predictions,flPick,ovPick) {
-    const predictionsObject=Object.fromEntries(predictions.map((pilot,index)=>[index+1,pilot]).filter(([,pilot])=>pilot))
-    const update={predictions:predictionsObject,fl_pick:flPick||'',ov_pick:ovPick||'',updated_at:new Date().toISOString(),manual_reviewed_at:null}
-    setReviewDraft({predictions:Object.fromEntries(Array.from({length:item.session.type==='sprint'?5:10},(_,index)=>[index+1,predictions[index]||''])),fl_pick:flPick||'',ov_pick:ovPick||''})
-    markReviewSaveStarted()
-    try {
-      if(IS_PREVIEW_DEPLOYMENT) {
-        const key=`forecast:${item.row.id}`
-        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
-      } else {
-        const {error}=await supabase.from('forecasts').update(update).eq('id',item.row.id)
-        if(error) throw error
-      }
-      setForecasts(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
-    } catch(error) { setMsg(`⚠ Не вдалося зберегти прогноз у картці перевірки: ${error.message||error}`) }
-    finally { markReviewSaveFinished() }
+  function persistReviewedForecast(item,predictions,flPick,ovPick) {
+    const slots=item.session.type==='sprint'?5:10
+    const input={
+      predictions:Object.fromEntries(Array.from({length:slots},(_,index)=>[index+1,predictions[index]||''])),
+      fl_pick:flPick||'',
+      ov_pick:ovPick||'',
+    }
+    setReviewItemInput(item,input)
   }
 
-  async function persistReviewedQual(item,pilots,positions) {
-    const update={pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,manual_reviewed_at:null}
-    setReviewDraft({...reviewInputRef.current,...update})
-    markReviewSaveStarted()
-    try {
-      if(IS_PREVIEW_DEPLOYMENT) {
-        const key=`qual:${item.row.id}`
-        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
-      } else {
-        const {error}=await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
-        if(error) throw error
-      }
-      setQualAssignments(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
-    } catch(error) { setMsg(`⚠ Не вдалося зберегти кваліфікацію у картці перевірки: ${error.message||error}`) }
-    finally { markReviewSaveFinished() }
+  function persistReviewedQual(item,pilots,positions) {
+    setReviewItemInput(item,{
+      ...reviewInputRef.current,
+      pilot_1:pilots[0]||'',pred_pos_1:positions[0]||null,
+      pilot_2:pilots[1]||'',pred_pos_2:positions[1]||null,
+      pilot_3:pilots[2]||'',pred_pos_3:positions[2]||null,
+    })
   }
 
-  async function persistReviewedPole(item,pilot) {
-    const update={pole_pick:pilot||'',manual_reviewed_at:null}
-    setReviewDraft({...reviewInputRef.current,pole_pick:pilot||''})
-    markReviewSaveStarted()
-    try {
-      if(IS_PREVIEW_DEPLOYMENT) {
-        const key=`qual:${item.row.id}`
-        persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[key]:{...item.row,...update}}})
-      } else {
-        const {error}=await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
-        if(error) throw error
-      }
-      setQualAssignments(previous=>previous.map(row=>row.id===item.row.id?{...row,...update}:row))
-    } catch(error) { setMsg(`⚠ Не вдалося зберегти вибір поула: ${error.message||error}`) }
-    finally { markReviewSaveFinished() }
+  function persistReviewedPole(item,pilot) {
+    setReviewItemInput(item,{...reviewInputRef.current,pole_pick:pilot||''})
   }
 
   function reviewAutoResult(item,input) {
@@ -176,16 +145,17 @@ export default function AdminPage() {
   }
 
   function isReviewItemApproved(item,playerId=reviewPlayerId) {
-    if(item.row) return Boolean(item.row.manual_reviewed_at)
-    const key=`${playerId}:${item.session.id}`
-    return Boolean(manualReviewState.absences?.[key]) || absenceReviews.some(entry=>entry.details?.player_id===playerId && entry.details?.session_id===item.session.id)
+    return Boolean(manualAudit[reviewStepKey(item,playerId)]?.checked)
   }
 
   function manualReviewMismatch(item,playerId) {
-    if(item.row?.manual_reviewed_at && isManualReviewMismatch(item.row.score,reviewAutoResult(item,inputForReviewItem(item,pilotChanges.filter(change=>change.stage_id===item.session.stage_id&&change.is_active))).score)) return true
-    if(item.missed && item.session.type==='race' && isReviewItemApproved(item,playerId)) {
+    const checked=manualAudit[reviewStepKey(item,playerId)]
+    if(!checked?.checked) return false
+    const official=Number(item.row?.score)||0
+    if(Number(checked.score)!==official) return true
+    if(item.missed&&item.session.type==='race') {
       const bonus=newcomerBonusPreview(item.session,playerId)
-      if(bonus.ready) return isManualReviewMismatch(bonus.recorded||0,bonus.points||0)
+      return Number(checked.bonusPoints||0)!==Number(bonus.recorded||0)
     }
     return false
   }
@@ -202,6 +172,11 @@ export default function AdminPage() {
     return {ready:result.ready,minimum:result.minimum,points:result.bonuses.find(row=>row.player_id===playerId)?.points ?? null,recorded,eligible}
   }
 
+  function reviewRunTotal(queue,playerId=reviewPlayerId) {
+    const official=players.find(player=>player.id===playerId)?.base_pts
+    return summarizeManualReview(queue,playerId,manualAudit,official).manualTotal
+  }
+
   function openPlayerReview(playerId, preferredSessionId=null) {
     const queue=reviewQueueFor(playerId)
     const mismatchIndex=queue.findIndex(item=>item.session.id===preferredSessionId)
@@ -209,110 +184,53 @@ export default function AdminPage() {
     const initialIndex=mismatchIndex>=0?mismatchIndex:firstUnreviewed>=0?firstUnreviewed:queue.length
     setReviewPlayerId(playerId)
     setReviewIndex(initialIndex)
-    setReviewDraft(initialIndex<queue.length?inputForReviewItem(queue[initialIndex],pilotChanges.filter(change=>change.stage_id===queue[initialIndex].session.stage_id && change.is_active)):null)
+    if(initialIndex<queue.length) {
+      const item=queue[initialIndex]
+      const input=reviewDrafts[reviewStepKey(item,playerId)] || manualAudit[reviewStepKey(item,playerId)]?.input || inputForReviewItem(item,pilotChanges.filter(change=>change.stage_id===item.session.stage_id&&change.is_active))
+      setReviewDraft(input)
+    } else setReviewDraft(null)
   }
 
-  async function approveReviewStep() {
+  function confirmReviewAbsence(item) {
+    const key=reviewStepKey(item)
+    setManualAudit(previous=>({...previous,[key]:{...previous[key],absenceConfirmed:!previous[key]?.absenceConfirmed,checked:false}}))
+  }
+
+  function toggleReviewBonus(item) {
+    const key=reviewStepKey(item)
+    setManualAudit(previous=>({...previous,[key]:{...previous[key],bonusIncluded:!previous[key]?.bonusIncluded,checked:false}}))
+  }
+
+  function moveReviewBack() {
+    if(reviewIndex<=0) return
+    const nextIndex=reviewIndex-1
+    const item=activeReviewQueue[nextIndex]
+    setReviewIndex(nextIndex)
+    setReviewDraft(reviewDrafts[reviewStepKey(item)] || manualAudit[reviewStepKey(item)]?.input || inputForReviewItem(item,pilotChanges.filter(change=>change.stage_id===item.session.stage_id&&change.is_active)))
+  }
+
+  function approveReviewStep() {
     const queue=reviewQueueFor(reviewPlayerId)
     const item=queue[reviewIndex]
     const currentInput=reviewInputRef.current || reviewInput
-    if(!item || !currentInput || reviewSaveCount.current>0) return
-    setReviewSaving(true)
-    try {
-      const changes=pilotChanges.filter(change=>change.stage_id===item.session.stage_id && change.is_active)
-      const scored=scoreManualReviewItem(item,currentInput,changes)
-      const timestamp=new Date().toISOString()
-      let stepMessage
-      if(item.missed) {
-        const absenceKey=`${reviewPlayerId}:${item.session.id}`
-        const bonus=item.session.type==='race'?newcomerBonusPreview(item.session,reviewPlayerId):null
-        if(IS_PREVIEW_DEPLOYMENT) {
-          persistManualReviewState({...manualReviewState,absences:{...(manualReviewState.absences||{}),[absenceKey]:true}})
-        } else {
-          const error=await log('manual_review_absence_approved',{player_id:reviewPlayerId,player_name:players.find(player=>player.id===reviewPlayerId)?.name,stage_id:item.session.stage_id,stage_name:item.session.stages?.name,session_id:item.session.id,session_type:item.session.type,newcomer_bonus_points:bonus?.recorded ?? bonus?.points ?? 0})
-          if(error) throw error
-          setAbsenceReviews(prev=>[{details:{player_id:reviewPlayerId,session_id:item.session.id}},...prev])
-        }
-        stepMessage=`${item.session.stages?.name || ''}: пропущен ${item.session.type.toUpperCase()} підтверджено.${item.session.type==='race'&&bonus?.ready?` Бонус новачка: ${bonus.recorded!=null?`зараховано +${bonus.recorded}`:bonus.points!=null?`очікує нарахування +${bonus.points}`:'не передбачений'}.`:''}`
-      } else {
-        const update=item.kind==='qual'
-          ? {...currentInput,score:scored.score,scored_input:scored.scoredInput,manual_reviewed_at:timestamp}
-          : {...currentInput,score:scored.score,score_breakdown:scored.breakdown,scored_input:scored.scoredInput,manual_reviewed_at:timestamp}
-        if(!IS_PREVIEW_DEPLOYMENT) {
-          const response=item.kind==='qual'
-            ? await supabase.from('qual_assignments').update(update).eq('id',item.row.id)
-            : await supabase.from('forecasts').update(update).eq('id',item.row.id)
-          if(response.error) throw response.error
-        } else {
-          const rowKey=`${item.kind==='qual'?'qual':'forecast'}:${item.row.id}`
-          persistManualReviewState({...manualReviewState,rows:{...(manualReviewState.rows||{}),[rowKey]:update}})
-        }
-        setForecasts(prev=>prev.map(row=>item.kind==='forecast'&&row.id===item.row.id?{...row,...update}:row))
-        setQualAssignments(prev=>prev.map(row=>item.kind==='qual'&&row.id===item.row.id?{...row,...update}:row))
-        if(!IS_PREVIEW_DEPLOYMENT) await log('manual_review_step_approved',{player_id:reviewPlayerId,player_name:players.find(player=>player.id===reviewPlayerId)?.name,stage_id:item.session.stage_id,stage_name:item.session.stages?.name,session_id:item.session.id,session_type:item.session.type,score:scored.score})
-        stepMessage=`${item.session.stages?.name || item.session.type}: затверджено ${scored.score} балів.`
-      }
-      const nextIndex=reviewIndex+1
-      setMsg(`✓ ${stepMessage}${IS_PREVIEW_DEPLOYMENT?' Зміни збережені лише локально в preview.':''}`)
-      if(nextIndex<queue.length) {
-        setReviewIndex(nextIndex)
-        setReviewDraft(inputForReviewItem(queue[nextIndex],pilotChanges.filter(change=>change.stage_id===queue[nextIndex].session.stage_id && change.is_active)))
-      } else {
-        setReviewDraft(null)
-      }
-    } catch(error) { setMsg(`⚠ Не вдалося зберегти перевірку: ${error.message || error}`) }
-    finally { setReviewSaving(reviewSaveCount.current>0) }
-  }
-
-  async function applyReviewNewcomerBonus(item) {
-    if(!item || item.session.type!=='race') return
-    const stageSessions=sessions.filter(session=>session.stage_id===item.session.stage_id)
-    if(!stageSessions.length || stageSessions.some(session=>!session.committed)) { setMsg('⚠ Бонус новачка можна нарахувати після затвердження всіх сесій етапу.');return }
-    try {
-      const race=stageSessions.find(session=>session.type==='race')
-      const raceRows=forecasts.filter(row=>row.session_id===race.id)
-      const order=Number(race.stages?.sort_order || item.session.stages?.sort_order)
-      const eligible=newcomerPlayersForStage(players,order,sessions,forecasts)
-      if(!eligible.some(player=>player.id===reviewPlayerId)) throw new Error('Це не пропущений етап до першого прогнозу гравця; бонус за пропуск посеред сезону не нараховується.')
-      const result=calculateNewcomerBonuses(players,stageSessions,raceRows,[],eligible.map(player=>player.id))
-      if(!result.ready) throw new Error('Не вдалося визначити мінімум за гонку. Перевір, що всі прогнози на гонку вже мають нараховані бали.')
-      if(IS_PREVIEW_DEPLOYMENT) {
-        const bonuses={...(manualReviewState.bonuses||{}),[race.stage_id]:{bonuses:result.bonuses,minimum:result.minimum}}
-        persistManualReviewState({...manualReviewState,bonuses})
-        setNewcomerBonuses(prev=>[...prev.filter(row=>row.stage_id!==race.stage_id),...result.bonuses.map(bonus=>({...bonus,stage_id:race.stage_id,source_minimum:result.minimum}))])
-      } else {
-        const {error}=await supabase.rpc('apply_stage_newcomer_bonuses',{p_stage_id:race.stage_id,p_bonuses:result.bonuses,p_source_minimum:result.minimum})
-        if(error) throw error
-        loadAll()
-      }
-      setMsg(`✓ Бонус новачка оновлено автоматично: мінімум гонки ${result.minimum} балів.${IS_PREVIEW_DEPLOYMENT?' Збережено лише в локальному preview-сховищі.':''}`)
-    } catch(error) { setMsg(`⚠ Не вдалося нарахувати бонус: ${error.message || error}`) }
-  }
-
-  async function finalizePlayerReview(playerId) {
-    const queue=reviewQueueFor(playerId)
-    if(queue.some(item=>!isReviewItemApproved(item,playerId))) { setMsg('⚠ Спершу послідовно підтвердь кожну сесію, зокрема пропущені етапи.');return }
-    const forecastPoints=queue.filter(item=>item.kind==='forecast').reduce((sum,item)=>sum+(Number(item.row?.score)||0),0)
-    const qualificationPoints=queue.filter(item=>item.kind==='qual').reduce((sum,item)=>sum+(Number(item.row?.score)||0),0)
-    const bonusPoints=await supabase.from('stage_newcomer_bonuses').select('points').eq('player_id',playerId)
-    if(bonusPoints.error) { setMsg(`⚠ Не вдалося завантажити бонуси: ${bonusPoints.error.message}`);return }
-    const replacedStages=IS_PREVIEW_DEPLOYMENT?new Set(Object.keys(manualReviewState.bonuses||{})):new Set()
-    const bonusRows=IS_PREVIEW_DEPLOYMENT
-      ? [...(bonusPoints.data||[]).filter(row=>!replacedStages.has(row.stage_id)),...Object.entries(manualReviewState.bonuses||{}).flatMap(([stageId,value])=>(value.bonuses||[]).filter(row=>row.player_id===playerId).map(row=>({...row,stage_id:stageId})))]
-      : (bonusPoints.data||[])
-    const bonusTotal=bonusRows.reduce((sum,row)=>sum+(Number(row.points)||0),0)
-    const total=forecastPoints+qualificationPoints+bonusTotal
-    if(!IS_PREVIEW_DEPLOYMENT) {
-      const {error}=await supabase.from('players').update({base_pts:total}).eq('id',playerId)
-      if(error) { setMsg(`⚠ Не вдалося затвердити підсумок: ${error.message}`);return }
-      await log('manual_review_total_approved',{player_id:playerId,total,forecast_points:forecastPoints,qualification_points:qualificationPoints,newcomer_bonus_points:bonusTotal})
-    } else {
-      persistManualReviewState({...manualReviewState,totals:{...(manualReviewState.totals||{}),[playerId]:total}})
-    }
-    setPlayers(prev=>prev.map(player=>player.id===playerId?{...player,base_pts:total}:player))
-    setReviewPlayerId('')
-    setReviewDraft(null)
-    setMsg(`✓ Підсумок ${total} балів затверджено з нуля.${IS_PREVIEW_DEPLOYMENT?' Збережено лише в локальному preview-сховищі; робочу базу не змінено.':''}`)
+    if(!item || (!item.missed&&!currentInput)) return
+    const key=reviewStepKey(item)
+    const stepState=manualAudit[key]||{}
+    if(item.missed&&!stepState.absenceConfirmed) { setMsg('Підтверди відсутність, щоб зарахувати цей крок як 0 балів.');return }
+    const scored=item.missed?{score:0,breakdown:[]} : reviewAutoResult(item,currentInput)
+    const bonus= item.missed&&item.session.type==='race' ? newcomerBonusPreview(item.session,reviewPlayerId) : null
+    const bonusPoints=bonus&&stepState.bonusIncluded?Number(bonus.points??bonus.recorded)||0:0
+    setManualAudit(previous=>({...previous,[key]:{
+      ...previous[key],checked:true,score:scored.score,breakdown:scored.breakdown,input:currentInput,
+      bonusPoints,bonusIncluded:Boolean(stepState.bonusIncluded),missed:item.missed,
+    }}))
+    setMsg(`${item.session.stages?.name||''}: ${scored.score} балів у калькуляторі${bonusPoints?` + бонус новачка ${bonusPoints}`:''}. База не змінювалась.`)
+    const nextIndex=reviewIndex+1
+    setReviewIndex(nextIndex)
+    if(nextIndex<queue.length) {
+      const nextItem=queue[nextIndex]
+      setReviewDraft(reviewDrafts[reviewStepKey(nextItem)] || manualAudit[reviewStepKey(nextItem)]?.input || inputForReviewItem(nextItem,pilotChanges.filter(change=>change.stage_id===nextItem.session.stage_id&&change.is_active)))
+    } else setReviewDraft(null)
   }
 
   async function log(action, details = {}) {
@@ -675,15 +593,47 @@ export default function AdminPage() {
     await log('pilot_substitution', { stage_name:stages.find(x=>x.id===subStageId)?.name, team:teamName, outgoing_driver:outgoingDriver, incoming_driver:incomingDriver, reason:null })
     setPilotChanges(prev => [data, ...prev.map(row=>previous.some(old=>old.id===row.id)?{...row,is_active:false}:row)])
     setSubOutgoing(''); setSubIncoming('')
-    setMsg('✓ Заміна збережена для обраного ГП')
+    setMsg(`✓ ${outgoingDriver} замінений на ${incomingDriver} для обраного ГП`)
   }
 
   async function deactivatePilotSubstitution(change) {
     const { error } = await supabase.from('stage_pilot_substitutions').update({ is_active:false }).eq('id',change.id)
     if (error) { setMsg(`⚠ ${error.message}`); return }
     setPilotChanges(prev => prev.map(row => row.id === change.id ? { ...row, is_active:false } : row))
+    if(subTeam===change.team_name) setSubOutgoing('')
     await log('pilot_substitution', { stage_name:change.stages?.name, team:change.team_name, outgoing_driver:change.outgoing_driver, incoming_driver:null, reason:'Заміна деактивована' })
-    setMsg('✓ Заміна вимкнена')
+    setMsg('✓ Резерв вимкнено; стартовий пілот повернувся')
+  }
+
+  async function toggleReserveDriver(teamRow,driver,teamChanges) {
+    if(!subStageId) { setMsg('Спершу обери ГП.');return }
+    if(teamChanges.length>1) { setMsg(`У ${teamRow.team} є кілька активних замін на це ГП. Спершу усунь дубль у журналі.`);return }
+    const current=teamChanges[0]
+    if(current) {
+      if(driver===current.incoming_driver || driver===current.outgoing_driver) {
+        await deactivatePilotSubstitution(current)
+        return
+      }
+      if(teamRow.drivers.includes(driver)) {
+        setMsg(`У ${teamRow.team} вже активний резерв ${current.incoming_driver}. Вимкни його перед іншою заміною.`)
+        return
+      }
+    }
+    if(teamRow.drivers.includes(driver)) {
+      const cancel=subTeam===teamRow.team&&subOutgoing===driver
+      setSubTeam(teamRow.team)
+      setSubOutgoing(cancel?'':driver)
+      setMsg(cancel?'Вибір заміни скасовано.':`Обрано ${driver}. Натисни ім’я резервіста в цьому рядку.`)
+      return
+    }
+    if(!(TEAM_RESERVE_PILOTS_2026[teamRow.team]||[]).includes(driver)) return
+    if(subTeam!==teamRow.team||!subOutgoing) {
+      setMsg(`Спершу натисни стартового пілота ${teamRow.team}, якого потрібно замінити.`)
+      return
+    }
+    const alreadyUsed=pilotChanges.find(change=>change.stage_id===subStageId&&change.is_active&&change.incoming_driver===driver)
+    if(alreadyUsed) { setMsg(`${driver} вже активний резерв на цьому ГП.`);return }
+    await addPilotSubstitution(teamRow.team,subOutgoing,driver)
   }
 
   const allTeamOptions = [...Object.keys(TEAM_META), ...customTeams]
@@ -711,12 +661,18 @@ export default function AdminPage() {
   const activeReviewQueue=reviewPlayerId?reviewQueueFor(reviewPlayerId):[]
   const activeReviewItem=activeReviewQueue[reviewIndex] || null
   const activeReviewPlayer=players.find(player=>player.id===reviewPlayerId)
-  const activeReviewScore=activeReviewItem&&reviewInput?reviewAutoResult(activeReviewItem,reviewInput):null
+  const activeReviewScore=activeReviewItem&&reviewInput?reviewAutoResult(activeReviewItem,reviewInput):activeReviewItem?.missed?{score:0,breakdown:[]}:null
   const activeReviewBonus=activeReviewItem?.session.type==='race'?newcomerBonusPreview(activeReviewItem.session,reviewPlayerId):null
+  const activeReviewKey=activeReviewItem?reviewStepKey(activeReviewItem):''
+  const activeReviewState=activeReviewKey?manualAudit[activeReviewKey]||{}:{}
+  const activeReviewSummary=summarizeManualReview(activeReviewQueue,reviewPlayerId,manualAudit,activeReviewPlayer?.base_pts)
+  const activeReviewRunTotal=activeReviewSummary.manualTotal
+  const activeReviewComplete=activeReviewSummary.complete
   const activeReviewChanges=activeReviewItem?pilotChanges.filter(change=>change.stage_id===activeReviewItem.session.stage_id&&change.is_active):[]
   const activeReviewStageOrder=Number(activeReviewItem?.session.stages?.sort_order)
   const activeReviewPilots=[...new Set([...buildStagePilotPool(activeReviewChanges),...resultsList(normalizeStageResults(activeReviewItem?.session.results||{},activeReviewChanges)),...activeReviewChanges.map(change=>change.incoming_driver),...Object.values(reviewInput?.predictions||{}),reviewInput?.fl_pick,reviewInput?.ov_pick].filter(Boolean))]
   const activeReviewQualHistory=activeReviewItem?priorQualAssignments(qualAssignments,activeReviewItem.session.id,activeReviewStageOrder):[]
+  const activeReviewQualPlayerTeams=Object.fromEntries(players.map(player=>[player.id,player.team]))
   const activeReviewAllQualAssignments=Object.fromEntries([...activeReviewQualHistory.map((row,index)=>[`history_${index}`,row]),...qualAssignments.filter(row=>row.session_id===activeReviewItem?.session.id).map(row=>[row.id,row])])
   const activeReviewQualUsed=new Set(USED_PILOTS[activeReviewPlayer?.name]||[])
   activeReviewQualHistory.filter(row=>row.player_id===activeReviewPlayer?.id).forEach(row=>[row.pilot_1,row.pilot_2,row.pilot_3].filter(Boolean).forEach(pilot=>activeReviewQualUsed.add(pilot)))
@@ -728,7 +684,8 @@ export default function AdminPage() {
     { key:'users',     label:'ГРАВЦІ' },
     { key:'review',    label:'ПЕРЕВІРКА ПРОГНОЗІВ' },
     { key:'teams',     label:'КОМАНДИ' },
-    { key:'substitutions', label:'ПІЛОТИ' },
+    { key:'qualifying', label:'КВАЛІФІКАЦІЇ' },
+    { key:'reserves', label:'РЕЗЕРВІСТИ' },
     { key:'log',       label:'ЖУРНАЛ' },
   ]
 
@@ -754,8 +711,8 @@ export default function AdminPage() {
       {/* STAGES */}
       {tab === 'stages' && (
         <>
-          <div className="section-label">Етапи · повний перерахунок</div>
-          <p className="team-created-note">{IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін перевіряє всі ГП із повністю зарахованими сесіями сезону й показує перераховані підсумки, не змінюючи робочу базу. ГП із незарахованими сесіями не включаються.' : 'Одна дія перераховує всі ГП із повністю зарахованими сесіями та замінює підсумки гравців сумою нарахувань із прогнозів, кваліфікацій і бонусу новачка. Архівний базовий залишок не переноситься.'}</p>
+          <div className="section-label">Перерахунок етапів</div>
+          <p className="team-created-note">{IS_PREVIEW_DEPLOYMENT ? 'Preview показує сухий прогін; production-база не змінюється.' : 'Перерахунок замінює підсумки балами за повністю зараховані сесії.'}</p>
           <button className="btn btn-red" style={{marginBottom:14}} disabled={!canRecalculateAll(stages,sessions) || recalculatingAll} title={IS_PREVIEW_DEPLOYMENT ? 'Сухий прогін доступних зарахованих ГП сезону без запису в робочу базу' : 'Перерахувати всі доступні завершені ГП і замінити підсумки'} onClick={recalculateAllScores}>{IS_PREVIEW_DEPLOYMENT ? '🧪 СУХИЙ ПРОГІН ПЕРЕРАХУНКУ СЕЗОНУ' : '↻ ПЕРЕРАХУВАТИ ВСІ ГП ТА ЗАМІНИТИ ПІДСУМКИ'}</button>
           {IS_PREVIEW_DEPLOYMENT && previewRecalculationReports?.totals && (
             <div style={{margin:'8px 0 20px',padding:14,border:'1px solid var(--green)',borderRadius:6,background:'rgba(107,255,138,.04)'}}>
@@ -808,7 +765,7 @@ export default function AdminPage() {
       {tab === 'review' && (
         <section>
           <div className="section-label">Ручна звірка · гравці за командами</div>
-          <p className="team-created-note">Відкрий гравця, щоб пройти затверджені сесії послідовно від початку сезону. Жовтий індикатор веде до першої конкретної розбіжності. Підсумок буде складено з нуля після завершення всіх перевірок.{IS_PREVIEW_DEPLOYMENT?' У preview зміни зберігаються лише в локальному сховищі браузера; базу даних не змінюємо.':''}</p>
+          <p className="team-created-note">Перевір сесії по порядку. Калькулятор не записує зміни в базу.</p>
           <div style={{display:'grid',gap:18}}>
             {[...new Set(players.map(player=>player.team || 'Без команди'))].sort((a,b)=>a.localeCompare(b)).map(team=> (
               <div key={team}>
@@ -851,7 +808,7 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addPlayer}>+ ДОДАТИ</button>
           </div>
 
-          <div className="section-label">Гравці та доступ · підсумкові бали формуються перерахунком результатів</div>
+          <div className="section-label">Гравці</div>
           <div style={{overflowX:'auto'}}>
           <table className="standings" style={{marginBottom:0,minWidth:750}}>
             <thead>
@@ -909,63 +866,62 @@ export default function AdminPage() {
       )}
 
       {/* INDIVIDUAL QUALIFYING PLAN + VERIFIED TEAM RESERVES */}
-      {tab === 'substitutions' && (
-        <>
-          <section className="admin-plan-card">
-            <header className="admin-plan-heading">
-              <div>
-                <div className="admin-plan-kicker">VEGAS · QATAR · UAE</div>
-                <h2>Індивідуальний план кваліфікацій</h2>
-                <p>Кількість слотів розрахована окремо для кожного гравця з невикористаних пілотів. Коли адмін розігрує кваліфікацію, саме цей план визначає скільки пілотів отримає кожен.</p>
-              </div>
-              <span className="admin-plan-badge">ПЛАН АКТИВНИЙ</span>
-            </header>
-            <div className="admin-plan-table-wrap">
-              <table className="admin-plan-table">
-                <thead><tr><th>Гравець</th><th>Доступно</th>{qualifyingPlanStages.map(stage=><th key={stage.order}>{stage.label}</th>)}<th>Залишиться</th></tr></thead>
-                <tbody>{qualifyingPlanRows.sort((a,b)=>a.player.name.localeCompare(b.player.name,'uk')).map(({player,available,plan,remaining})=>(
-                  <tr key={player.id}>
-                    <td><strong>{player.name}</strong><small>{player.team}</small></td>
-                    <td>{available}</td>
-                    {qualifyingPlanStages.map(stage=><td key={stage.order}><b>{plan[stage.order] || 0}</b></td>)}
-                    <td className={remaining ? 'plan-remaining' : 'plan-complete'}>{remaining}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-            <p className="admin-plan-footnote">Пілотів призначаємо лише з офіційного списку чинних пілотів; один пілот не повторюється для гравця. Якщо після UAE лишається число більше нуля, у поточних трьох кваліфікаціях не вистачає слотів, щоб видати всіх пілотів.</p>
-          </section>
+      {tab === 'qualifying' && (
+        <section className="admin-plan-card">
+          <header className="admin-plan-heading">
+            <div><div className="admin-plan-kicker">КВАЛІФІКАЦІЙНІ СЛОТИ</div><h2>План на етап</h2></div>
+          </header>
+          <div className="admin-plan-table-wrap">
+            <table className="admin-plan-table">
+              <thead><tr><th>Гравець</th><th>Вільні пілоти</th>{qualifyingPlanStages.map(stage=><th key={stage.order}>{stage.label}</th>)}<th>Не використано</th></tr></thead>
+              <tbody>{qualifyingPlanRows.sort((a,b)=>a.player.name.localeCompare(b.player.name,'uk')).map(({player,available,plan,remaining})=>(
+                <tr key={player.id}><td><strong>{player.name}</strong></td><td>{available}</td>{qualifyingPlanStages.map(stage=><td key={stage.order}><b>{plan[stage.order]||0}</b></td>)}<td className={remaining?'plan-remaining':'plan-complete'}>{remaining}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
-          <section className="reserve-admin-section">
-            <header className="reserve-admin-heading">
-              <div><div className="admin-plan-kicker">F1 2026</div><h2>Резервні пілоти команд</h2></div>
-              <label className="reserve-stage-select"><span>Гран-прі для заміни</span>
-                <select className="reserve-select" value={subStageId} onChange={e=>setSubStageId(e.target.value)}><option value="">Оберіть етап</option>{stages.filter(st=>Number(st.sort_order)>=10).map(st=><option key={st.id} value={st.id}>{st.flag} {st.name}</option>)}</select>
-              </label>
-            </header>
-            <p className="reserve-admin-note">Резерви внесені окремо для кожної команди й не потрапляють у звичайний пул жеребкування. Базовий список звірений з <a href="https://www.formula1.com/en/latest/article/who-are-the-reserve-drivers-for-each-f1-team-in-2026.Ce8YvwuVJGLkVNgERX21U" target="_blank" rel="noreferrer">оглядом Formula 1 від 25.02.2026</a>; Camara для Haas і Slater для Audi додані за вашим уточненням.</p>
-            <div className="reserve-team-grid">{PILOT_TEAM_ROSTER.map(row => {
-              const teamChanges = pilotChanges.filter(item => item.stage_id===subStageId && item.team_name===row.team && item.is_active)
-              const replaced = new Set(teamChanges.map(change=>change.outgoing_driver))
-              const officialReserves = TEAM_RESERVE_PILOTS_2026[row.team] || []
-              const selected = subTeam === row.team
-              return <article key={row.team} className="reserve-team-card">
-                <div className="reserve-team-title"><strong>{row.team}</strong><span>{officialReserves.length ? `${officialReserves.length} у списку` : 'список порожній'}</span></div>
-                <div className="reserve-active-list">{row.drivers.map(driver=><span key={driver} className={`reserve-driver-chip ${replaced.has(driver)?'is-replaced':''}`}>{driver}{replaced.has(driver)?' · замінений':' · стартовий'}</span>)}</div>
-                {teamChanges.map(change=><div key={change.id} className="reserve-saved-change"><span>{change.outgoing_driver} <b>→</b> {change.incoming_driver || '—'}</span><button type="button" onClick={()=>deactivatePilotSubstitution(change)} aria-label={`Скасувати ${change.outgoing_driver}`}>Скасувати</button></div>)}
-                {officialReserves.length > 0 ? <div className="reserve-form-row">
-                  <select className="reserve-select" value={selected?subOutgoing:''} onChange={e=>{setSubTeam(row.team);setSubOutgoing(e.target.value);setSubIncoming(current=>officialReserves.includes(current)?current:'')}}>
-                    <option value="">Кого замінити</option>{row.drivers.filter(driver=>!replaced.has(driver)).map(driver=><option key={driver} value={driver}>{driver}</option>)}
-                  </select>
-                  <select className="reserve-select" value={selected?subIncoming:''} onChange={e=>{setSubTeam(row.team);setSubIncoming(e.target.value)}}>
-                    <option value="">Резервний пілот</option>{officialReserves.map(driver=><option key={driver} value={driver}>{driver}</option>)}
-                  </select>
-                  <button className="reserve-save-btn" disabled={!subStageId || !selected || !subOutgoing || !subIncoming} onClick={()=>addPilotSubstitution(row.team,subOutgoing,subIncoming)}>Зберегти заміну</button>
-                </div> : <div className="reserve-unconfirmed">У довіднику поки немає резервного пілота для цієї команди.</div>}
-              </article>
-            })}</div>
-          </section>
-        </>
+      {tab === 'reserves' && (
+        <section className="reserve-admin-section">
+          <header className="reserve-admin-heading">
+            <div><div className="admin-plan-kicker">ЗАМІНИ НА ОКРЕМИЙ ГП</div><h2>Резервісти</h2></div>
+            <label className="reserve-stage-select"><span>Етап</span>
+              <select className="reserve-select" value={subStageId} onChange={event=>{setSubStageId(event.target.value);setSubTeam('');setSubOutgoing('')}}><option value="">Оберіть ГП</option>{stages.filter(stage=>Number(stage.sort_order)>=10).map(stage=><option key={stage.id} value={stage.id}>{stage.flag} {stage.name}</option>)}</select>
+            </label>
+          </header>
+          {subOutgoing&&<div className="reserve-pending-note">Обрано заміну: <b>{subOutgoing}</b> · натисни резервіста в тому самому рядку.</div>}
+          <div className="reserve-table-wrap">
+            <table className="reserve-table">
+              <thead><tr><th>Команда</th><th>Пілот</th><th>Пілот</th><th>Резервіст</th></tr></thead>
+              <tbody>{PILOT_TEAM_ROSTER.map(row=>{
+                const displayDrivers=row.team==='Mercedes'?[...row.drivers].reverse():row.drivers
+                const teamChanges=pilotChanges.filter(change=>change.stage_id===subStageId&&change.team_name===row.team&&change.is_active)
+                const current=teamChanges[0]
+                const replaced=new Set(teamChanges.map(change=>change.outgoing_driver))
+                const activeReserveNames=new Set(pilotChanges.filter(change=>change.stage_id===subStageId&&change.is_active).map(change=>change.incoming_driver))
+                return <tr key={row.team}>
+                  <th scope="row" className="reserve-team-name">{row.team}</th>
+                  {displayDrivers.map(driver=>{
+                    const active=!replaced.has(driver)
+                    const pending=subTeam===row.team&&subOutgoing===driver
+                    return <td key={driver}><button type="button" className={`reserve-driver-button ${active?'is-active':'is-inactive'}${pending?' is-pending':''}`} onClick={()=>toggleReserveDriver(row,driver,teamChanges)} disabled={!subStageId} aria-pressed={active}>
+                      <span>{driver}</span><small>{pending?'ОБРАНО НА ЗАМІНУ':active?'АКТИВНИЙ':'ЗАМІНЕНИЙ'}</small>
+                    </button></td>
+                  })}
+                  <td><div className="reserve-pilot-options">{(TEAM_RESERVE_PILOTS_2026[row.team]||[]).map(driver=>{
+                    const active=current?.incoming_driver===driver
+                    const unavailable=activeReserveNames.has(driver)&&!active
+                    return <button type="button" key={driver} className={`reserve-driver-button reserve-option ${active?'is-active':'is-inactive'}`} onClick={()=>active?toggleReserveDriver(row,driver,teamChanges):toggleReserveDriver(row,driver,teamChanges)} disabled={!subStageId||unavailable} aria-pressed={active}>
+                      <span>{driver}</span><small>{active?'АКТИВНИЙ':unavailable?'ЗАЙНЯТИЙ':'РЕЗЕРВ'}</small>
+                    </button>
+                  })}</div></td>
+                </tr>
+              })}</tbody>
+            </table>
+          </div>
+          <div className="reserve-legend"><span><i className="is-active"/>Активний склад</span><span><i className="is-inactive"/>Неактивний</span><span>Натисни стартового пілота, потім резервіста.</span></div>
+        </section>
       )}
 
       {/* TEAMS */}
@@ -978,7 +934,6 @@ export default function AdminPage() {
             <button className="btn btn-red" onClick={addCustomTeam}>+ ДОДАТИ КОМАНДУ</button>
           </div>
           <div className="section-label">Існуючі команди</div>
-          <p className="team-created-note">Сортування — за сумою балів гравців. «Створено» показує дату найранішої реєстрації гравця цієї команди, оскільки окремої таблиці команд і дати створення команди в базі немає.</p>
           <table className="team-table">
             <thead><tr><th>Команда</th><th>Гравці</th><th>Сумарні бали</th><th>Створено*</th></tr></thead>
             <tbody>
@@ -1028,70 +983,71 @@ export default function AdminPage() {
       )}
 
       {reviewPlayerId && (
-        <div role="dialog" aria-modal="true" aria-label={`Ручна перевірка прогнозів ${activeReviewPlayer?.name || ''}`} style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.78)',display:'flex',alignItems:'center',justifyContent:'center',padding:14}}>
-          <div style={{width:'min(760px,100%)',maxHeight:'92vh',overflowY:'auto',background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:18,boxShadow:'0 18px 70px rgba(0,0,0,.6)'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
-              <div><div className="section-label">РУЧНА ПЕРЕВІРКА</div><h2 style={{margin:'4px 0 12px',fontSize:20}}>{activeReviewPlayer?.name}</h2></div>
+        <div role="dialog" aria-modal="true" aria-label={`Калькулятор перевірки ${activeReviewPlayer?.name || ''}`} className="manual-review-backdrop">
+          <div className="manual-review-modal">
+            <div className="manual-review-heading">
+              <div><div className="section-label">КАЛЬКУЛЯТОР ПЕРЕВІРКИ</div><h2>{activeReviewPlayer?.name}</h2></div>
               <button aria-label="Закрити" className="btn btn-ghost" onClick={()=>{setReviewPlayerId('');setReviewDraft(null)}}>✕</button>
             </div>
-            {activeReviewItem && reviewInput ? <>
-              <div style={{padding:'10px 12px',marginBottom:12,border:'1px solid var(--border)',borderRadius:5,background:'rgba(255,255,255,.025)'}}>
-                <b>{activeReviewItem.session.stages?.flag} {activeReviewItem.session.stages?.name}</b><span style={{color:'var(--muted)'}}> · {String(activeReviewItem.session.type).toUpperCase()} · крок {reviewIndex+1} з {activeReviewQueue.length}</span>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Фактичний результат: {resultsList(normalizeStageResults(activeReviewItem.session.results || {},activeReviewChanges)).join(' · ') || 'результат не внесено'}</div>
-              </div>
-              {activeReviewItem.missed ? (
-                <div className="manual-review-missed">
-                  Для цієї сесії прогнозу немає. Підтверди відсутність, щоб продовжити звірку.
-                  {activeReviewItem.session.type==='race' && <div className="manual-review-bonus">
-                    {activeReviewBonus?.ready
-                      ? <>Мінімум очок за гонку цього ГП: <b>{activeReviewBonus.minimum}</b>. {' '}
-                        <button className="btn btn-ghost" disabled={reviewSaving||!activeReviewBonus.eligible||activeReviewBonus.recorded!=null||activeReviewBonus.points==null} onClick={()=>applyReviewNewcomerBonus(activeReviewItem)}>
-                          🎁 БОНУС НОВАЧКА{activeReviewBonus.recorded!=null?` · ВЖЕ +${activeReviewBonus.recorded}`:activeReviewBonus.points!=null?` +${activeReviewBonus.points}`:''}
-                        </button>{' '}
-                        {activeReviewBonus.recorded!=null?'Бонус за цей етап уже записаний.':activeReviewBonus.eligible?'Це ГП до першого прогнозу гравця.':'Це пропуск після початку участі, тому за правилом ліги бонусу немає.'}</>
-                      : <><button className="btn btn-ghost" disabled>🎁 БОНУС НОВАЧКА</button> Бонус стане доступний після зарахування всіх сесій ГП і наявності балів за прогнози гонки.</>}
-                  </div>}
+            <div className="manual-review-layout">
+              <aside className="manual-review-totals">
+                <span className="manual-review-caption">РУЧНИЙ ПІДСУМОК</span>
+                <strong>{activeReviewRunTotal}</strong><small>балів перевірено</small>
+                <div className="manual-review-divider" />
+                <span className="manual-review-caption">ФІНАЛЬНИЙ У БАЗІ</span>
+                <b>{Number(activeReviewPlayer?.base_pts)||0}</b><small>балів</small>
+                <div className={`manual-review-delta ${activeReviewRunTotal===(Number(activeReviewPlayer?.base_pts)||0)?'is-match':'is-different'}`}>
+                  {activeReviewComplete
+                    ? activeReviewRunTotal===(Number(activeReviewPlayer?.base_pts)||0)?'ЗБІГАЄТЬСЯ':`РІЗНИЦЯ ${activeReviewRunTotal-(Number(activeReviewPlayer?.base_pts)||0)>0?'+':''}${activeReviewRunTotal-(Number(activeReviewPlayer?.base_pts)||0)}`
+                    : `ПЕРЕВІРЕНО ${activeReviewQueue.filter(item=>isReviewItemApproved(item,reviewPlayerId)).length}/${activeReviewQueue.length}`}
                 </div>
-              ) : <PlayerCard
-                key={`${activeReviewItem.session.id}:${reviewPlayerId}`}
-                player={activeReviewPlayer}
-                teamColor={TEAM_META[activeReviewPlayer?.team]?.color || '#888'}
-                sessionType={activeReviewItem.session.type}
-                session={activeReviewItem.session}
-                forecast={activeReviewItem.kind==='forecast'?activeReviewItem.row:null}
-                qualAssign={activeReviewItem.kind==='qual'?activeReviewItem.row:null}
-                results={resultsList(normalizeStageResults(activeReviewItem.session.results||{},activeReviewChanges))}
-                flResult={normalizeStageDriver(activeReviewItem.session.fl_pilot||'',activeReviewChanges)}
-                ovResult={String(activeReviewItem.session.ov_pilot||'').split(/[,;|]/).map(value=>normalizeStageDriver(value.trim(),activeReviewChanges)).filter(Boolean).join(', ')}
-                isAdmin
-                isLocked={false}
-                stageKey={activeReviewItem.session.stages?.key}
-                stageOrder={activeReviewStageOrder}
-                allQualAssign={activeReviewAllQualAssignments}
-                driverOptions={activeReviewPilots}
-                pilotSubstitutions={activeReviewChanges}
-                forecastHidden={false}
-                qualSlotCount={activeReviewQualSlots}
-                editorOnly
-                saveDelay={0}
-                onSaveForecast={(predictions,fl,ov)=>persistReviewedForecast(activeReviewItem,predictions,fl,ov)}
-                onSaveQual={(pilots,positions)=>persistReviewedQual(activeReviewItem,pilots,positions)}
-                onSavePolePick={pilot=>persistReviewedPole(activeReviewItem,pilot)}
-              />}
-              {activeReviewItem.session.type==='race'&&!activeReviewItem.missed&&activeReviewBonus?.ready&&<div className="manual-review-bonus">Бонуси гонки визначено за найменшим прогнозним рахунком: {activeReviewBonus.minimum ?? '—'} балів. {activeReviewBonus.recorded!=null?`Гравцю вже зараховано +${activeReviewBonus.recorded}.`:activeReviewBonus.points!=null?`Для гравця передбачено +${activeReviewBonus.points}.`:'Цей гравець не отримує бонусу за цю гонку.'}</div>}
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginTop:15,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-                <b>{activeReviewItem.missed?'Прогноз відсутній · 0 балів':`Бали для затвердження: ${activeReviewScore?.score ?? '—'}`}</b>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                  <button className="btn btn-red" disabled={reviewSaving} onClick={approveReviewStep}>{reviewSaving?'ЗБЕРЕЖЕННЯ…':activeReviewItem.missed?'ПІДТВЕРДИТИ ВІДСУТНІСТЬ І ДАЛІ':'ЗАТВЕРДИТИ Й ДАЛІ'}</button>
-                </div>
+              </aside>
+              <div className="manual-review-work">
+                {activeReviewItem&&reviewInput ? <>
+                  <div className="manual-review-stage">
+                    <b>{activeReviewItem.session.stages?.flag} {activeReviewItem.session.stages?.name}</b>
+                    <span>{String(activeReviewItem.session.type).toUpperCase()} · {reviewIndex+1}/{activeReviewQueue.length}</span>
+                    <small>Факт: {resultsList(normalizeStageResults(activeReviewItem.session.results||{},activeReviewChanges)).join(' · ')||'результат не внесено'}</small>
+                  </div>
+                  {activeReviewItem.missed ? <div className="manual-review-missed">Прогнозу немає · у ручній звірці це 0 балів.</div> : <PlayerCard
+                    key={`${activeReviewItem.session.id}:${reviewPlayerId}`}
+                    player={activeReviewPlayer}
+                    teamColor={TEAM_META[activeReviewPlayer?.team]?.color||'#888'}
+                    sessionType={activeReviewItem.session.type}
+                    session={activeReviewItem.session}
+                    forecast={activeReviewItem.kind==='forecast'?activeReviewItem.row:null}
+                    qualAssign={activeReviewItem.kind==='qual'?activeReviewItem.row:null}
+                    results={resultsList(normalizeStageResults(activeReviewItem.session.results||{},activeReviewChanges))}
+                    flResult={normalizeStageDriver(activeReviewItem.session.fl_pilot||'',activeReviewChanges)}
+                    ovResult={String(activeReviewItem.session.ov_pilot||'').split(/[,;|]/).map(value=>normalizeStageDriver(value.trim(),activeReviewChanges)).filter(Boolean).join(', ')}
+                    isAdmin isLocked={false} stageKey={activeReviewItem.session.stages?.key} stageOrder={activeReviewStageOrder}
+                    allQualAssign={activeReviewAllQualAssignments} allQualPlayerTeams={activeReviewQualPlayerTeams} driverOptions={activeReviewPilots} pilotSubstitutions={activeReviewChanges}
+                    forecastHidden={false} qualSlotCount={activeReviewQualSlots} editorOnly saveDelay={0}
+                    onSaveForecast={(predictions,fl,ov)=>persistReviewedForecast(activeReviewItem,predictions,fl,ov)}
+                    onSaveQual={(pilots,positions)=>persistReviewedQual(activeReviewItem,pilots,positions)}
+                    onSavePolePick={pilot=>persistReviewedPole(activeReviewItem,pilot)}
+                  />}
+                  {activeReviewItem.session.type==='race'&&activeReviewItem.missed&&<div className="manual-review-bonus-note"><b>Бонус новачка</b> · {activeReviewBonus?.eligible?`мінімум за гонку ${activeReviewBonus.minimum??'—'} балів${activeReviewBonus.recorded!=null?` · уже записано +${activeReviewBonus.recorded}`:''}`:'за пропуск після першого прогнозу не дається.'}</div>}
+                  <div className="manual-review-score">За цей крок: <b>{activeReviewScore?.score??0}</b> балів{activeReviewState.bonusIncluded&&activeReviewBonus?.points!=null?` · бонус у звірці +${activeReviewBonus.points}`:''}</div>
+                  <div className="manual-review-navigation">
+                    <button className="btn btn-ghost" disabled={reviewIndex===0} onClick={moveReviewBack}>← НАЗАД</button>
+                    <div className="manual-review-center-controls">
+                      {activeReviewItem.missed&&<button type="button" className={`btn ${activeReviewState.absenceConfirmed?'btn-red':'btn-ghost'}`} onClick={()=>confirmReviewAbsence(activeReviewItem)}>{activeReviewState.absenceConfirmed?'ВІДСУТНІСТЬ ✓':'ПІДТВЕРДИТИ ВІДСУТНІСТЬ'}</button>}
+                      {activeReviewItem.session.type==='race'&&activeReviewItem.missed&&<button type="button" className={`btn ${activeReviewState.bonusIncluded?'btn-red':'btn-ghost'}`} disabled={!activeReviewBonus?.ready||!activeReviewBonus?.eligible||activeReviewBonus.points==null} onClick={()=>toggleReviewBonus(activeReviewItem)}>{activeReviewState.bonusIncluded?'БОНУС ✓':`БОНУС НОВАЧКА +${activeReviewBonus?.points??'—'}`}</button>}
+                    </div>
+                    <button className="btn btn-red" disabled={activeReviewItem.missed&&!activeReviewState.absenceConfirmed} onClick={approveReviewStep}>ДАЛІ →</button>
+                  </div>
+                </> : activeReviewComplete ? <div className="manual-review-finish">
+                  <h3>Звірку завершено</h3>
+                  <p>Ручний підсумок: <b>{activeReviewRunTotal}</b> · у базі: <b>{Number(activeReviewPlayer?.base_pts)||0}</b></p>
+                  <strong className={activeReviewRunTotal===(Number(activeReviewPlayer?.base_pts)||0)?'is-match':'is-different'}>
+                    {activeReviewRunTotal===(Number(activeReviewPlayer?.base_pts)||0)?'БАЛИ ЗБІГАЮТЬСЯ':`РІЗНИЦЯ ${activeReviewRunTotal-(Number(activeReviewPlayer?.base_pts)||0)>0?'+':''}${activeReviewRunTotal-(Number(activeReviewPlayer?.base_pts)||0)}`}
+                  </strong>
+                  <small>Калькулятор не змінює прогнози, бонуси чи підсумкові бали в базі.</small>
+                  <div className="manual-review-finish-actions"><button className="btn btn-ghost" onClick={moveReviewBack}>← ДО ОСТАННЬОЇ СЕСІЇ</button><button className="btn btn-ghost" onClick={()=>{setReviewPlayerId('');setReviewDraft(null)}}>ЗАКРИТИ</button></div>
+                </div> : <div className="manual-review-finish"><p>Для цього гравця немає зарахованих сесій.</p><button className="btn btn-ghost" onClick={()=>setReviewPlayerId('')}>ЗАКРИТИ</button></div>}
               </div>
-            </> : activeReviewQueue.length>0 && activeReviewQueue.every(item=>isReviewItemApproved(item,reviewPlayerId)) ? <>
-              <p className="team-created-note">Усі {activeReviewQueue.length} кроків — включно з пропущеними сесіями — підтверджено. Підсумок буде складено лише з зарахованих прогнозів, кваліфікацій і бонусів.</p>
-              <button className="btn btn-red" onClick={()=>finalizePlayerReview(reviewPlayerId)}>ЗАТВЕРДИТИ СУМУ З НУЛЯ І ЗАВЕРШИТИ</button>
-            </> : <>
-              <p className="team-created-note">Для цього гравця немає завершених прогнозів для ручної перевірки.</p>
-              <button className="btn btn-ghost" onClick={()=>setReviewPlayerId('')}>Закрити</button>
-            </>}
+            </div>
           </div>
         </div>
       )}
