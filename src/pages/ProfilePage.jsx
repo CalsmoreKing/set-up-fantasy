@@ -11,7 +11,7 @@ export default function ProfilePage() {
   const [roster, setRoster] = useState([])
   const [seasonRank, setSeasonRank] = useState(null)
   const [seasonTotal, setSeasonTotal] = useState(0)
-  const [scoreSplit, setScoreSplit] = useState({ newcomer:0 })
+  const [scoreSplit, setScoreSplit] = useState({ newcomer:0, top3:0, top5:0 })
   const [schemaReady, setSchemaReady] = useState(true)
   const [bannerBusy, setBannerBusy] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
@@ -35,7 +35,7 @@ export default function ProfilePage() {
     const raceSessionIds = sessions.filter(session => session.type === 'race').map(session => session.id)
     let forecasts = []
     if (raceSessionIds.length) {
-      const forecastsResult = await supabase.from('forecasts').select('player_id,session_id,score').in('session_id',raceSessionIds)
+      const forecastsResult = await supabase.from('forecasts').select('player_id,session_id,score,score_breakdown').in('session_id',raceSessionIds)
       forecasts = forecastsResult.data || []
     }
     let bonuses = []
@@ -65,7 +65,9 @@ export default function ProfilePage() {
     setPosterRows(rows)
     setSeasonTotal(rows.reduce((sum, row) => sum + row.score, 0))
     const newcomerPoints = bonuses.reduce((sum,row)=>sum+(Number(row.points)||0),0)
-    setScoreSplit({ newcomer:newcomerPoints })
+    const playerRaceForecasts=forecasts.filter(row=>row.player_id===viewedPlayer.id)
+    const scoredBonusCount=(label)=>playerRaceForecasts.filter(row=>Array.isArray(row.score_breakdown)&&row.score_breakdown.some(entry=>String(entry.label||'').includes(label))).length
+    setScoreSplit({ newcomer:newcomerPoints, top3:scoredBonusCount('Топ-3'), top5:scoredBonusCount('Топ-5') })
     setLoading(false)
   }
 
@@ -113,7 +115,7 @@ export default function ProfilePage() {
     </div>
     <div id="season-poster" style={{border:`1px solid ${teamColor}66`,borderTop:`4px solid ${teamColor}`,borderRadius:5,padding:18,background:profile?.banner_url ? `linear-gradient(145deg,rgba(8,8,8,.9),rgba(8,8,8,.94)),url(${profile.banner_url}) center/cover` : 'linear-gradient(145deg,var(--card),#0b0b0b)',marginBottom:24}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:14}}>
-        <div><div style={{fontFamily:'Orbitron,sans-serif',fontSize:15,fontWeight:900}}>{profilePlayer?.name}</div><div style={{fontSize:10,color:teamColor,marginTop:4}}>{TEAM_META[profilePlayer?.team]?.glyph || '◆'} {TEAM_META[profilePlayer?.team]?.code || profilePlayer?.team} · {profilePlayer?.team}{teammate ? ` · teammate: ${teammate.name}` : ''}</div></div>
+        <div><div style={{fontFamily:'Orbitron,sans-serif',fontSize:15,fontWeight:900}}>{profilePlayer?.name}</div><div style={{fontSize:10,color:teamColor,marginTop:4}}>{TEAM_META[profilePlayer?.team]?.glyph || '◆'} {TEAM_META[profilePlayer?.team]?.code || profilePlayer?.team} · {profilePlayer?.team}{teammate ? ` · напарник: ${teammate.name}` : ''}</div></div>
         <div style={{textAlign:'right'}}><div style={{fontFamily:'Orbitron,sans-serif',fontSize:8,color:'var(--muted)',letterSpacing:1}}>СУМА ГОНКОВИХ БАЛІВ</div><strong style={{fontFamily:'Orbitron,sans-serif',fontSize:22,color:'var(--gold)'}}>{seasonTotal}</strong></div>
       </div>
       {posterRows.length ? <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(125px,1fr))',gap:7}}>{posterRows.map(({stage,score,place})=><div key={stage.id} style={{padding:'9px 10px',border:'1px solid var(--border)',borderRadius:3,background:'#111'}}><div style={{fontSize:11,fontWeight:700}}>{stage.flag} {stage.name}</div><div style={{display:'flex',justifyContent:'space-between',marginTop:10,alignItems:'end'}}><b style={{fontFamily:'Orbitron,sans-serif',fontSize:12,color:place===1?'var(--gold)':place===2?'var(--silver)':place===3?'var(--bronze)':'var(--text)'}}>P{place}</b><span style={{fontSize:10,color:'var(--muted)'}}>{score} pts</span></div></div>)}</div> : <div style={{fontSize:12,color:'var(--muted)'}}>Ще немає зарахованих гонок.</div>}
@@ -124,6 +126,8 @@ export default function ProfilePage() {
       <ProfileMetric label="КОМАНДА / НАПАРНИК" value={`${TEAM_META[profilePlayer?.team]?.code || ''} · ${teammate?.name || '—'}`} />
       <ProfileMetric label="ЗАГАЛЬНІ ОЧКИ" value={profilePlayer?.base_pts ?? 0} />
       <ProfileMetric label="БОНУС НОВАЧКА" value={scoreSplit.newcomer} />
+      <ProfileMetric label="БОНУС ТОП-3 · ГП" value={scoreSplit.top3} />
+      <ProfileMetric label="БОНУС ТОП-5 · ГП" value={scoreSplit.top5} />
       <ProfileMetric label="ГОНКОВІ ОЧКИ" value={seasonTotal} />
       <ProfileMetric label="ЕТАПІВ З РЕЗУЛЬТАТОМ" value={posterRows.length} />
     </div>

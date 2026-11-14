@@ -21,6 +21,32 @@ export function saveManualReviewState(state, storage = globalThis.sessionStorage
   }
 }
 
+export function manualReviewStepKey(playerId,sessionId) {
+  return `${playerId}:${sessionId}`
+}
+
+/** Sum only steps explicitly advanced in the client-side audit; this never writes scoring data. */
+export function summarizeManualReview(queue,playerId,steps,officialTotal=0) {
+  let manualTotal=0
+  let checkedCount=0
+  for (const item of queue || []) {
+    const step=steps?.[manualReviewStepKey(playerId,item.session.id)]
+    if (!step?.checked) continue
+    checkedCount++
+    manualTotal+=(Number(step.score)||0)+(Number(step.bonusPoints)||0)
+  }
+  const totalSteps=(queue || []).length
+  return {
+    manualTotal,
+    officialTotal:Number(officialTotal)||0,
+    difference:manualTotal-(Number(officialTotal)||0),
+    checkedCount,
+    totalSteps,
+    complete:totalSteps>0&&checkedCount===totalSteps,
+    matches:totalSteps>0&&checkedCount===totalSteps&&manualTotal===(Number(officialTotal)||0),
+  }
+}
+
 export function sessionSortOrder(session) {
   const typeOrder = {qual:0,sprint:1,race:2}
   return [Number(session?.stages?.sort_order ?? session?.stage_sort_order ?? 0),typeOrder[session?.type] ?? 9,String(session?.committed_at || '')]

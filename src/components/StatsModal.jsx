@@ -296,8 +296,8 @@ function PlayerStatsCard({ stats, side }) {
     <div className="mini-stats-grid">
       <MiniStat icon="⚡" label="Швидке коло" value={`${stats.flHits}/${stats.flTotal}`} />
       <MiniStat icon="🚀" label="Прорив" value={`${stats.ovHits}/${stats.ovTotal}`} />
-      <MiniStat icon="🏆" label="Топ-3 бонус" value={stats.podiumHits} />
-      <MiniStat icon="🎯" label="Топ-5 бонус" value={stats.top5Hits} />
+      <MiniStat icon="🏆" label="Бонус Топ-3 · ГП" value={stats.podiumHits} />
+      <MiniStat icon="🎯" label="Бонус Топ-5 · ГП" value={stats.top5Hits} />
     </div>
     {stats.favoritePilot && <div className="favorite-pilot">
       <span>Улюблений пілот</span>

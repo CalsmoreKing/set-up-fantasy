@@ -86,11 +86,11 @@ export function calcSprintPickPoints(predictedPosition, pilot, results) {
   const actualPosition = results.slice(0,5).indexOf(pilot)
   if (actualPosition < 0) return 0
   const difference = Math.abs(Number(predictedPosition) - actualPosition)
-  return difference === 0 ? 6 : difference === 1 ? 3 : difference === 2 ? 1 : 0
+  return difference === 0 ? 3 : difference === 1 ? 2 : difference === 2 ? 1 : 0
 }
 
 export function calcSprintScore(preds, results) {
-  // All sprints use the same 6/3/1 position scale and only the actual top five;
+  // All sprints use the same 3/2/1 position scale and only the actual top five;
   // a forecast contains only the sprint top five and has no sprint bonuses.
   const sprintResults = results.slice(0,5)
   const breakdown = []

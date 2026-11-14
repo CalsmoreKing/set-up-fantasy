@@ -103,6 +103,16 @@ export function normalizeStageResults(results, changes = []) {
 }
 
 /** Past assignments count as used only when the player actually submitted a position for that pilot. */
+export function teammatePilotsAssignedForSession(assignments,playerId,team,playerTeams,sessionId) {
+  const taken=new Set()
+  if(!sessionId||!team) return taken
+  for(const row of Object.values(assignments||{})) {
+    if(row?.session_id!==sessionId||row.player_id===playerId||playerTeams?.[row.player_id]!==team) continue
+    for(const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if(pilot) taken.add(pilot)
+  }
+  return taken
+}
+
 export function priorQualAssignments(assignments, currentSessionId, currentStageOrder) {
   return (assignments || []).filter(row => {
     if (row.session_id === currentSessionId) return false

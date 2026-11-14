@@ -125,6 +125,7 @@ export default function MainPage() {
     ...qualHistory.map((row,index) => [`history_${index}`, row]),
     ...Object.entries(qualAssign),
   ])
+  const allQualPlayerTeams=Object.fromEntries(players.map(player=>[player.id,player.team]))
   const qualSlotsByPlayer = Object.fromEntries(players.map(player => {
     const used = new Set(USED_PILOTS[player.name] || [])
     qualHistory.filter(row => row.player_id === player.id).forEach(row => {
@@ -689,6 +690,7 @@ export default function MainPage() {
                         stageKey={stageKey}
                         stageOrder={currentStage?.sort_order}
                         allQualAssign={allQualAssignments}
+                        allQualPlayerTeams={allQualPlayerTeams}
                         driverOptions={stagePilotOptions}
                         pilotSubstitutions={stagePilotChanges}
                         forecastHidden={!canSeeForecast}
