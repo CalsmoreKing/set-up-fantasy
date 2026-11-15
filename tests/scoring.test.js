@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { calcRaceScore, calcSprintPickPoints, calcSprintScore, explainForecastScoreDifference, explainQualifyingScoreDifference, hasForecastSubmission, hasQualifyingPrediction, hasSavedForecastPickMismatch, isOvertakeWinner, parseOvertakeWinners, recalculateForecast, recalculateQualAssignment } from '../src/lib/scoring.js'
+import { calcQualScore, calcRaceScore, calcSprintPickPoints, calcSprintScore, explainForecastScoreDifference, explainQualifyingScoreDifference, hasForecastSubmission, hasQualifyingPrediction, hasSavedForecastPickMismatch, isOvertakeWinner, parseOvertakeWinners, recalculateForecast, recalculateQualAssignment } from '../src/lib/scoring.js'
 
 const brazilRace = {
   type: 'race',
@@ -169,6 +169,25 @@ test('saved breakdown conflicts preserve historical score instead of recalculati
   assert.match(explanation, /залишено збережені 25 балів без перерахунку/)
   assert.equal(hasSavedForecastPickMismatch({predictions:{1:'Norris'},score_breakdown:[]}), false)
   assert.match(explainQualifyingScoreDifference(7, 3), /збережено лише загальну суму/)
+})
+
+test('owner-directed Monaco forecast for Kitasu recalculates to 8 without fast-lap or set bonuses', () => {
+  const results = ['Antonelli','Hamilton','Hadjar','Piastri','Lawson','Lindblad','Gasly','Albon','Ocon','Alonso']
+  const result = calcRaceScore(
+    ['Verstappen','Antonelli','Leclerc','Hamilton','Russell','Norris','Piastri','Hadjar','Gasly','Albon'],
+    'Leclerc','',results,'Antonelli','Alonso',8,
+  )
+  assert.equal(result.total, 8)
+  assert.deepEqual(result.breakdown.map(({pts})=>pts), [2,1,1,2,2])
+})
+
+test('qualifying roulette scores exact, one-off, and two-off positions 6/3/1 and rejects invalid slots', () => {
+  const results = ['A','B','C','D','E','F','G']
+  assert.equal(calcQualScore('A', 1, results).total, 6)
+  assert.equal(calcQualScore('A', 2, results).total, 3)
+  assert.equal(calcQualScore('A', 3, results).total, 1)
+  assert.equal(calcQualScore('A', 0, results).total, 0)
+  assert.equal(calcQualScore('A', 23, results).total, 0)
 })
 
 test('qualifying coverage ignores assignments with no submitted prediction', () => {

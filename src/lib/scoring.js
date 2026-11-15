@@ -55,10 +55,11 @@ export function calcRaceScore(preds, fl, ov, results, resultFl, resultOv, stageO
 }
 
 export function calcQualScore(pilot, predPos, results) {
-  if (!pilot || !predPos) return { total: 0, breakdown: [] }
+  const position = Number(predPos)
+  if (!pilot || !Number.isInteger(position) || position < 1 || position > 22) return { total: 0, breakdown: [] }
   const actualPos = results.indexOf(pilot)
   if (actualPos === -1) return { total: 0, breakdown: [] }
-  const diff = Math.abs(predPos - 1 - actualPos)
+  const diff = Math.abs(position - 1 - actualPos)
   const points = diff === 0 ? 6 : diff === 1 ? 3 : diff === 2 ? 1 : 0
   return points > 0
     ? { total: points, breakdown: [{ label: `${pilot}: прог P${predPos} → факт P${actualPos + 1}`, pts: points }] }
