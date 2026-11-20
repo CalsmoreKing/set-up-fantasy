@@ -1,3 +1,5 @@
+import { qualifyingPilotPairs } from './roster.js'
+
 export function parseOvertakeWinners(value) {
   const values = Array.isArray(value) ? value : String(value || '').split(/[,;|]/)
   return [...new Set(values.map(pilot => String(pilot || '').trim()).filter(Boolean))]
@@ -77,7 +79,7 @@ export function calcQualAssignmentScore(assignment, results, stageOrder = 10, st
   if (Number(stageOrder) < QUAL_ROULETTE_START_SORT_ORDER) {
     return calcPolePickScore(assignment?.pole_pick, results, Boolean(assignment?.pole_pick))
   }
-  return [[assignment?.pilot_1, assignment?.pred_pos_1], [assignment?.pilot_2, assignment?.pred_pos_2], [assignment?.pilot_3, assignment?.pred_pos_3]]
+  return qualifyingPilotPairs(assignment)
     .reduce((sum, [pilot, position]) => {
       const part = calcQualScore(pilot, position, results)
       return { total: sum.total + part.total, breakdown: [...sum.breakdown, ...part.breakdown] }
@@ -117,8 +119,7 @@ export function hasForecastSubmission(forecast) {
 
 export function hasQualifyingPrediction(assignment) {
   return Boolean(assignment?.pole_pick)
-    || [[assignment?.pilot_1, assignment?.pred_pos_1], [assignment?.pilot_2, assignment?.pred_pos_2], [assignment?.pilot_3, assignment?.pred_pos_3]]
-      .some(([pilot, position]) => Boolean(pilot) && Number(position) > 0)
+    || qualifyingPilotPairs(assignment).some(([pilot, position]) => Boolean(pilot) && Number(position) > 0)
 }
 
 export function resultsList(results) {
@@ -258,9 +259,10 @@ export function recalculateQualAssignment(session, assignment, stageOrder, optio
   if (!results.length) return { score: savedScore, breakdown: [], recalculated: false, verifiable: false, ruleVersion:'no-results' }
   const result = calcQualAssignmentScore(input, results, stageOrderOf(session, stageOrder), session?.stages?.key || session?.stage_key)
   const currentInput = {
-    pilot_1:assignment.pilot_1, pred_pos_1:assignment.pred_pos_1,
-    pilot_2:assignment.pilot_2, pred_pos_2:assignment.pred_pos_2,
-    pilot_3:assignment.pilot_3, pred_pos_3:assignment.pred_pos_3,
+    ...Object.fromEntries(qualifyingPilotPairs(assignment).flatMap(([pilot,position],index)=>[
+      [`pilot_${index+1}`,pilot],
+      [`pred_pos_${index+1}`,position],
+    ])),
     pole_pick:assignment.pole_pick || '',
   }
   return {

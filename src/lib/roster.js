@@ -103,12 +103,26 @@ export function normalizeStageResults(results, changes = []) {
 }
 
 /** Past assignments count as used only when the player actually submitted a position for that pilot. */
+export const QUALIFYING_PILOT_SLOT_COUNT = 22
+export const MAX_QUALIFYING_SLOTS_PER_STAGE = 22
+export const QUALIFYING_PILOT_COLUMNS = Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+  `pilot_${index+1}`,
+  `pred_pos_${index+1}`,
+]).flat().join(',')
+
+export function qualifyingPilotPairs(assignment) {
+  return Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+    assignment?.[`pilot_${index+1}`],
+    assignment?.[`pred_pos_${index+1}`],
+  ])
+}
+
 export function teammatePilotsAssignedForSession(assignments,playerId,team,playerTeams,sessionId) {
   const taken=new Set()
   if(!sessionId||!team) return taken
   for(const row of Object.values(assignments||{})) {
     if(row?.session_id!==sessionId||row.player_id===playerId||playerTeams?.[row.player_id]!==team) continue
-    for(const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if(pilot) taken.add(pilot)
+    for(const [pilot] of qualifyingPilotPairs(row)) if(pilot) taken.add(pilot)
   }
   return taken
 }
@@ -119,34 +133,80 @@ export function priorQualAssignments(assignments, currentSessionId, currentStage
     const order = Number(row.sessions?.stages?.sort_order)
     const isPrior = !Number.isFinite(order) || !Number.isFinite(Number(currentStageOrder)) || order < Number(currentStageOrder)
     if (!isPrior) return false
-    return [['pilot_1', 'pred_pos_1'], ['pilot_2', 'pred_pos_2'], ['pilot_3', 'pred_pos_3']]
-      .some(([pilot, position]) => row[pilot] && Number(row[position]) > 0)
+    return qualifyingPilotPairs(row).some(([pilot, position]) => pilot && Number(position) > 0)
   }).map(row => ({
     ...row,
-    pilot_1: Number(row.pred_pos_1) > 0 ? row.pilot_1 : '',
-    pilot_2: Number(row.pred_pos_2) > 0 ? row.pilot_2 : '',
-    pilot_3: Number(row.pred_pos_3) > 0 ? row.pilot_3 : '',
+    ...Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      `pilot_${index+1}`,
+      Number(row[`pred_pos_${index+1}`]) > 0 ? row[`pilot_${index+1}`] : '',
+    ])),
   }))
 }
 
 // The remaining 2026 qualifying rounds use the regular Vegas slot plus the two double rounds.
 export const FUTURE_QUAL_SLOT_BASE = { 23:1, 24:2, 25:2 }
 
+/** Cross-player pilot uniqueness is waived only for the final three qualifying rounds. */
+export function isFinalThreeQualifyingStage(stageOrder) {
+  const order = Number(stageOrder)
+  return Object.hasOwn(FUTURE_QUAL_SLOT_BASE, order)
+}
+
+/**
+ * Allocate qualifying pilots while preserving per-player season uniqueness.
+ * Before the final three rounds, each slot also prefers unique pilots across
+ * players; in rounds 23–25 that cross-player restriction is removed.
+ */
+export function buildQualifyingPilotAssignments(players, usedByPlayer, slotCounts, pilotPool, stageOrder, random = Math.random) {
+  const usedByPlayerNext = Object.fromEntries((players || []).map(player => [
+    player.id,
+    new Set(usedByPlayer?.[player.id] || []),
+  ]))
+  const assigned = Object.fromEntries((players || []).map(player => [player.id, []]))
+  const maxSlots = Math.min(QUALIFYING_PILOT_SLOT_COUNT, Math.max(0, ...(players || []).map(player => Number(slotCounts?.[player.id]) || 0)))
+  const allowCrossPlayerRepeats = isFinalThreeQualifyingStage(stageOrder)
+
+  for (let slotIndex = 0; slotIndex < maxSlots; slotIndex++) {
+    const candidates = [...(players || [])]
+      .filter(player => (Number(slotCounts?.[player.id]) || 0) > slotIndex)
+      .sort(() => random() - 0.5)
+    const usedThisSlot = new Set()
+    for (const player of candidates) {
+      const already = usedByPlayerNext[player.id]
+      const available = (pilotPool || []).filter(pilot => !already.has(pilot)
+        && (allowCrossPlayerRepeats || !usedThisSlot.has(pilot)))
+      const fallback = allowCrossPlayerRepeats
+        ? []
+        : (pilotPool || []).filter(pilot => !already.has(pilot))
+      const pool = available.length ? available : fallback
+      const pilot = pool.length ? pool[Math.floor(random() * pool.length)] : ''
+      assigned[player.id][slotIndex] = pilot
+      if (pilot) {
+        already.add(pilot)
+        usedThisSlot.add(pilot)
+      }
+    }
+  }
+  return { assigned, usedByPlayer: usedByPlayerNext }
+}
+
 /** Build one per-player plan across all remaining Vegas/Qatar/UAE qualifying rounds. */
-export function qualifyingPlanForAvailable(availableCount, fromStageOrder = 23, maxPerStage = 3) {
+export function qualifyingPlanForAvailable(availableCount, fromStageOrder = 23, maxPerStage = null) {
   const orders = Object.keys(FUTURE_QUAL_SLOT_BASE).map(Number).filter(order => order >= Number(fromStageOrder)).sort((a,b)=>a-b)
   const plan = Object.fromEntries(orders.map(order => [order, 0]))
   let remaining = Math.max(0, Number(availableCount) || 0)
+  const inferredCap = Math.max(3, Math.ceil(remaining / Math.max(1,orders.length)))
+  const perStageCap = Math.min(MAX_QUALIFYING_SLOTS_PER_STAGE, Number(maxPerStage) > 0 ? Number(maxPerStage) : inferredCap)
   for (const order of orders) {
     const future = orders.filter(value => value >= order)
-    const baseTotal = future.reduce((sum, value) => sum + Math.min(maxPerStage, FUTURE_QUAL_SLOT_BASE[value]), 0)
-    const maxTotal = future.length * maxPerStage
+    const baseTotal = future.reduce((sum, value) => sum + Math.min(perStageCap, FUTURE_QUAL_SLOT_BASE[value]), 0)
+    const maxTotal = future.length * perStageCap
     let extras = Math.max(0, Math.min(remaining, maxTotal) - baseTotal)
-    const counts = future.map(value => Math.min(maxPerStage, FUTURE_QUAL_SLOT_BASE[value]))
+    const counts = future.map(value => Math.min(perStageCap, FUTURE_QUAL_SLOT_BASE[value]))
     while (extras > 0) {
       let placed = false
       for (let index = 0; index < counts.length && extras > 0; index++) {
-        if (counts[index] >= maxPerStage) continue
+        if (counts[index] >= perStageCap) continue
         counts[index]++
         extras--
         placed = true
@@ -161,7 +221,7 @@ export function qualifyingPlanForAvailable(availableCount, fromStageOrder = 23, 
 }
 
 /** The active individual allocation for this round, with catch-up slots first. */
-export function qualifyingSlotsForStage(availableCount, stageOrder, maxPerStage = 3) {
+export function qualifyingSlotsForStage(availableCount, stageOrder, maxPerStage = null) {
   const order = Number(stageOrder)
   if (!Number.isFinite(order)) return 1
   const plan = qualifyingPlanForAvailable(availableCount, order, maxPerStage)

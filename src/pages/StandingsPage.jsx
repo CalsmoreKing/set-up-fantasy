@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase, TEAM_META } from '../lib/supabase'
+import { supabase, TEAM_META, QUALIFYING_PILOT_COLUMNS } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import StatsModal from '../components/StatsModal'
 import PodiumCalendar from '../components/PodiumCalendar'
@@ -72,7 +72,7 @@ export default function StandingsPage() {
           if (!session.committed) continue
           if (session.type === 'qual') {
             const { data: assignments, error } = await supabase.from('qual_assignments')
-              .select('player_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3')
+              .select(`player_id,score,pole_pick,${QUALIFYING_PILOT_COLUMNS}`)
               .eq('session_id', session.id)
             if (error) throw error
             ;(assignments || []).forEach(assignment => {

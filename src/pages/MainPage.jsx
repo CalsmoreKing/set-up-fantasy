@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, IS_PREVIEW_DEPLOYMENT, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, qualifyingSlotsForStage } from '../lib/supabase'
+import { supabase, IS_PREVIEW_DEPLOYMENT, PILOTS, DOUBLE_STAGES, calcRaceScore, calcQualAssignmentScore, calcSprintScore, TEAM_META, USED_PILOTS, QUALIFYING_PILOT_SLOT_COUNT, QUALIFYING_PILOT_COLUMNS, qualifyingSlotsForStage, buildQualifyingPilotAssignments } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlayerCard, { FormIndicator, loadFormData } from '../components/PlayerCard'
 import DragResults from '../components/DragResults'
@@ -20,6 +20,7 @@ export default function MainPage() {
   const [forecasts, setForecasts] = useState({})
   const [qualAssign,setQualAssign]= useState({})
   const [qualHistory, setQualHistory] = useState([])
+  const [qualifyingSlotPlans, setQualifyingSlotPlans] = useState([])
   const [stagePilotChanges, setStagePilotChanges] = useState([])
   const stagePilotOptions = buildStagePilotPool(stagePilotChanges)
   const [stageKey,  setStageKey]  = useState('')
@@ -29,6 +30,17 @@ export default function MainPage() {
   const [committing,setCommitting]= useState(false)
   const [recalculatingStage,setRecalculatingStage] = useState(false)
   const [stageRecalcReport,setStageRecalcReport] = useState(null)
+
+  useEffect(() => {
+    if (IS_PREVIEW_DEPLOYMENT) {
+      try { setQualifyingSlotPlans(JSON.parse(globalThis.localStorage?.getItem('set-up-fantasy:qualifying-slot-plans')||'[]')) } catch { setQualifyingSlotPlans([]) }
+    } else {
+      supabase.from('qualifying_slot_plans').select('*').then(({data,error})=>{
+        if(error) { setCommitMsg(`Не вдалося завантажити план кваліфікацій: ${error.message}`); return }
+        setQualifyingSlotPlans(data||[])
+      })
+    }
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -117,7 +129,7 @@ export default function MainPage() {
     if (!session) return
     if (session.archive_preview) { setQualHistory([]); return }
     const stageOrder = stages.find(stage => stage.key === stageKey)?.sort_order
-    supabase.from('qual_assignments').select('id,session_id,player_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))')
+    supabase.from('qual_assignments').select(`id,session_id,player_id,${QUALIFYING_PILOT_COLUMNS},sessions(stages(sort_order))`)
       .then(({data}) => setQualHistory(priorQualAssignments(data, session.id, stageOrder)))
   }, [sessions, sessionType, stages, stageKey])
 
@@ -129,10 +141,15 @@ export default function MainPage() {
   const qualSlotsByPlayer = Object.fromEntries(players.map(player => {
     const used = new Set(USED_PILOTS[player.name] || [])
     qualHistory.filter(row => row.player_id === player.id).forEach(row => {
-      for (const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if (pilot) used.add(pilot)
+      for (let index=1; index<=QUALIFYING_PILOT_SLOT_COUNT; index++) {
+        const pilot=row[`pilot_${index}`]
+        if (pilot) used.add(pilot)
+      }
     })
     const available = stagePilotOptions.filter(pilot => !used.has(pilot)).length
-    return [player.id, qualifyingSlotsForStage(available, stages.find(stage => stage.key === stageKey)?.sort_order)]
+    const stageOrder=Number(stages.find(stage=>stage.key===stageKey)?.sort_order)
+    const savedPlan=qualifyingSlotPlans.find(row=>row.player_id===player.id&&Number(row.stage_order)===stageOrder)
+    return [player.id, savedPlan?Number(savedPlan.slot_count)||0:qualifyingSlotsForStage(available,stageOrder)]
   }))
 
   const navigationStages = stages.filter(stage => Number(stage.sort_order) < 10 || !stage.is_archived)
@@ -254,17 +271,19 @@ export default function MainPage() {
 
   async function saveQualAssign(playerId, pilots, positions) {
     if (!currentSession || currentSession.archive_preview) { setCommitMsg('Архівний preview доступний лише для читання, доки його не відновлено в Supabase.'); return }
+    const slotFields=Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      [`pilot_${index+1}`,pilots[index]||''],
+      [`pred_pos_${index+1}`,positions[index]||null],
+    ]).flat())
     if (IS_PREVIEW_DEPLOYMENT) {
-      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,pilot_1:pilots[0]||'',pilot_2:pilots[1]||'',pilot_3:pilots[2]||'',pred_pos_1:positions[0]||null,pred_pos_2:positions[1]||null,pred_pos_3:positions[2]||null,preview_draft:true}
+      const draft = {...(qualAssign[playerId]||{}),id:qualAssign[playerId]?.id || `preview-${currentSession.id}-${playerId}`,session_id:currentSession.id,player_id:playerId,...slotFields,preview_draft:true}
       setQualAssign(prev => ({...prev,[playerId]:draft}))
       rememberPreviewDraft('qual_assignments',draft)
       setCommitMsg('🧪 Прогноз змінено лише в цьому прев’ю; сухий прогін сезону врахує цю чернетку, робоча база не змінюється.')
       return
     }
     const { data, error } = await supabase.from('qual_assignments').upsert({
-      session_id: currentSession.id, player_id: playerId,
-      pilot_1: pilots[0]||'', pilot_2: pilots[1]||'', pilot_3: pilots[2]||'',
-      pred_pos_1: positions[0]||null, pred_pos_2: positions[1]||null, pred_pos_3: positions[2]||null,
+      session_id: currentSession.id, player_id: playerId, ...slotFields,
     }, { onConflict: 'session_id,player_id' }).select().single()
     if (error) { setCommitMsg(`⚠ Не вдалося зберегти пілота кваліфікації: ${error.message}`); return }
     if (data) setQualAssign(prev => ({ ...prev, [playerId]: data }))
@@ -311,13 +330,17 @@ export default function MainPage() {
           const normalized = {
             ...qa,
             pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
-            pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
-            pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
-            pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
+            ...Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+              [`pilot_${index+1}`,normalizeStageDriver(qa[`pilot_${index+1}`],stagePilotChanges)],
+              [`pred_pos_${index+1}`,qa[`pred_pos_${index+1}`]],
+            ]).flat()),
           }
           const { total, breakdown } = calcQualAssignmentScore(normalized, results, currentStage?.sort_order, currentStage?.key)
           updates.push({ id: qa.players?.id, delta: total-(Number(qa.score)||0) })
-          qualScores.push({ id:qa.id, score:total })
+          qualScores.push({ id:qa.id, score:total, scored_input:{pole_pick:normalized.pole_pick||'',...Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+            [`pilot_${index+1}`,normalized[`pilot_${index+1}`]],
+            [`pred_pos_${index+1}`,normalized[`pred_pos_${index+1}`]],
+          ]).flat())} })
           bdLog.push({ player: qa.players?.name, score: total, breakdown })
         }
       } else if (sessionType === 'sprint') {
@@ -383,7 +406,7 @@ export default function MainPage() {
       const ids = stageSessions.map(session=>session.id)
       const [forecastResult,qualResult,changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id',ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',ids),
+        supabase.from('qual_assignments').select(`id,player_id,session_id,score,pole_pick,${QUALIFYING_PILOT_COLUMNS}`).in('session_id',ids),
         supabase.from('stage_pilot_substitutions').select('*').eq('stage_id',currentStage.id).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -417,9 +440,13 @@ export default function MainPage() {
           const rows=assignments.filter(row=>row.session_id===session.id).map(row=>{
             const playerName = players.find(player=>player.id===row.player_id)?.name || row.player_id
             recalcPhase = `КВАЛІФІКАЦІЯ: розрахунок прогнозу ${playerName}`
-            const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),pilot_1:normalizeStageDriver(row.pilot_1,changes),pilot_2:normalizeStageDriver(row.pilot_2,changes),pilot_3:normalizeStageDriver(row.pilot_3,changes)}
+            const slotInput=Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+              [`pilot_${index+1}`,normalizeStageDriver(row[`pilot_${index+1}`],changes)],
+              [`pred_pos_${index+1}`,row[`pred_pos_${index+1}`]],
+            ]).flat())
+            const normalized={...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),...slotInput}
             const {total}=calcQualAssignmentScore(normalized,results,currentStage.sort_order,currentStage.key)
-            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            return {id:row.id,player_id:row.player_id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',...slotInput}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows.map(({player_id,...row})=>row)})
           return {type:session.type,scores:rows.map(row=>({player:players.find(p=>p.id===row.player_id)?.name||'—',points:row.score}))}
@@ -631,9 +658,9 @@ export default function MainPage() {
                 const normalizedAssignment = {
                   ...qa,
                   pole_pick:normalizeStageDriver(qa.pole_pick,stagePilotChanges),
-                  pilot_1:normalizeStageDriver(qa.pilot_1,stagePilotChanges),
-                  pilot_2:normalizeStageDriver(qa.pilot_2,stagePilotChanges),
-                  pilot_3:normalizeStageDriver(qa.pilot_3,stagePilotChanges),
+                  ...Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+                    [`pilot_${index+1}`,normalizeStageDriver(qa[`pilot_${index+1}`],stagePilotChanges)],
+                  ]).flat()),
                 }
                 liveScores[p.id] = calcQualAssignmentScore(normalizedAssignment, currentResultsList, currentStage?.sort_order, currentStage?.key).total
               } else if (sessionType === 'sprint' && fc) {
@@ -720,38 +747,25 @@ async function rollAllQual(players, qualAssign, stageKey, sessionId, setQualAssi
   const { USED_PILOTS } = await import('../lib/supabase')
   const { data: allAssignData } = await supabase
     .from('qual_assignments')
-    .select('session_id, player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, sessions(stages(sort_order))')
+    .select(`session_id,player_id,${QUALIFYING_PILOT_COLUMNS},sessions(stages(sort_order))`)
   const priorAssignments = priorQualAssignments(allAssignData, sessionId, stageOrder)
   const usedByPlayer = Object.fromEntries(players.map(player => [player.id, new Set(USED_PILOTS[player.name] || [])]))
   priorAssignments.forEach(row => {
     const used = usedByPlayer[row.player_id]
-    if (used) for (const pilot of [row.pilot_1,row.pilot_2,row.pilot_3]) if (pilot) used.add(pilot)
-  })
-  const assigned = Object.fromEntries(players.map(player => [player.id, []]))
-  const maxSlots = Math.min(3, Math.max(0, ...players.map(player => Number(slotCounts[player.id]) || 0)))
-  for (let slotIndex=0; slotIndex<maxSlots; slotIndex++) {
-    const candidates = [...players].filter(player => (Number(slotCounts[player.id]) || 0) > slotIndex)
-      .sort(() => Math.random() - .5)
-    const usedThisSlot = new Set()
-    for (const player of candidates) {
-      const already = usedByPlayer[player.id]
-      const available = pilotPool.filter(pilot => !already.has(pilot) && !usedThisSlot.has(pilot))
-      const fallback = pilotPool.filter(pilot => !already.has(pilot))
-      const pool = available.length ? available : fallback
-      const pilot = pool.length ? pool[Math.floor(Math.random()*pool.length)] : ''
-      assigned[player.id][slotIndex] = pilot
-      if (pilot) { already.add(pilot); usedThisSlot.add(pilot) }
+    if (used) for (let index=1; index<=QUALIFYING_PILOT_SLOT_COUNT; index++) {
+      const pilot=row[`pilot_${index}`]
+      if (pilot) used.add(pilot)
     }
-  }
+  })
+  const { assigned } = buildQualifyingPilotAssignments(players, usedByPlayer, slotCounts, pilotPool, stageOrder)
   const updates = players.map(player => {
     const pilots = assigned[player.id] || []
-    const planned = Math.max(0,Math.min(3,Number(slotCounts[player.id])||0))
-    const merged = [0,1,2].map(index=>index<planned?(pilots[index]||''):'')
-    return {
-      session_id:sessionId, player_id:player.id,
-      pilot_1:merged[0], pilot_2:merged[1], pilot_3:merged[2],
-      pred_pos_1:null, pred_pos_2:null, pred_pos_3:null,
-    }
+    const planned = Math.max(0,Math.min(QUALIFYING_PILOT_SLOT_COUNT,Number(slotCounts[player.id])||0))
+    const slotFields = Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      [`pilot_${index+1}`,index<planned?(pilots[index]||''):''],
+      [`pred_pos_${index+1}`,null],
+    ]).flat())
+    return { session_id:sessionId, player_id:player.id, ...slotFields }
   })
   const { data, error } = await supabase.from('qual_assignments').upsert(updates,{onConflict:'session_id,player_id'}).select()
   if (error) { alert(error.message); return }

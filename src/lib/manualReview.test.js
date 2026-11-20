@@ -47,9 +47,12 @@ test('manual review is a calculator: totals include checked steps and locally se
   })
 })
 
-test('qualifying manual editor carries player picks and their submitted positions',()=>{
-  const item={kind:'qual',session:{type:'qual',results:['A','B','C'],stages:{sort_order:10}},row:{pilot_1:'A',pred_pos_1:1,pilot_2:'B',pred_pos_2:2,pilot_3:'C',pred_pos_3:3}}
+test('qualifying manual editor carries all 22 pilot picks and scores each with the regular scale',()=>{
+  const results=Array.from({length:22},(_,index)=>`Driver ${index+1}`)
+  const row=Object.fromEntries(results.flatMap((pilot,index)=>[[`pilot_${index+1}`,pilot],[`pred_pos_${index+1}`,index+1]]))
+  const item={kind:'qual',session:{type:'qual',results,stages:{sort_order:10}},row}
   const input=inputForReviewItem(item)
-  assert.equal(input.pred_pos_3,3)
-  assert.equal(scoreManualReviewItem(item,input).score,18)
+  assert.equal(input.pred_pos_22,22)
+  assert.equal(input.pilot_22,'Driver 22')
+  assert.equal(scoreManualReviewItem(item,input).score,132)
 })

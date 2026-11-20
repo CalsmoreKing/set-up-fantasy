@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { supabase, TEAM_META } from '../lib/supabase'
+import { supabase, TEAM_META, QUALIFYING_PILOT_COLUMNS } from '../lib/supabase'
 import CountryFlag from './CountryFlag'
 import { isCompletedGrandPrix, rankEventPodium } from '../lib/podium'
 import { canonicalStoredScore } from '../lib/scoring'
@@ -49,7 +49,7 @@ export default function PodiumCalendar({ open, onClose }) {
           ? supabase.from('forecasts').select('player_id,session_id,score,predictions,fl_pick,ov_pick,score_breakdown').in('session_id', scoredSessionIds)
           : Promise.resolve({ data: [], error: null }),
         qualSessionIds.length
-          ? supabase.from('qual_assignments').select('player_id,session_id,score,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', qualSessionIds)
+          ? supabase.from('qual_assignments').select(`player_id,session_id,score,${QUALIFYING_PILOT_COLUMNS}`).in('session_id', qualSessionIds)
           : Promise.resolve({ data: [], error: null }),
         committedStageIds.length
           ? supabase.from('stage_newcomer_bonuses').select('stage_id,player_id,points').in('stage_id',committedStageIds)

@@ -1,5 +1,5 @@
 import { calcRaceScore, calcQualAssignmentScore, calcSprintScore, resultsList, hasForecastSubmission, hasQualifyingPrediction } from './scoring.js'
-import { normalizeStageDriver, normalizeStageResults } from './roster.js'
+import { normalizeStageDriver, normalizeStageResults, QUALIFYING_PILOT_SLOT_COUNT } from './roster.js'
 
 export const REVIEW_STORAGE_KEY = 'set-up-fantasy:manual-score-review:v1'
 
@@ -80,12 +80,10 @@ export function inputForReviewItem(item, substitutions = []) {
   const {session,row}=item
   if (item.kind==='qual') return {
     pole_pick:normalizeStageDriver(row?.pole_pick || '',substitutions),
-    pilot_1:normalizeStageDriver(row?.pilot_1 || '',substitutions),
-    pred_pos_1:row?.pred_pos_1 || null,
-    pilot_2:normalizeStageDriver(row?.pilot_2 || '',substitutions),
-    pred_pos_2:row?.pred_pos_2 || null,
-    pilot_3:normalizeStageDriver(row?.pilot_3 || '',substitutions),
-    pred_pos_3:row?.pred_pos_3 || null,
+    ...Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      [`pilot_${index+1}`,normalizeStageDriver(row?.[`pilot_${index+1}`] || '',substitutions)],
+      [`pred_pos_${index+1}`,row?.[`pred_pos_${index+1}`] || null],
+    ]).flat()),
   }
   const slots=session.type==='sprint'?5:10
   const predictions=Object.fromEntries(Array.from({length:slots},(_,index)=>[

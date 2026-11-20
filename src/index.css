@@ -913,6 +913,19 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .admin-plan-table td small{display:block;color:var(--muted);margin-top:3px}
 .admin-plan-table td b{display:inline-grid;place-items:center;min-width:26px;height:26px;border-radius:7px;background:rgba(225,6,0,.12);color:#ff817c}
 .admin-plan-table .plan-remaining{color:#ffbf69;font-weight:700}.admin-plan-table .plan-complete{color:var(--green);font-weight:700}
+.qual-plan-explainer{max-width:980px;margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.65}
+.qualifying-edit-table{min-width:1120px}
+.qualifying-edit-table th small{display:block;margin-top:5px;color:var(--green);font:600 8px 'Orbitron',sans-serif}
+.qualifying-edit-table .qual-plan-available{background:rgba(255,191,105,.13);color:#ffbf69}
+.qualifying-edit-table .qual-plan-locked{display:inline-grid;place-items:center;min-width:34px;height:32px;color:var(--muted);background:rgba(255,255,255,.045);border-radius:7px}
+.qual-plan-input{width:68px;min-height:36px;padding:5px 8px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:#10151d;color:var(--text);font:700 13px 'Orbitron',sans-serif;text-align:center}
+.qual-plan-input:focus{outline:2px solid rgba(255,191,105,.55);border-color:#ffbf69}
+.qual-plan-total{font-weight:700;white-space:nowrap}
+.admin-plan-table .plan-overallocated{color:#ff817c;font-weight:700}
+.qual-plan-actions{display:flex;gap:6px;white-space:nowrap}
+.qual-plan-reset,.qual-plan-save{border:1px solid rgba(255,255,255,.13);border-radius:6px;padding:7px 9px;background:rgba(255,255,255,.04);color:var(--text);font:700 9px 'Orbitron',sans-serif;cursor:pointer}
+.qual-plan-save{border-color:rgba(255,191,105,.38);color:#ffbf69;background:rgba(255,191,105,.08)}
+.qual-plan-reset:disabled,.qual-plan-save:disabled{opacity:.4;cursor:not-allowed}
 .admin-plan-footnote{margin-top:12px;font-size:11px}
 .reserve-stage-select{display:grid;gap:6px;min-width:min(100%,260px);font-size:10px;color:var(--muted)}
 .reserve-select{appearance:auto;min-width:0;width:100%;background:#171c25!important;color:#f3f4f6!important;border:1px solid #3b4452!important;border-radius:7px;padding:10px 11px;font-family:inherit;font-size:12px;font-weight:500;outline:none;box-shadow:inset 0 1px 2px rgba(0,0,0,.3)}

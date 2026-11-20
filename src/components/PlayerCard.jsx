@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META } from '../lib/supabase'
+import { PILOTS, calcRaceScore, calcQualAssignmentScore, calcSprintScore, USED_PILOTS, TEAM_META, QUALIFYING_PILOT_SLOT_COUNT, QUALIFYING_PILOT_COLUMNS, isFinalThreeQualifyingStage } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 import { normalizeStageDriver, priorQualAssignments, teammatePilotsAssignedForSession } from '../lib/roster'
 import { calcSprintPickPoints, isOvertakeWinner } from '../lib/scoring'
@@ -14,8 +14,9 @@ export default function PlayerCard({
 }) {
   const teamCode = TEAM_META[player.team]?.code || player.team.slice(0,3).toUpperCase()
   const pilotOptions = ['', ...driverOptions]
-  const slotCount = Math.max(0, Math.min(3, Number(qualSlotCount) || 0))
+  const slotCount = Math.max(0, Math.min(QUALIFYING_PILOT_SLOT_COUNT, Number(qualSlotCount) || 0))
   const sameTeamTakenQualPilots=teammatePilotsAssignedForSession(allQualAssign,player.id,player.team,allQualPlayerTeams,session?.id)
+  const allowRepeatedQualPilots=isFinalThreeQualifyingStage(stageOrder)
   const [open, setOpen]   = useState(editorOnly)
   const bodyRef           = useRef(null)
   const saveTimer         = useRef(null)
@@ -29,8 +30,8 @@ export default function PlayerCard({
   const [preds, setPreds]   = useState(initPreds)
   const [fl,    setFl]      = useState(forecast?.fl_pick || '')
   const [ov,    setOv]      = useState(forecast?.ov_pick || '')
-  const [qPilots, setQPilots] = useState([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
-  const [qPos,    setQPos]    = useState([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+  const [qPilots, setQPilots] = useState(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>qualAssign?.[`pilot_${index+1}`]||''))
+  const [qPos,    setQPos]    = useState(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>qualAssign?.[`pred_pos_${index+1}`]||''))
   const [polePick, setPolePick] = useState(qualAssign?.pole_pick || '')
   const legacyPoleOnly = Number(stageOrder) < 7
 
@@ -41,8 +42,8 @@ export default function PlayerCard({
     setOv(forecast?.ov_pick || '')
   }, [forecast])
   useEffect(() => {
-    setQPilots([qualAssign?.pilot_1||'', qualAssign?.pilot_2||'', qualAssign?.pilot_3||''])
-    setQPos([qualAssign?.pred_pos_1||'', qualAssign?.pred_pos_2||'', qualAssign?.pred_pos_3||''])
+    setQPilots(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>qualAssign?.[`pilot_${index+1}`]||''))
+    setQPos(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>qualAssign?.[`pred_pos_${index+1}`]||''))
     setPolePick(qualAssign?.pole_pick || '')
   }, [qualAssign])
 
@@ -87,12 +88,11 @@ export default function PlayerCard({
     )
     score = r.total; breakdown = r.breakdown
   } else if (sessionType === 'qual') {
-    const assignment = {
-      pilot_1:normalizeStageDriver(qPilots[0], pilotSubstitutions), pred_pos_1:parseInt(qPos[0]) || null,
-      pilot_2:normalizeStageDriver(qPilots[1], pilotSubstitutions), pred_pos_2:parseInt(qPos[1]) || null,
-      pilot_3:normalizeStageDriver(qPilots[2], pilotSubstitutions), pred_pos_3:parseInt(qPos[2]) || null,
-      pole_pick:normalizeStageDriver(polePick, pilotSubstitutions),
-    }
+    const assignment = Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      [`pilot_${index+1}`,normalizeStageDriver(qPilots[index],pilotSubstitutions)],
+      [`pred_pos_${index+1}`,parseInt(qPos[index])||null],
+    ]).flat())
+    assignment.pole_pick=normalizeStageDriver(polePick,pilotSubstitutions)
     const result = calcQualAssignmentScore(assignment, results, stageOrder, stageKey)
     score = result.total; breakdown = result.breakdown
   } else if (sessionType === 'sprint') {
@@ -118,9 +118,10 @@ export default function PlayerCard({
     // Add all previously assigned in other stages
     Object.values(allQualAssign || {}).forEach(a => {
       if (a.player_id === player.id) {
-        if (a.pilot_1) used.add(a.pilot_1)
-        if (a.pilot_2) used.add(a.pilot_2)
-        if (a.pilot_3) used.add(a.pilot_3)
+        for (let index=1; index<=QUALIFYING_PILOT_SLOT_COUNT; index++) {
+          const pilot=a[`pilot_${index}`]
+          if (pilot) used.add(pilot)
+        }
       }
     })
     qPilots.forEach(p => { if (p) used.add(p) })
@@ -128,7 +129,7 @@ export default function PlayerCard({
   }
 
   async function rollPilot(idx) {
-    const available = getAvailable().filter(p => !sameTeamTakenQualPilots.has(p))
+    const available = getAvailable().filter(p => allowRepeatedQualPilots || !sameTeamTakenQualPilots.has(p))
     if (!available.length) { alert(`${player.name}: немає доступних пілотів для цієї команди на цей ГП!`); return }
     const pilot = available[Math.floor(Math.random() * available.length)]
     const nPilots = [...qPilots]; nPilots[idx] = pilot
@@ -322,7 +323,7 @@ export default function PlayerCard({
                           }}
                         >
                           <option value="">вручну...</option>
-                          {driverOptions.filter(p=>!sameTeamTakenQualPilots.has(p)).map(p => <option key={p} value={p}>{p}</option>)}
+                          {getAvailable().filter(p=>allowRepeatedQualPilots||!sameTeamTakenQualPilots.has(p)).map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </>
                     ) : (
@@ -407,7 +408,7 @@ function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, sco
     setHistory(null)
     async function loadHistory() {
       const [{ data }, { data: stage }] = await Promise.all([
-        supabase.from('qual_assignments').select('session_id,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3,sessions(stages(sort_order))').eq('player_id', player.id),
+        supabase.from('qual_assignments').select(`session_id,${QUALIFYING_PILOT_COLUMNS},sessions(stages(sort_order))`).eq('player_id', player.id),
         supabase.from('stages').select('sort_order').eq('key',stageKey).maybeSingle(),
       ])
       setHistory(priorQualAssignments(data, session?.id, stage?.sort_order))
@@ -422,7 +423,7 @@ function QualTooltip({ visible, pos, player, sessionType, ttType, breakdown, sco
 
   if (ttType === 'qual') {
     const usedBase = USED_PILOTS[player.name] || []
-    const fromDB = (history || []).flatMap(a => [a.pilot_1, a.pilot_2, a.pilot_3].filter(Boolean))
+    const fromDB = (history || []).flatMap(a => Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>a[`pilot_${index+1}`]).filter(Boolean))
     const allUsed = [...new Set([...usedBase, ...fromDB])]
     const available = driverOptions.filter(p => !allUsed.includes(p))
     const loading = history === null
@@ -566,13 +567,13 @@ export async function loadFormData(players) {
 
   const { data: quals } = await supabase
     .from('qual_assignments')
-    .select('player_id, pilot_1, pred_pos_1, pilot_2, pred_pos_2, pilot_3, pred_pos_3, score')
+    .select(`player_id,${QUALIFYING_PILOT_COLUMNS},score`)
     .gt('score', -1)
 
   // Qual score of 6 per pilot = exact; approximate using average score per assigned pilot
   quals?.forEach(qa => {
     if (!stats[qa.player_id]) return
-    const pilots = [qa.pilot_1, qa.pilot_2, qa.pilot_3].filter(Boolean)
+    const pilots = Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>qa[`pilot_${index+1}`]).filter(Boolean)
     if (!pilots.length) return
     // We don't have per-pilot breakdown here, so treat qa.score/pilots.length >= 6 as exact-ish signal
     const avgPerPilot = (qa.score || 0) / pilots.length

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { calcQualScore, calcRaceScore, calcSprintPickPoints, calcSprintScore, explainForecastScoreDifference, explainQualifyingScoreDifference, hasForecastSubmission, hasQualifyingPrediction, hasSavedForecastPickMismatch, isOvertakeWinner, parseOvertakeWinners, recalculateForecast, recalculateQualAssignment } from '../src/lib/scoring.js'
+import { calcQualScore, calcQualAssignmentScore, calcRaceScore, calcSprintPickPoints, calcSprintScore, explainForecastScoreDifference, explainQualifyingScoreDifference, hasForecastSubmission, hasQualifyingPrediction, hasSavedForecastPickMismatch, isOvertakeWinner, parseOvertakeWinners, recalculateForecast, recalculateQualAssignment } from '../src/lib/scoring.js'
 
 const brazilRace = {
   type: 'race',
@@ -188,6 +188,14 @@ test('qualifying roulette scores exact, one-off, and two-off positions 6/3/1 and
   assert.equal(calcQualScore('A', 3, results).total, 1)
   assert.equal(calcQualScore('A', 0, results).total, 0)
   assert.equal(calcQualScore('A', 23, results).total, 0)
+})
+
+test('all 22 qualifying slots score at 6/3/1 each and coverage sees the last slot', () => {
+  const results=Array.from({length:22},(_,index)=>`Driver ${index+1}`)
+  const assignment=Object.fromEntries(results.flatMap((pilot,index)=>[[`pilot_${index+1}`,pilot],[`pred_pos_${index+1}`,index+1]]))
+  assert.equal(calcQualAssignmentScore(assignment,results,10).total,132)
+  assert.equal(hasQualifyingPrediction({pilot_1:'Leclerc',pred_pos_1:null}),false)
+  assert.equal(hasQualifyingPrediction({pilot_22:'Leclerc',pred_pos_22:7}),true)
 })
 
 test('qualifying coverage ignores assignments with no submitted prediction', () => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { supabase, IS_PREVIEW_DEPLOYMENT, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, qualifyingPlanForAvailable, qualifyingSlotsForStage, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
+import { supabase, IS_PREVIEW_DEPLOYMENT, TEAM_META, TEAM_RESERVE_PILOTS_2026, PILOT_TEAM_ROSTER, ACTIVE_PILOTS_2026, USED_PILOTS, QUALIFYING_PILOT_SLOT_COUNT, QUALIFYING_PILOT_COLUMNS, MAX_QUALIFYING_SLOTS_PER_STAGE, qualifyingPlanForAvailable, qualifyingSlotsForStage, calcRaceScore, calcQualAssignmentScore, calcSprintScore } from '../lib/supabase'
 import PlayerCard from '../components/PlayerCard'
 import { buildStagePilotPool, normalizeStageDriver, normalizeStageResults, newcomerPlayersForStage, priorQualAssignments } from '../lib/roster'
 import { useAuth } from '../contexts/AuthContext'
@@ -21,6 +21,9 @@ export default function AdminPage() {
   const [logs,      setLogs]      = useState([])
   const [pilotChanges, setPilotChanges] = useState([])
   const [qualAssignments, setQualAssignments] = useState([])
+  const [qualifyingSlotPlans, setQualifyingSlotPlans] = useState([])
+  const [qualifyingPlanDrafts, setQualifyingPlanDrafts] = useState({})
+  const [savingPlanPlayerIds, setSavingPlanPlayerIds] = useState(new Set())
   const [forecasts, setForecasts] = useState([])
   const [newcomerBonuses, setNewcomerBonuses] = useState([])
   const [manualReviewState, setManualReviewState] = useState(()=>loadManualReviewState())
@@ -59,7 +62,8 @@ export default function AdminPage() {
       supabase.from('qual_assignments').select('*,sessions(*,stages(name,flag,sort_order,key))'),
       supabase.from('forecasts').select('*,sessions(*,stages(name,flag,sort_order,key))'),
       supabase.from('stage_newcomer_bonuses').select('*'),
-    ]).then(([s,p,se,l,sub,qa,fc,nb]) => {
+      supabase.from('qualifying_slot_plans').select('*').order('stage_order'),
+    ]).then(([s,p,se,l,sub,qa,fc,nb,plans]) => {
       const loadErrors = [
         s.error && `етапи: ${s.error.message}`,
         p.error && `гравці: ${p.error.message}`,
@@ -69,9 +73,14 @@ export default function AdminPage() {
         qa.error && `кваліфікації: ${qa.error.message}`,
         fc.error && `прогнози: ${fc.error.message}`,
         nb.error && `бонуси новачків: ${nb.error.message}`,
+        plans.error && `план кваліфікацій: ${plans.error.message}`,
       ].filter(Boolean)
       if (loadErrors.length) setMsg(`⚠ Не вдалося завантажити частину даних адмінки — ${loadErrors.join('; ')}`)
       const savedReview=IS_PREVIEW_DEPLOYMENT?loadManualReviewState():{}
+      let previewPlans=[]
+      if(IS_PREVIEW_DEPLOYMENT) {
+        try { previewPlans=JSON.parse(globalThis.localStorage?.getItem('set-up-fantasy:qualifying-slot-plans')||'[]') } catch {}
+      }
       const localRows=savedReview.rows || {}
       setStages((s.data||[]))
       setPlayers((p.data||[]).map(player=>({...player,...(savedReview.totals?.[player.id]!=null?{base_pts:savedReview.totals[player.id]}:{})})))
@@ -79,6 +88,8 @@ export default function AdminPage() {
       setLogs(l.data||[])
       setPilotChanges(sub.data || [])
       setQualAssignments((qa.data || []).map(row=>({...row,...(localRows[`qual:${row.id}`]||{})})))
+      const mergedPlans=new Map([...(plans.data||[]),...previewPlans].map(row=>[`${row.player_id}:${row.stage_order}`,row]))
+      setQualifyingSlotPlans([...mergedPlans.values()])
       setForecasts((fc.data || []).map(row=>({...row,...(localRows[`forecast:${row.id}`]||{})})))
       const localBonuses=savedReview.bonuses || {}
       setNewcomerBonuses([...((nb.data||[]).filter(row=>!Object.hasOwn(localBonuses,row.stage_id))),...Object.entries(localBonuses).flatMap(([stageId,value])=>(value.bonuses||[]).map(bonus=>({...bonus,stage_id:stageId,source_minimum:value.minimum})) )])
@@ -128,12 +139,11 @@ export default function AdminPage() {
   }
 
   function persistReviewedQual(item,pilots,positions) {
-    setReviewItemInput(item,{
-      ...reviewInputRef.current,
-      pilot_1:pilots[0]||'',pred_pos_1:positions[0]||null,
-      pilot_2:pilots[1]||'',pred_pos_2:positions[1]||null,
-      pilot_3:pilots[2]||'',pred_pos_3:positions[2]||null,
-    })
+    const slotFields=Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+      [`pilot_${index+1}`,pilots[index]||''],
+      [`pred_pos_${index+1}`,positions[index]||null],
+    ]).flat())
+    setReviewItemInput(item,{...reviewInputRef.current,...slotFields})
   }
 
   function persistReviewedPole(item,pilot) {
@@ -328,7 +338,7 @@ export default function AdminPage() {
       const ids = stageSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,predictions,fl_pick,ov_pick').in('session_id', ids),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id', ids),
+        supabase.from('qual_assignments').select(`id,player_id,session_id,score,pole_pick,${QUALIFYING_PILOT_COLUMNS}`).in('session_id', ids),
         supabase.from('stage_pilot_substitutions').select('*').eq('stage_id', stage.id).eq('is_active', true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -350,14 +360,13 @@ export default function AdminPage() {
         const overtake = String(session.ov_pilot || '').split(/[,;|]/).map(pilot=>normalizeStageDriver(pilot.trim(),changes)).filter(Boolean).join(', ')
         if (session.type === 'qual') {
           const qualifyingScores = (qualResult.data || []).filter(row=>row.session_id===session.id).map(row=>{
-            const normalized = {...row,
-              pole_pick:normalizeStageDriver(row.pole_pick,changes),
-              pilot_1:normalizeStageDriver(row.pilot_1,changes),
-              pilot_2:normalizeStageDriver(row.pilot_2,changes),
-              pilot_3:normalizeStageDriver(row.pilot_3,changes),
-            }
+            const slotFields=Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+              [`pilot_${index+1}`,normalizeStageDriver(row[`pilot_${index+1}`],changes)],
+              [`pred_pos_${index+1}`,row[`pred_pos_${index+1}`]],
+            ]).flat())
+            const normalized = {...row,pole_pick:normalizeStageDriver(row.pole_pick,changes),...slotFields}
             const {total} = calcQualAssignmentScore(normalized,results,order,stage.key)
-            return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+            return {id:row.id,score:total,scored_input:{pole_pick:normalized.pole_pick || '',...slotFields}}
           })
           scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:qualifyingScores})
         } else {
@@ -431,7 +440,7 @@ export default function AdminPage() {
       const sessionIds = eventSessions.map(session => session.id)
       const [forecastResult, qualResult, changesResult] = await Promise.all([
         supabase.from('forecasts').select('id,player_id,session_id,score,score_breakdown,scored_input,predictions,fl_pick,ov_pick').in('session_id',sessionIds),
-        supabase.from('qual_assignments').select('id,player_id,session_id,score,scored_input,pole_pick,pilot_1,pred_pos_1,pilot_2,pred_pos_2,pilot_3,pred_pos_3').in('session_id',sessionIds),
+        supabase.from('qual_assignments').select(`id,player_id,session_id,score,scored_input,pole_pick,${QUALIFYING_PILOT_COLUMNS}`).in('session_id',sessionIds),
         supabase.from('stage_pilot_substitutions').select('*').in('stage_id',stageIds).eq('is_active',true),
       ])
       if (forecastResult.error) throw forecastResult.error
@@ -467,14 +476,13 @@ export default function AdminPage() {
           const overtake = String(session.ov_pilot || '').split(/[,;|]/).map(pilot=>normalizeStageDriver(pilot.trim(),stageChanges)).filter(Boolean).join(', ')
           if (session.type === 'qual') {
             const rows = allQualifying.filter(row => row.session_id === session.id).map(row => {
-              const normalized = {...row,
-                pole_pick:normalizeStageDriver(row.pole_pick,stageChanges),
-                pilot_1:normalizeStageDriver(row.pilot_1,stageChanges),
-                pilot_2:normalizeStageDriver(row.pilot_2,stageChanges),
-                pilot_3:normalizeStageDriver(row.pilot_3,stageChanges),
-              }
+              const slotFields=Object.fromEntries(Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>[
+                [`pilot_${index+1}`,normalizeStageDriver(row[`pilot_${index+1}`],stageChanges)],
+                [`pred_pos_${index+1}`,row[`pred_pos_${index+1}`]],
+              ]).flat())
+              const normalized = {...row,pole_pick:normalizeStageDriver(row.pole_pick,stageChanges),...slotFields}
               const {total} = calcQualAssignmentScore(normalized,results,order,stage.key)
-              return {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:total,scored_input:{pole_pick:normalized.pole_pick || '',pilot_1:normalized.pilot_1,pred_pos_1:row.pred_pos_1,pilot_2:normalized.pilot_2,pred_pos_2:row.pred_pos_2,pilot_3:normalized.pilot_3,pred_pos_3:row.pred_pos_3}}
+              return {id:row.id,player_id:row.player_id,previous_score:Number(row.score)||0,has_saved_input:Boolean(row.scored_input),score:total,scored_input:{pole_pick:normalized.pole_pick || '',...slotFields}}
             })
             scoreRows.push({session_id:session.id,forecast_scores:[],qual_scores:rows})
             continue
@@ -639,23 +647,75 @@ export default function AdminPage() {
 
   const allTeamOptions = [...Object.keys(TEAM_META), ...customTeams]
   const nextQualOrders = [23,24,25]
+  const qualifyingPlanStages = nextQualOrders.map((order,index) => {
+    const stage=stages.find(item=>Number(item.sort_order)===order)
+    const session=sessions.find(item=>item.type==='qual'&&Number(item.stages?.sort_order)===order)
+    return {order,stageId:stage?.id,committed:Boolean(session?.committed),label:stage?.name||['Лас-Вегас','Катар','ОАЕ'][index]}
+  })
+  const firstOpenQualOrder=qualifyingPlanStages.find(stage=>!stage.committed)?.order ?? 26
+  const openQualOrders=qualifyingPlanStages.filter(stage=>!stage.committed).map(stage=>stage.order)
   const qualifyingPlanRows = players.map(player => {
     const used = new Set([...(USED_PILOTS[player.name] || [])].map(name => normalizeStageDriver(name)))
+    const stageUsedCounts={}
     qualAssignments.forEach(row => {
-      if (row.player_id !== player.id || !Number.isFinite(Number(row.sessions?.stages?.sort_order)) || Number(row.sessions.stages.sort_order) >= 23) return
-      for (const [pilotKey,posKey] of [['pilot_1','pred_pos_1'],['pilot_2','pred_pos_2'],['pilot_3','pred_pos_3']]) {
-        if (row[pilotKey] && Number(row[posKey]) > 0) used.add(normalizeStageDriver(row[pilotKey]))
+      if (row.player_id !== player.id || !Number.isFinite(Number(row.sessions?.stages?.sort_order))) return
+      const order=Number(row.sessions.stages.sort_order)
+      if(order>=firstOpenQualOrder) return
+      for (let index=1;index<=QUALIFYING_PILOT_SLOT_COUNT;index++) {
+        const pilot=row[`pilot_${index}`]
+        if (pilot && Number(row[`pred_pos_${index}`]) > 0) {
+          used.add(normalizeStageDriver(pilot))
+          stageUsedCounts[order]=(stageUsedCounts[order]||0)+1
+        }
       }
     })
     const available = Math.max(0, ACTIVE_PILOTS_2026.length - used.size)
-    const plan = qualifyingPlanForAvailable(available, 23)
-    const planned = nextQualOrders.reduce((sum,order)=>sum+(plan[order]||0),0)
-    return { player, available, plan, remaining:Math.max(0,available-planned) }
+    const suggested=qualifyingPlanForAvailable(available,firstOpenQualOrder,MAX_QUALIFYING_SLOTS_PER_STAGE)
+    const saved=Object.fromEntries(qualifyingSlotPlans.filter(row=>row.player_id===player.id).map(row=>[Number(row.stage_order),Number(row.slot_count)||0]))
+    const draft=qualifyingPlanDrafts[player.id]||{}
+    const plan=Object.fromEntries(qualifyingPlanStages.map(stage=>[
+      stage.order,
+      stage.committed?(stageUsedCounts[stage.order]||saved[stage.order]||0):Number(draft[stage.order]??saved[stage.order]??suggested[stage.order]??0),
+    ]))
+    const planned=openQualOrders.reduce((sum,order)=>sum+(plan[order]||0),0)
+    return {player,usedCount:used.size,available,plan,suggested,remaining:available-planned,hasDraft:Boolean(qualifyingPlanDrafts[player.id])}
   })
-  const qualifyingPlanStages = nextQualOrders.map((order,index) => ({
-    order,
-    label:stages.find(stage=>Number(stage.sort_order)===order)?.name || ['Лас-Вегас','Катар','ОАЕ'][index],
-  }))
+
+  function setQualifyingPlanValue(playerId,stageOrder,value) {
+    const count=Math.max(0,Math.min(MAX_QUALIFYING_SLOTS_PER_STAGE,Number.parseInt(value,10)||0))
+    setQualifyingPlanDrafts(prev=>({...prev,[playerId]:{...(prev[playerId]||{}),[stageOrder]:count}}))
+  }
+
+  function resetQualifyingPlan(playerId) {
+    const row=qualifyingPlanRows.find(item=>item.player.id===playerId)
+    if(!row) return
+    setQualifyingPlanDrafts(prev=>({...prev,[playerId]:{...(prev[playerId]||{}),...Object.fromEntries(openQualOrders.map(order=>[order,row.suggested[order]||0]))}}))
+  }
+
+  async function saveQualifyingPlan(playerId) {
+    const row=qualifyingPlanRows.find(item=>item.player.id===playerId)
+    if(!row||row.remaining!==0||!openQualOrders.length) return
+    const payload=openQualOrders.map(stage_order=>({player_id:playerId,stage_order,slot_count:row.plan[stage_order]||0}))
+    setSavingPlanPlayerIds(prev=>new Set([...prev,playerId]))
+    try {
+      if(IS_PREVIEW_DEPLOYMENT) {
+        const next=[...qualifyingSlotPlans.filter(item=>item.player_id!==playerId||!openQualOrders.includes(Number(item.stage_order))),...payload]
+        globalThis.localStorage?.setItem('set-up-fantasy:qualifying-slot-plans',JSON.stringify(next))
+        setQualifyingSlotPlans(next)
+        setMsg('🧪 План кваліфікацій збережено локально в цьому прев’ю.')
+      } else {
+        const {data,error}=await supabase.from('qualifying_slot_plans').upsert(payload,{onConflict:'player_id,stage_order'}).select()
+        if(error) throw error
+        setQualifyingSlotPlans(prev=>[...prev.filter(item=>item.player_id!==playerId||!openQualOrders.includes(Number(item.stage_order))),...(data||payload)])
+        setMsg(`✓ План кваліфікацій для ${row.player.name} збережено.`)
+      }
+      setQualifyingPlanDrafts(prev=>{const next={...prev};delete next[playerId];return next})
+    } catch(error) {
+      setMsg(`⚠ Не вдалося зберегти план для ${row.player.name}: ${error.message}`)
+    } finally {
+      setSavingPlanPlayerIds(prev=>{const next=new Set(prev);next.delete(playerId);return next})
+    }
+  }
 
   if (loading) return <main><div style={{color:'var(--muted)',fontFamily:'Orbitron,sans-serif',fontSize:11,letterSpacing:2,padding:20}}>ЗАВАНТАЖЕННЯ...</div></main>
 
@@ -676,8 +736,9 @@ export default function AdminPage() {
   const activeReviewQualPlayerTeams=Object.fromEntries(players.map(player=>[player.id,player.team]))
   const activeReviewAllQualAssignments=Object.fromEntries([...activeReviewQualHistory.map((row,index)=>[`history_${index}`,row]),...qualAssignments.filter(row=>row.session_id===activeReviewItem?.session.id).map(row=>[row.id,row])])
   const activeReviewQualUsed=new Set(USED_PILOTS[activeReviewPlayer?.name]||[])
-  activeReviewQualHistory.filter(row=>row.player_id===activeReviewPlayer?.id).forEach(row=>[row.pilot_1,row.pilot_2,row.pilot_3].filter(Boolean).forEach(pilot=>activeReviewQualUsed.add(pilot)))
-  const activeReviewQualSlots=activeReviewItem&&activeReviewPlayer?qualifyingSlotsForStage(activeReviewPilots.filter(pilot=>!activeReviewQualUsed.has(pilot)).length,activeReviewStageOrder):1
+  activeReviewQualHistory.filter(row=>row.player_id===activeReviewPlayer?.id).forEach(row=>Array.from({length:QUALIFYING_PILOT_SLOT_COUNT},(_,index)=>row[`pilot_${index+1}`]).filter(Boolean).forEach(pilot=>activeReviewQualUsed.add(pilot)))
+  const activeReviewSavedPlan=qualifyingSlotPlans.find(row=>row.player_id===activeReviewPlayer?.id&&Number(row.stage_order)===activeReviewStageOrder)
+  const activeReviewQualSlots=activeReviewItem&&activeReviewPlayer?(activeReviewSavedPlan?Number(activeReviewSavedPlan.slot_count)||0:qualifyingSlotsForStage(activeReviewPilots.filter(pilot=>!activeReviewQualUsed.has(pilot)).length,activeReviewStageOrder)):1
 
   const tabs = [
     { key:'stages',    label:'ЕТАПИ' },
@@ -895,14 +956,31 @@ export default function AdminPage() {
       {tab === 'qualifying' && (
         <section className="admin-plan-card">
           <header className="admin-plan-heading">
-            <div><div className="admin-plan-kicker">КВАЛІФІКАЦІЙНІ СЛОТИ</div><h2>План на етап</h2></div>
+            <div><div className="admin-plan-kicker">КВАЛІФІКАЦІЙНІ СЛОТИ · СЕЗОННИЙ БАЛАНС</div><h2>Розподіл пілотів на фінальні етапи</h2></div>
           </header>
+          <p className="qual-plan-explainer">«Вільні» — пілоти, яких гравець ще не використав у зарахованих прогнозах. Вкажи, скільки пілотів він отримає на кожну незавершену кваліфікацію. План можна зберегти, коли сума дорівнює всьому залишку; обмеження — 22 пілоти на етап. Для нових гравців система одразу покаже збалансовану пропозицію.</p>
           <div className="admin-plan-table-wrap">
-            <table className="admin-plan-table">
-              <thead><tr><th>Гравець</th><th>Вільні пілоти</th>{qualifyingPlanStages.map(stage=><th key={stage.order}>{stage.label}</th>)}<th>Не використано</th></tr></thead>
-              <tbody>{qualifyingPlanRows.sort((a,b)=>a.player.name.localeCompare(b.player.name,'uk')).map(({player,available,plan,remaining})=>(
-                <tr key={player.id}><td><strong>{player.name}</strong></td><td>{available}</td>{qualifyingPlanStages.map(stage=><td key={stage.order}><b>{plan[stage.order]||0}</b></td>)}<td className={remaining?'plan-remaining':'plan-complete'}>{remaining}</td></tr>
-              ))}</tbody>
+            <table className="admin-plan-table qualifying-edit-table">
+              <thead><tr><th>Гравець</th><th>Використано</th><th>Вільно зараз</th>{qualifyingPlanStages.map(stage=><th key={stage.order}>{stage.label}{stage.committed&&<small>зараховано</small>}</th>)}<th>Плануємо</th><th>Залишок</th><th>Дія</th></tr></thead>
+              <tbody>{qualifyingPlanRows.sort((a,b)=>a.player.name.localeCompare(b.player.name,'uk')).map(({player,usedCount,available,plan,suggested,remaining,hasDraft})=>{
+                const saving=savingPlanPlayerIds.has(player.id)
+                return <tr key={player.id}>
+                  <td><strong>{player.name}</strong></td>
+                  <td>{usedCount} <small>з {ACTIVE_PILOTS_2026.length}</small></td>
+                  <td><b className="qual-plan-available">{available}</b></td>
+                  {qualifyingPlanStages.map(stage=><td key={stage.order}>
+                    {stage.committed
+                      ? <span className="qual-plan-locked" title="Кваліфікацію вже зараховано">{plan[stage.order]||0}</span>
+                      : <input className="qual-plan-input" aria-label={`${player.name}, ${stage.label}: кількість пілотів`} type="number" min="0" max={MAX_QUALIFYING_SLOTS_PER_STAGE} step="1" value={plan[stage.order]||0} disabled={saving} onChange={event=>setQualifyingPlanValue(player.id,stage.order,event.target.value)} />}
+                  </td>)}
+                  <td className="qual-plan-total">{Math.max(0,available-remaining)} / {available}</td>
+                  <td className={remaining===0?'plan-complete':remaining>0?'plan-remaining':'plan-overallocated'}>{remaining===0?'0':remaining>0?`+${remaining}`:`−${Math.abs(remaining)}`}</td>
+                  <td className="qual-plan-actions">
+                    <button type="button" className="qual-plan-reset" onClick={()=>resetQualifyingPlan(player.id)} disabled={saving||!openQualOrders.length} title="Повернути автоматично збалансований план">Автоплан</button>
+                    <button type="button" className="qual-plan-save" onClick={()=>saveQualifyingPlan(player.id)} disabled={saving||!hasDraft||remaining!==0||!openQualOrders.length}>{saving?'Зберігаю…':'Зберегти'}</button>
+                  </td>
+                </tr>
+              })}</tbody>
             </table>
           </div>
         </section>
