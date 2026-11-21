@@ -160,12 +160,32 @@ export default function BulkPanel({ open, onClose, standalone }) {
         ))}
       </div>
 
+      <div style={{marginBottom:10}}>
+        <label htmlFor="bulk-import-session" style={{display:'block',fontSize:10,color:'var(--muted)',letterSpacing:1,marginBottom:5}}>
+          ЕТАП ДЛЯ ІМПОРТУ
+        </label>
+        <select
+          id="bulk-import-session"
+          value={sessionId}
+          onChange={e=>{setSessionId(e.target.value);setStatus('');setParsed(null)}}
+          disabled={!filteredSessions.length}
+          style={{width:'100%',padding:'10px 11px',background:'#171c25',color:'var(--text)',border:'1px solid var(--border)',borderRadius:4,fontFamily:'inherit',fontSize:12}}
+        >
+          <option value="">{filteredSessions.length ? 'Обери етап…' : 'Для цього типу імпорту немає доступних сесій'}</option>
+          {filteredSessions.map(session=>(
+            <option key={session.id} value={session.id}>
+              {session.stages?.flag ? `${session.stages.flag} ` : ''}{session.stages?.name || 'Етап'}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <textarea
         className="bulk-textarea"
         style={{minHeight:160}}
         value={text}
         onChange={e=>{setText(e.target.value);setStatus('');setParsed(null)}}
-        placeholder=""
+        placeholder="Встав сюди дані для імпорту…"
       />
 
       {/* Warnings */}
