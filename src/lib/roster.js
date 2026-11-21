@@ -77,7 +77,7 @@ export function applyStagePilotSubstitutions(baseDrivers, changes) {
   for (const change of [...(changes || [])].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))) {
     const index = drivers.indexOf(change.outgoing_driver)
     if (index < 0) continue
-    if (change.incoming_driver && !drivers.includes(change.incoming_driver)) drivers[index] = change.incoming_driver
+    if (change.incoming_driver) drivers[index] = change.incoming_driver
     else drivers.splice(index, 1)
   }
   return drivers

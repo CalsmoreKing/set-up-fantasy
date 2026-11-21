@@ -8,13 +8,13 @@ test('legacy pilot seeds follow the current profile and deduplicate resolved qua
   assert.deepEqual(USED_PILOTS['Андріі'], ['Ocon','Piastri','Norris'])
 })
 
-test('stage-scoped reserve changes replace or deactivate a driver without mutating the base roster', () => {
+test('stage-scoped reserve changes replace literally without dropping a slot, or deactivate a driver', () => {
   const base = ['Driver A','Driver B','Reserve']
   const changes = [
     { outgoing_driver:'Driver A', incoming_driver:'Reserve', created_at:'2026-01-01' },
     { outgoing_driver:'Driver B', incoming_driver:null, created_at:'2026-01-02' },
   ]
-  assert.deepEqual(applyStagePilotSubstitutions(base, changes), ['Reserve'])
+  assert.deepEqual(applyStagePilotSubstitutions(base, changes), ['Reserve','Reserve'])
   assert.deepEqual(base, ['Driver A','Driver B','Reserve'])
 })
 
