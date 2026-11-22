@@ -15,7 +15,6 @@ export default function DragResults({
   const [dragFrom,  setDragFrom]    = useState(null)
   const [dragOver,  setDragOver]    = useState(null)
   const [selPilot,  setSelPilot]    = useState(null)
-  const [ovOpen, setOvOpen] = useState(false)
 
   useEffect(() => {
     setLocalSlots(Array.from({length:slotsCount}, (_,i) => (session?.results||{})[i+1] || ''))
@@ -27,18 +26,6 @@ export default function DragResults({
     const res = {}
     newSlots.forEach((p,i) => { if (p) res[i+1] = p })
     onUpdate(res, newFl ?? localFl, newOv ?? localOv)
-  }
-
-  function toggleOvertakeWinner(pilot, checked) {
-    const winners = new Set(parseOvertakeWinners(localOv))
-    if (checked) winners.add(pilot)
-    else winners.delete(pilot)
-    setLocalOv([...winners].join(', '))
-  }
-
-  function applyOvertakeWinners() {
-    save(localSlots, localFl, localOv)
-    setOvOpen(false)
   }
 
   function dropOnSlot(toIdx) {
@@ -206,17 +193,14 @@ export default function DragResults({
           </div>
           {!isSprint && <div className="special-result">
             <span className="special-result-label">🚀 ПРОРИВ</span>
-            <div className="overtake-picker">
-              <button type="button" className="base-select overtake-picker-trigger" aria-expanded={ovOpen} onClick={()=>setOvOpen(open=>!open)}>
-                <span>{parseOvertakeWinners(localOv).join(' / ') || 'Обрати пілота'}</span><span aria-hidden="true">{ovOpen?'▲':'▼'}</span>
-              </button>
-              {ovOpen && <div className="overtake-picker-menu">
-                {driverOptions.map(p=><label key={p} className="overtake-picker-option">
-                  <input type="checkbox" checked={parseOvertakeWinners(localOv).includes(p)} onChange={e=>toggleOvertakeWinner(p,e.target.checked)} />{p}
-                </label>)}
-                <button type="button" className="overtake-picker-apply" onClick={applyOvertakeWinners}>Зберегти прорив</button>
-              </div>}
-            </div>
+            <select
+              className="base-select"
+              value={parseOvertakeWinners(localOv)[0] || ''}
+              onChange={e=>{setLocalOv(e.target.value);save(localSlots,localFl,e.target.value)}}
+            >
+              <option value="">—</option>
+              {driverOptions.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
           </div>}
         </div>
       )}
